@@ -1,0 +1,16 @@
+<Project>
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- SAST a ogni compilazione: tutte le regole di sicurezza .NET (injection, crittografia, P/Invoke…). -->
+    <AnalysisModeSecurity>All</AnalysisModeSecurity>
+    <Company>Hudu Launcher</Company>
+    <Copyright>Copyright (c) 2026 Hudu Launcher contributors (MIT)</Copyright>
+    <Product>Hudu Launcher</Product>
+    <Version>1.0.0</Version>
+    <!-- Permette di compilare i progetti Windows anche da Linux/macOS (solo compilazione). -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+</Project>

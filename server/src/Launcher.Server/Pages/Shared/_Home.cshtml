@@ -1,0 +1,45 @@
+@model HomeViewModel
+<div class="page-head">
+    <div>
+        <h1>Connessioni</h1>
+        <p class="muted">Cerca un cliente o un server in alto, oppure sceglilo dall'elenco a sinistra.</p>
+    </div>
+    <div class="sync-pill" title="Ultima sincronizzazione con Hudu">
+        <svg><use href="#i-refresh" /></svg>
+        Inventario aggiornato @Format.Relative(Model.Sync?.LastSuccessAt)
+    </div>
+</div>
+
+<section class="section">
+    <h2 class="section-title"><svg><use href="#i-star" /></svg>Preferiti</h2>
+    @if (Model.Favorites.Count == 0)
+    {
+        <p class="muted">Nessun preferito. Usa la stella accanto a un asset per averlo sempre qui.</p>
+    }
+    else
+    {
+        <div class="asset-list">
+            @foreach (var asset in Model.Favorites)
+            {
+                <partial name="_AssetRow" model="asset" view-data='new ViewDataDictionary(ViewData) { ["ShowCompany"] = true }' />
+            }
+        </div>
+    }
+</section>
+
+<section class="section">
+    <h2 class="section-title"><svg><use href="#i-history" /></svg>Usati di recente</h2>
+    @if (Model.Recent.Count == 0)
+    {
+        <p class="muted">Le ultime connessioni aperte compariranno qui.</p>
+    }
+    else
+    {
+        <div class="asset-list">
+            @foreach (var asset in Model.Recent)
+            {
+                <partial name="_AssetRow" model="asset" view-data='new ViewDataDictionary(ViewData) { ["ShowCompany"] = true }' />
+            }
+        </div>
+    }
+</section>

@@ -1,0 +1,10 @@
+bin/
+obj/
+*.user
+.vs/
+.vscode/
+server/src/Launcher.Server/data/
+*.db
+*.db-shm
+*.db-wal
+secrets/

@@ -1,0 +1,89 @@
+@page
+@model Launcher.Server.Pages.Admin.LayoutsModel
+@{
+    ViewData["Title"] = "Layout Hudu";
+    ViewData["AdminSection"] = "layouts";
+}
+@functions {
+    private static Microsoft.AspNetCore.Html.IHtmlContent Options(IReadOnlyList<string> fields, string? selected, string emptyLabel)
+    {
+        var builder = new Microsoft.AspNetCore.Html.HtmlContentBuilder();
+        builder.AppendHtml("<option value=\"\">");
+        builder.Append(emptyLabel);
+        builder.AppendHtml("</option>");
+        foreach (var field in fields)
+        {
+            builder.AppendHtml(field == selected ? "<option selected value=\"" : "<option value=\"");
+            builder.Append(field);
+            builder.AppendHtml("\">");
+            builder.Append(field);
+            builder.AppendHtml("</option>");
+        }
+
+        return builder;
+    }
+}
+<div class="page-head">
+    <div>
+        <h1>Layout Hudu</h1>
+        <p class="muted">Quali tipi di asset sono collegabili e in quali campi si trovano IP, sistema operativo, console e ID RustDesk. Se il campo IP manca o è vuoto si usa l'indirizzo collegato all'asset nell'IPAM di Hudu.</p>
+    </div>
+</div>
+
+@if (Model.Rows.Count == 0)
+{
+    <div class="empty"><p>Nessun layout: configura Hudu e lancia una sincronizzazione.</p></div>
+}
+else
+{
+    <form method="post">
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Collegabile</th>
+                        <th>Layout</th>
+                        <th>Campo IP</th>
+                        <th>Sistema operativo</th>
+                        <th>Hostname</th>
+                        <th>Console (iDRAC/iLO/web)</th>
+                        <th>ID RustDesk</th>
+                        <th>Protocollo predefinito</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @for (var i = 0; i < Model.Rows.Count; i++)
+                    {
+                        var row = Model.Rows[i];
+                        var c = row.Config;
+                        <tr class="@(c.Enabled ? "" : "row-muted")">
+                            <td>
+                                <input type="hidden" name="Layouts[@i].LayoutId" value="@c.LayoutId" />
+                                <label class="switch"><input type="checkbox" name="Layouts[@i].Enabled" value="true" checked="@c.Enabled" /><span></span></label>
+                            </td>
+                            <td><strong>@c.LayoutName</strong></td>
+                            <td><select class="input input-sm" name="Layouts[@i].IpFieldLabel">@Options(row.Fields, c.IpFieldLabel, "— solo IPAM")</select></td>
+                            <td><select class="input input-sm" name="Layouts[@i].OsFieldLabel">@Options(row.Fields, c.OsFieldLabel, "—")</select></td>
+                            <td><select class="input input-sm" name="Layouts[@i].HostnameFieldLabel">@Options(row.Fields, c.HostnameFieldLabel, "—")</select></td>
+                            <td><select class="input input-sm" name="Layouts[@i].ConsoleFieldLabel">@Options(row.Fields, c.ConsoleFieldLabel, "—")</select></td>
+                            <td><select class="input input-sm" name="Layouts[@i].RustDeskIdFieldLabel">@Options(row.Fields, c.RustDeskIdFieldLabel, "—")</select></td>
+                            <td>
+                                <select class="input input-sm" name="Layouts[@i].DefaultProtocol">
+                                    <option value="">Dal sistema operativo</option>
+                                    @foreach (var p in Enum.GetValues<ConnectionProtocol>())
+                                    {
+                                        <option value="@p" selected="@(c.DefaultProtocol == p)">@Format.ProtocolName(p)</option>
+                                    }
+                                </select>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="muted small">
+            Un layout non collegabile ma con il campo "ID RustDesk" (es. <em>VPN &amp; Remote Access</em>) viene letto per trovare il gateway del cliente.
+        </p>
+        <div class="actions"><button class="btn btn-primary" type="submit">Salva</button></div>
+    </form>
+}

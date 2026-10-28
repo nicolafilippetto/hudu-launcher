@@ -1,0 +1,123 @@
+name: Hudu Launcher per Windows
+
+on:
+  push:
+    paths:
+      - "connector/**"
+      - ".github/workflows/connector.yml"
+    # Un tag v1.2.3 pubblica l'installer nelle Release di GitHub.
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - "connector/**"
+      - ".github/workflows/connector.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: connector-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Indirizzo predefinito del portale, inserito nell'app (facoltativo: senza, il Launcher lo impara
+  # dal primo link). Settings → Secrets and variables → Actions → Variables (LAUNCHER_PORTAL_URL).
+  # In un repository pubblico l'installer è pubblico: meglio lasciarlo vuoto.
+  PORTAL_URL: ${{ vars.LAUNCHER_PORTAL_URL }}
+
+jobs:
+  build:
+    name: Compilazione, test e installer
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: connector
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: connector/global.json
+
+      - name: Test
+        run: dotnet test tests/Launcher.Connector.Tests
+
+      - name: Versione
+        id: version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          # Tag v1.2.3 → 1.2.3; altrimenti 1.0.<numero di esecuzione>.
+          $version = "1.0.${{ github.run_number }}"
+          if ($env:REF_TYPE -eq "tag") {
+            if ($env:REF_NAME -notmatch '^v(\d+\.\d+\.\d+)$') { throw "Tag non valido: usare vX.Y.Z" }
+            $version = $Matches[1]
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Versione $version"
+
+      - name: Pubblicazione (self-contained, ReadyToRun)
+        run: >
+          dotnet publish src/Launcher.Connector/Launcher.Connector.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          --output publish
+          -p:Version=${{ steps.version.outputs.version }}
+          -p:PortalUrl="${{ env.PORTAL_URL }}"
+
+      - name: Installer per utente (Velopack)
+        run: |
+          dotnet tool install --global vpk --version 1.2.161
+          vpk pack `
+            --packId HuduLauncher `
+            --packVersion ${{ steps.version.outputs.version }} `
+            --packDir publish `
+            --mainExe HuduLauncher.exe `
+            --packTitle "Hudu Launcher" `
+            --packAuthors "Hudu Launcher" `
+            --icon src/Launcher.Connector/Assets/launcher.ico `
+            --outputDir releases
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: HuduLauncher-${{ steps.version.outputs.version }}
+          path: |
+            connector/releases/*-Setup.exe
+            connector/releases/*.nupkg
+            connector/releases/RELEASES*
+            connector/releases/releases.*.json
+          if-no-files-found: error
+          retention-days: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+  release:
+    name: Release GitHub
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    # Solo questo job può scrivere nel repository, e solo per creare la Release.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: HuduLauncher-${{ needs.build.outputs.version }}
+          path: release
+
+      - name: Crea la Release con l'installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          cd release
+          sha256sum -- * > SHA256SUMS.txt
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Hudu Launcher $VERSION" --generate-notes -- *

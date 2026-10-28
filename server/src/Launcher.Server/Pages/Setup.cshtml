@@ -1,0 +1,42 @@
+@page
+@model SetupModel
+@{
+    Layout = "_AuthLayout";
+    ViewData["Title"] = "Configurazione iniziale";
+}
+<h2 class="auth-title">Configurazione iniziale</h2>
+<p class="muted">Crea il primo amministratore con accesso locale. Dopo potrai configurare Microsoft 365 e aggiungere gli altri admin.</p>
+@if (Model.Errors.Count > 0)
+{
+    <div class="alert alert-danger">
+        <ul>
+            @foreach (var error in Model.Errors)
+            {
+                <li>@error</li>
+            }
+        </ul>
+    </div>
+}
+<form method="post" class="stack">
+    <label class="field">
+        <span>Token di configurazione (dai log del container)</span>
+        <input class="input mono" asp-for="Token" autocomplete="off" spellcheck="false" />
+    </label>
+    <label class="field">
+        <span>Email dell'amministratore (la stessa di Microsoft 365)</span>
+        <input class="input" asp-for="AdminEmail" type="email" autocomplete="username" />
+    </label>
+    <label class="field">
+        <span>Nome</span>
+        <input class="input" asp-for="DisplayName" autocomplete="name" />
+    </label>
+    <label class="field">
+        <span>Password (min. 14 caratteri, maiuscole, minuscole e numeri)</span>
+        <input class="input" asp-for="Password" type="password" autocomplete="new-password" />
+    </label>
+    <label class="field">
+        <span>Ripeti la password</span>
+        <input class="input" asp-for="ConfirmPassword" type="password" autocomplete="new-password" />
+    </label>
+    <button type="submit" class="btn btn-primary btn-block">Crea amministratore</button>
+</form>

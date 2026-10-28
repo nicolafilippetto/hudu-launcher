@@ -1,0 +1,72 @@
+@inject LayoutInfo Info
+@{
+    var title = ViewData["Title"] as string;
+    var query = ViewData["Query"] as string;
+    var bodyClass = ViewData["BodyClass"] as string;
+    var scopeId = ViewData["ScopeCompanyId"] as int?;
+    var scopeName = ViewData["ScopeCompanyName"] as string;
+}
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>@(string.IsNullOrEmpty(title) ? Info.PortalName : $"{title} · {Info.PortalName}")</title>
+    <link rel="icon" href="/branding/favicon" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <script src="~/js/theme.js" asp-append-version="true"></script>
+    <script src="~/js/site.js" asp-append-version="true" defer></script>
+</head>
+<body class="@bodyClass" data-offline-max="@Info.OfflineMaxAssets" data-offline-minutes="@Info.OfflineMinutes">
+    <partial name="_Icons" />
+    <header class="topbar">
+        <a class="brand" href="/">
+            @if (Info.HasLogo)
+            {
+                <img src="/branding/logo" alt="" class="brand-logo" />
+            }
+            else
+            {
+                <span class="brand-mark"><svg><use href="#i-plug" /></svg></span>
+            }
+            <span class="brand-name">@Info.PortalName</span>
+        </a>
+
+        <form class="search @(scopeId is null ? "" : "has-scope")" method="get" action="/" role="search" data-live-search
+              data-scope-id="@scopeId" data-scope-name="@scopeName">
+            <svg class="search-icon"><use href="#i-search" /></svg>
+            <input type="search" name="q" value="@query" autocomplete="off" spellcheck="false" aria-label="Cerca"
+                   placeholder="@(scopeId is null ? "Cerca cliente, server, IP…" : "Cerca in questo cliente…")" />
+            <kbd class="search-hint">/</kbd>
+            <button type="button" class="search-scope" data-search-scope title="Solo in @scopeName: clic per cercare ovunque" hidden="@(scopeId is null)">
+                <span>@scopeName</span><svg><use href="#i-x" /></svg>
+            </button>
+        </form>
+
+        <nav class="topnav">
+            @if (User.IsAdmin())
+            {
+                <a class="btn btn-ghost" href="/Admin" title="Amministrazione"><svg><use href="#i-settings" /></svg><span class="hide-sm">Admin</span></a>
+            }
+            <button type="button" class="btn btn-ghost btn-icon" data-theme-toggle title="Tema">
+                <svg class="theme-light"><use href="#i-sun" /></svg>
+                <svg class="theme-dark"><use href="#i-moon" /></svg>
+                <svg class="theme-auto"><use href="#i-auto" /></svg>
+            </button>
+            <div class="user-chip" title="@User.GetEmail()">
+                <svg><use href="#i-user" /></svg>
+                <span class="hide-sm">@User.Identity?.Name</span>
+            </div>
+            <form method="post" asp-page="/Account/Logout">
+                <button type="submit" class="btn btn-ghost btn-icon" title="Esci"><svg><use href="#i-logout" /></svg></button>
+            </form>
+        </nav>
+    </header>
+
+    @RenderBody()
+
+    <div class="toasts" aria-live="polite"></div>
+    @Html.AntiForgeryToken()
+</body>
+</html>

@@ -1,0 +1,94 @@
+@model ResolvedAsset
+@{
+    var showCompany = ViewData["ShowCompany"] is true;
+    var primary = Model.Primary;
+    var issues = Model.Connections.SelectMany(c => c.Issues.Select(i => c.Key == ConnectionResolver.PrimaryKey ? i : $"{c.Label}: {i}")).Distinct().ToList();
+}
+<article class="asset @(Model.Hidden ? "is-hidden" : "") @(issues.Count > 0 ? "has-issues" : "")" data-asset-id="@Model.Asset.Id">
+    <label class="asset-pick" title="Seleziona (cache offline, modifica in blocco, nascondi)">
+        <input type="checkbox" data-pick="@Model.Asset.Id" data-pick-name="@Model.Asset.Name · @Model.CompanyName"
+               data-pick-direct="@(Model.Connections.Any(c => c.CanConnectDirect) ? "true" : "false")" aria-label="Seleziona @Model.Asset.Name" />
+    </label>
+    <div class="asset-icon proto-@(primary?.Protocol.ToString().ToLowerInvariant())">
+        <svg><use href="#@(primary is null ? "i-server" : Format.Icon(primary.Protocol))" /></svg>
+    </div>
+
+    <div class="asset-main">
+        <div class="asset-title">
+            <span class="asset-name">@Model.Asset.Name</span>
+            @if (Model.Hidden)
+            {
+                <span class="chip"><svg><use href="#i-eye-off" /></svg>nascosto</span>
+            }
+            @if (showCompany)
+            {
+                <a class="chip chip-link" href="/?c=@Model.Asset.CompanyId"><svg><use href="#i-building" /></svg>@Model.CompanyName</a>
+            }
+        </div>
+        <div class="asset-meta">
+            @if (primary?.Host is not null)
+            {
+                <span class="mono">@primary.Host@(primary.Port != ConnectionResolver.DefaultPort(primary.Protocol) ? ":" + primary.Port : "")</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(Model.Asset.OperatingSystem))
+            {
+                <span>@Model.Asset.OperatingSystem</span>
+            }
+            else
+            {
+                <span>@Model.Asset.LayoutName</span>
+            }
+            @if (primary?.GatewayPeerId is not null)
+            {
+                <span title="Gateway RustDesk (@primary.GatewaySource)"><svg class="inline"><use href="#i-plug" /></svg>@primary.GatewayPeerId</span>
+            }
+            @if (primary?.Username is not null)
+            {
+                <span title="Credenziale: @primary.PasswordName"><svg class="inline"><use href="#i-key" /></svg>@primary.Username</span>
+            }
+        </div>
+        @if (!string.IsNullOrWhiteSpace(Model.Setting?.Note))
+        {
+            <div class="asset-note">@Model.Setting.Note</div>
+        }
+        @if (issues.Count > 0)
+        {
+            <button type="button" class="issues" data-edit="@Model.Asset.Id" title="Sistema">
+                <svg><use href="#i-alert" /></svg>
+                <span>@string.Join(" · ", issues)</span>
+                <span class="issues-fix">Sistema</span>
+            </button>
+        }
+    </div>
+
+    <div class="asset-actions">
+        <div class="connect-group">
+            @foreach (var connection in Model.Connections)
+            {
+                <button type="button" class="btn @(connection.Key == ConnectionResolver.PrimaryKey ? "btn-primary" : "btn-secondary") btn-connect"
+                        data-connect="@Model.Asset.Id" data-key="@connection.Key"
+                        data-gateway="@(connection.CanConnect ? connection.GatewayPeerId : null)"
+                        data-target="@connection.Host:@connection.Port"
+                        title="@Format.ConnectionTitle(connection)"
+                        aria-haspopup="menu"
+                        disabled="@(!connection.CanConnectDirect)">
+                    <svg><use href="#@Format.Icon(connection.Protocol)" /></svg>@connection.Label
+                </button>
+            }
+        </div>
+        <div class="tool-group">
+            <button type="button" class="btn btn-ghost btn-icon star @(Model.IsFavorite ? "on" : "")" data-favorite="@Model.Asset.Id" title="Preferito" aria-pressed="@(Model.IsFavorite ? "true" : "false")">
+                <svg><use href="#i-star" /></svg>
+            </button>
+            <button type="button" class="btn btn-ghost btn-icon" data-edit="@Model.Asset.Id" title="Modifica connessioni">
+                <svg><use href="#i-pencil" /></svg>
+            </button>
+            @if (Model.Asset.HuduUrl is not null)
+            {
+                <a class="btn btn-ghost btn-icon" href="@Model.Asset.HuduUrl" target="_blank" rel="noopener noreferrer" title="Apri in Hudu">
+                    <svg><use href="#i-external" /></svg>
+                </a>
+            }
+        </div>
+    </div>
+</article>

@@ -1,0 +1,55 @@
+@page
+@model Launcher.Server.Pages.Admin.BrandingModel
+@{
+    ViewData["Title"] = "Aspetto";
+    ViewData["AdminSection"] = "branding";
+}
+<div class="page-head">
+    <div>
+        <h1>Aspetto</h1>
+        <p class="muted">Logo e favicon del portale. Il nome si cambia in Impostazioni → Portale. Formati: PNG, JPEG, WebP o ICO, max 512 KB.</p>
+    </div>
+</div>
+
+<div class="grid grid-2">
+    <section class="card">
+        <h2 class="card-title"><svg><use href="#i-image" /></svg>Logo</h2>
+        <div class="brand-preview">
+            @if (Model.HasLogo)
+            {
+                <img src="/branding/logo?v=@DateTime.UtcNow.Ticks" alt="Logo attuale" />
+            }
+            else
+            {
+                <span class="muted">Logo predefinito</span>
+            }
+        </div>
+        <p class="muted small">Consigliato: PNG con sfondo trasparente, altezza 64 px o più. Viene mostrato alto 28 px.</p>
+        <form method="post" asp-page-handler="Upload" enctype="multipart/form-data" class="inline-form">
+            <input type="hidden" name="kind" value="logo" />
+            <input class="input" type="file" name="file" accept="image/png,image/jpeg,image/webp" required />
+            <button class="btn btn-primary" type="submit">Carica</button>
+        </form>
+        @if (Model.HasLogo)
+        {
+            <form method="post" asp-page-handler="Remove"><input type="hidden" name="kind" value="logo" /><button class="btn btn-ghost btn-sm" type="submit">Rimuovi</button></form>
+        }
+    </section>
+
+    <section class="card">
+        <h2 class="card-title"><svg><use href="#i-image" /></svg>Favicon</h2>
+        <div class="brand-preview">
+            <img src="/branding/favicon?v=@DateTime.UtcNow.Ticks" alt="Favicon attuale" width="32" height="32" />
+        </div>
+        <p class="muted small">Consigliato: PNG quadrato 64×64 o ICO.</p>
+        <form method="post" asp-page-handler="Upload" enctype="multipart/form-data" class="inline-form">
+            <input type="hidden" name="kind" value="favicon" />
+            <input class="input" type="file" name="file" accept="image/png,image/x-icon,image/vnd.microsoft.icon,image/webp" required />
+            <button class="btn btn-primary" type="submit">Carica</button>
+        </form>
+        @if (Model.HasFavicon)
+        {
+            <form method="post" asp-page-handler="Remove"><input type="hidden" name="kind" value="favicon" /><button class="btn btn-ghost btn-sm" type="submit">Rimuovi</button></form>
+        }
+    </section>
+</div>

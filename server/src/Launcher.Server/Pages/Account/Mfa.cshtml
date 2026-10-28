@@ -1,0 +1,22 @@
+@page
+@model Launcher.Server.Pages.Account.MfaModel
+@{
+    ViewData["Title"] = "Verifica in due passaggi";
+}
+<h2 class="auth-title">Verifica in due passaggi</h2>
+@if (Model.Error is not null)
+{
+    <div class="alert alert-danger">@Model.Error</div>
+}
+<form method="post" class="stack">
+    <label class="field">
+        <span>Codice dell'app di autenticazione</span>
+        <input class="input input-code" asp-for="Code" autocomplete="one-time-code" inputmode="numeric" autofocus placeholder="123456" />
+    </label>
+    <label class="check">
+        <input type="checkbox" asp-for="UseRecovery" />
+        <span>Uso un codice di recupero</span>
+    </label>
+    <button type="submit" class="btn btn-primary btn-block">Accedi</button>
+</form>
+<p class="auth-alt"><a href="/Account/LocalLogin">Ricomincia</a></p>

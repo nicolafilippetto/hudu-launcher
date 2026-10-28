@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>HuduLauncher</AssemblyName>
+    <RootNamespace>Launcher.Connector</RootNamespace>
+    <ApplicationIcon>Assets\launcher.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <StartupObject>Launcher.Connector.Program</StartupObject>
+    <!-- WPF0001: ThemeMode (tema Fluent di Windows) è ancora marcato sperimentale.
+         WFO0003: la DPI per monitor va nel manifest perché la finestra è WPF, non WinForms. -->
+    <NoWarn>$(NoWarn);WPF0001;WFO0003</NoWarn>
+    <!-- Avvio veloce: codice precompilato e niente estrazione da file unico. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <TieredPGO>true</TieredPGO>
+    <SatelliteResourceLanguages>it;en</SatelliteResourceLanguages>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!-- WinForms serve solo per ospitare il controllo RDP: niente using globali che creano ambiguità con WPF. -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <!-- Indirizzo predefinito del portale, impostabile in compilazione: -p:PortalUrl=https://... -->
+  <ItemGroup>
+    <AssemblyMetadata Include="DefaultPortalUrl" Value="$(PortalUrl)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.91.1" />
+    <PackageReference Include="Microsoft.Identity.Client.Broker" Version="4.91.1" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
+    <PackageReference Include="SSH.NET" Version="2026.0.0" />
+    <PackageReference Include="Velopack" Version="1.2.161" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Launcher.Connector.Core\Launcher.Connector.Core.csproj" />
+  </ItemGroup>
+
+  <!-- App.xaml come Page: il Main è in Program.cs (serve per Velopack e l'istanza singola). -->
+  <ItemGroup>
+    <ApplicationDefinition Remove="App.xaml" />
+    <Page Include="App.xaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\launcher.ico" />
+    <Content Include="Assets\terminal\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

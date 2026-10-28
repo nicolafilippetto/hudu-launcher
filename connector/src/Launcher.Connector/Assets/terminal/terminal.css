@@ -1,0 +1,15 @@
+html, body {
+    margin: 0;
+    height: 100%;
+    background: #0e1116;
+    overflow: hidden;
+}
+
+#terminal {
+    position: absolute;
+    inset: 6px 4px 4px 8px;
+}
+
+body.light {
+    background: #ffffff;
+}

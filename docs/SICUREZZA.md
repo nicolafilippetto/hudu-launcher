@@ -1,0 +1,84 @@
+# Hudu Launcher — Scheda di sicurezza
+
+Per il team Cyber: cosa custodisce il sistema, come lo protegge e come viene verificato.
+Stato: ottobre 2026.
+
+## 1. Cosa custodisce il server
+
+| Dato | Dove | Protezione |
+|---|---|---|
+| Password dei clienti | **Non salvate.** Lette da Hudu solo al momento della connessione, consegnate al Launcher e scartate | Mai su disco, mai nei log |
+| Elenco asset, IP, nomi delle credenziali e nomi utente | Cache SQLite nel volume Docker | Solo metadati, nessun segreto |
+| Chiave API di Hudu, token RustDesk, password di connessione RustDesk, segreto Entra | Database, **cifrati** (ASP.NET Data Protection, AES) | Le chiavi di cifratura sono a loro volta cifrate (AES-GCM) con la chiave master, fuori dal database (Docker secret, file 400 di proprietà del container) |
+| Account admin di emergenza | Database (ASP.NET Identity) | Password con hash PBKDF2, MFA TOTP obbligatoria, codici di recupero monouso |
+| Registro accessi | Database | Chi, cosa, quando, da quale IP; conservazione configurabile |
+
+Senza la chiave master, il database copiato non permette di leggere i segreti.
+
+## 2. Hudu: solo lettura
+
+La chiave API di Hudu non si può limitare alla sola lettura. Il blocco è quindi nel codice: il
+client HTTP verso Hudu ha un filtro (`ReadOnlyHandler`) che **rifiuta qualsiasi richiesta che non
+sia GET** prima che parta, ed è verificato dai test automatici (POST, PUT, PATCH e DELETE bloccati).
+Il portale non ha alcuna funzione di scrittura verso Hudu.
+
+Mitigazioni consigliate lato Hudu: chiave dedicata solo a questo server, limitata all'IP pubblico del
+server (se la licenza lo consente), rotazione periodica, alert sugli accessi API.
+
+## 3. Chi può fare cosa
+
+- **Tecnici**: accesso con Microsoft 365 (OIDC con PKCE). Chi entra lo decide Entra: assegnazione
+  utente obbligatoria all'app e Accesso condizionale con MFA.
+- **Admin**: elenco gestito nel portale; accesso locale di emergenza solo da reti interne, con MFA.
+- **Launcher (Windows)**: per ricevere una credenziale serve un **biglietto** monouso (256 bit casuali,
+  30 secondi, legato all'utente; nel database c'è solo l'hash) **e** un token Microsoft 365 dello stesso
+  utente con scope dedicato. Un link `hudulauncher://` contraffatto non contiene host né credenziali e
+  viene rifiutato.
+- **Connessione diretta** (senza RustDesk): stesso biglietto e stessa autenticazione; il Launcher non
+  riceve la password di RustDesk, che non gli serve.
+- **Cache d'emergenza offline**: il tecnico sceglie nel portale fino a N asset (N deciso dall'admin,
+  predefinito 10; 0 = funzione spenta). Il Launcher, con biglietto e token 365 come sempre, riceve le
+  connessioni dirette con le credenziali e le tiene **solo in memoria** per la durata impostata
+  (predefinita 60 minuti): mai su disco, cancellate alla scadenza, chiudendo il Launcher o spegnendo il
+  PC; un nuovo pacchetto sostituisce il precedente. Ogni preparazione e ogni asset consegnato sono nel
+  registro (`offline.prepare`, `offline.redeem`).
+
+## 4. Difese dell'applicazione web
+
+- Input validati lato server (IP/hostname, porte, ID RustDesk, opzioni da elenco chiuso, espressioni
+  regolari compilate prima del salvataggio). Database interrogato solo con query parametrizzate (EF Core).
+- Output sempre codificato (Razor), **Content Security Policy** senza script inline, frame vietati,
+  HSTS, `nosniff`, `no-referrer`, isolamento tra origini.
+- Token antiforgery su tutti i form e le API del portale; cookie `__Host-`, HttpOnly, Secure, SameSite.
+- Limiti per IP: login, MFA e Setup 10 ogni 5 minuti; connessioni e riscatti 30 ogni 5 minuti;
+  aggiornamento da Hudu una volta al minuto per cliente. Blocco dell'account dopo 5 errori
+  (password o MFA). Messaggi di errore che non rivelano se un utente esiste.
+- Accesso di emergenza rifiutato se il proxy davanti al portale non è riconosciuto (IP reale non
+  verificabile).
+- Upload solo di immagini raster riconosciute dal contenuto (niente SVG), richieste massimo 2 MB.
+- Container non root, filesystem in sola lettura, nessuna capability, nessuna shell.
+
+## 5. Verifiche eseguite
+
+| Tipo | Strumento | Esito |
+|---|---|---|
+| SAST C# | Analizzatori di sicurezza .NET (`AnalysisModeSecurity=All`), **attivi in ogni compilazione**: un avviso blocca la build | Server: nessun problema. Launcher: 1 avviso (ricerca delle DLL di sistema, CA5392) **corretto** |
+| SAST multi-linguaggio e segreti | Semgrep 1.182 (regole C#, JavaScript, OWASP Top 10, segreti, Dockerfile, GitHub Actions) | 6 segnalazioni: 4 corrette (attesa sugli aggiornamenti Dependabot), 2 falsi positivi motivati nel codice → **0 aperte** |
+| Dipendenze | `dotnet list package --vulnerable` + Dependabot | Nessuna libreria vulnerabile |
+| DAST | OWASP ZAP 2.16.1, scansione attiva **con sessione da amministratore**, in modalità produzione | 1 difetto reale: il pulsante Esci non inviava il token antiforgery (logout in errore, nessun rischio CSRF perché la richiesta veniva rifiutata) → **corretto e coperto da test**. Altri avvisi analizzati: falsi positivi ("XSLT" dal testo "Microsoft 365") o comportamenti voluti (IP dei clienti mostrati ai tecnici autenticati) |
+| Test automatici | 88 test server, 62 Launcher | Includono: biglietti rubati/scaduti/riusati, token di altro tenant o senza scope, solo lettura verso Hudu, antiforgery, ruoli |
+
+In CI (GitHub Actions, workflow **Sicurezza**) Semgrep e il controllo delle dipendenze girano a ogni
+modifica e ogni lunedì; gli analizzatori .NET girano in ogni compilazione.
+
+## 6. Rischi residui e raccomandazioni
+
+- **Compromissione del server**: chi ottiene il controllo del container può usare la chiave di Hudu.
+  Mitigazioni: server dedicato in DMZ, aggiornamenti, accesso amministrativo limitato, backup della
+  chiave master separato dal backup del volume.
+- **Compromissione di un account tecnico 365**: permette connessioni come quel tecnico. Mitigazioni:
+  Accesso condizionale (MFA resistente al phishing, dispositivo conforme), assegnazione utenti al gruppo.
+- **PC del tecnico**: durante la sessione, e per la durata della cache offline, le credenziali sono in
+  memoria del Launcher. Antivirus/EDR e Intune sui PC; durata e numero di asset offline limitati dall'admin.
+- Un codice MFA resta valido nella sua finestra di ~30 secondi.
+- Consigliato prima del go-live: **penetration test indipendente** sull'istanza pubblicata dietro il WAF.

@@ -1,0 +1,61 @@
+# Launcher — portale delle connessioni (Hudu + RustDesk).
+#
+# Prima dell'avvio:
+#   mkdir -p secrets && openssl rand -base64 32 > secrets/master_key
+#   chown 1654:1654 secrets/master_key && chmod 400 secrets/master_key   (1654 = utente del container)
+#   (conservare una copia della chiave master in Hudu: senza, i segreti salvati non si leggono più)
+#
+# Avvio:        docker compose up -d
+# Token setup:  docker compose logs launcher | grep CONFIGURAZIONE
+
+services:
+  launcher:
+    image: ghcr.io/nicolafilippetto/hudu-launcher/launcher-server:latest
+    build:
+      context: .
+    container_name: launcher
+    restart: unless-stopped
+
+    # Esposto solo verso il WAF: sostituire con l'IP interno dell'host Docker raggiungibile dal WAF.
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    environment:
+      # Chiave master (segreto Docker qui sotto): cifra i segreti salvati nel database.
+      Launcher__MasterKeyFile: /run/secrets/launcher_master_key
+      # IP del WAF / proxy inverso: solo da lui si accettano X-Forwarded-For / X-Forwarded-Proto.
+      Launcher__TrustedProxies: "172.16.0.10"
+      # Nome pubblico del portale; 127.0.0.1 serve al controllo di salute interno.
+      AllowedHosts: "launcher.example.com;127.0.0.1"
+      TZ: Europe/Rome
+
+    secrets:
+      - launcher_master_key
+
+    volumes:
+      - launcher-data:/data
+
+    # Indurimento del container
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 512m
+    cpus: 1.0
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+secrets:
+  launcher_master_key:
+    file: ./secrets/master_key
+
+volumes:
+  launcher-data:
