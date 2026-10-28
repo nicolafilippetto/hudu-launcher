@@ -1,3 +1,4 @@
+@inject Launcher.Server.Pages.LayoutInfo Info
 @model CompanyView
 @{
     var attention = Model.Groups.SelectMany(g => g).Count(a => a.NeedsAttention);
@@ -28,6 +29,8 @@
         </div>
     </div>
 
+    @if (Info.RustDeskEnabled)
+    {
     <details class="gateway-box">
         <summary>
             <svg><use href="#i-plug" /></svg>
@@ -54,6 +57,7 @@
             <div class="actions"><button class="btn btn-primary" type="submit">Salva</button></div>
         </form>
     </details>
+    }
 </div>
 
 @if (!Model.Groups.Any())

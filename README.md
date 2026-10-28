@@ -42,7 +42,8 @@ Ogni connessione, e ogni credenziale consegnata, finisce nel registro accessi de
   prompt degli apparati di rete) e verifica delle chiavi host.
 - **Interfacce web** di firewall, NAS, iDRAC/iLO aperte in una scheda attraverso lo stesso tunnel.
 - **Jump host automatico**: il gateway RustDesk si ricava da Hudu, dal cliente o dal dispositivo
-  stesso; in alternativa connessione **diretta**.
+  stesso; in alternativa connessione **diretta**. RustDesk è facoltativo: senza, il portale offre
+  solo la connessione diretta (dalla rete del cliente o in VPN).
 - **Indirizzi dall'IPAM di Hudu**, con segnalazione degli asset senza IP o con più IP da scegliere.
 - **Modifiche in blocco** su più asset (gateway, credenziale, protocollo, visibilità).
 - **Cache d'emergenza**: fino a N connessioni preparate in anticipo, tenute solo in memoria per un
@@ -73,7 +74,7 @@ I dettagli sono in [`docs/SICUREZZA.md`](docs/SICUREZZA.md).
 | Componente | Requisito |
 |---|---|
 | Hudu | Chiave API con accesso alle password |
-| RustDesk | Server Pro (rubrica condivisa e API) e client RustDesk sui PC |
+| RustDesk | Facoltativo: Server Pro (rubrica condivisa e API) e client RustDesk sui PC. Senza, solo connessioni dirette |
 | Identità | Tenant Microsoft Entra ID (Microsoft 365) |
 | Portale | Host Docker dietro un reverse proxy o WAF con HTTPS |
 | Launcher | Windows 10 o 11 (installazione per utente, senza diritti di amministratore) |

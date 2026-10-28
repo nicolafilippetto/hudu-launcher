@@ -53,6 +53,8 @@ public sealed class ResolutionContext
     /// <summary>Gateway letto da Hudu a livello di cliente (asset con campo ID RustDesk).</summary>
     public required IReadOnlyDictionary<int, string> HuduCompanyGateways { get; init; }
     public required IReadOnlySet<int> Favorites { get; init; }
+    /// <summary>false = RustDesk spento: niente gateway, solo connessioni dirette.</summary>
+    public bool RustDeskEnabled { get; init; } = true;
 }
 
 /// <summary>
@@ -122,8 +124,8 @@ public static class ConnectionResolver
         ctx.CompanySettings.TryGetValue(asset.CompanyId, out var companySetting);
         ctx.Layouts.TryGetValue(asset.LayoutId, out var layout);
         var companyName = ctx.Companies.TryGetValue(asset.CompanyId, out var company) ? company.Name : "";
-        var ownPeer = FindOwnPeer(asset, ctx);
-        var companyGateway = companySetting?.GatewayPeerId
+        var ownPeer = ctx.RustDeskEnabled ? FindOwnPeer(asset, ctx) : null;
+        var companyGateway = !ctx.RustDeskEnabled ? null : companySetting?.GatewayPeerId
             ?? (ctx.HuduCompanyGateways.TryGetValue(asset.CompanyId, out var huduGateway) ? huduGateway : null);
         var companyGatewaySource = companySetting?.GatewayPeerId is not null ? "predefinito del cliente" : "Hudu, cliente";
 
@@ -134,7 +136,11 @@ public static class ConnectionResolver
         string? gateway;
         string? gatewaySource;
         var (host, hostIssue) = ResolveHost(setting?.Host, asset);
-        if (setting?.GatewayPeerId is { } manualGateway)
+        if (!ctx.RustDeskEnabled)
+        {
+            (gateway, gatewaySource) = (null, null);
+        }
+        else if (setting?.GatewayPeerId is { } manualGateway)
         {
             (gateway, gatewaySource) = (manualGateway, "manuale");
         }
@@ -177,7 +183,7 @@ public static class ConnectionResolver
         foreach (var extra in ctx.Extras[asset.Id].OrderBy(e => e.Label, StringComparer.OrdinalIgnoreCase))
         {
             var extraHost = extra.Host ?? host;
-            var (extraGateway, extraSource) = extra.GatewayPeerId is not null
+            var (extraGateway, extraSource) = !ctx.RustDeskEnabled ? (null, null) : extra.GatewayPeerId is not null
                 ? (extra.GatewayPeerId, "manuale")
                 : extra.Host is null ? (gateway, gatewaySource) : (companyGateway ?? gateway, companyGateway is not null ? companyGatewaySource : gatewaySource);
             var (extraPasswordId, extraPasswordIssue) = extra.PasswordId is not null
@@ -204,7 +210,11 @@ public static class ConnectionResolver
             issues.Add(hostIssue);
         }
 
-        if (gateway is null)
+        if (!ctx.RustDeskEnabled)
+        {
+            // Solo connessioni dirette: il gateway non serve.
+        }
+        else if (gateway is null)
         {
             issues.Add("Nessun gateway RustDesk");
         }

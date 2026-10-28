@@ -28,7 +28,8 @@ public sealed record OfflineBundleResponse(int ValidSeconds, IReadOnlyList<Redee
 
 public sealed record ConnectorConfigResponse(string? TenantId, string? ClientId, string? Scope, string PortalName);
 
-public sealed record RedeemGateway(string Id, string? Password);
+/// <summary>Jump host RustDesk; ClientPath = client personalizzato indicato dall'admin (facoltativo).</summary>
+public sealed record RedeemGateway(string Id, string? Password, string? ClientPath = null);
 
 public sealed record RedeemTarget(string Host, int Port);
 
@@ -118,7 +119,8 @@ public static class ApiEndpoints
             return Results.NotFound();
         }
 
-        var direct = string.Equals(request.Mode, "direct", StringComparison.Ordinal);
+        // Con RustDesk spento esiste solo la connessione diretta.
+        var direct = !settings.RustDesk.Enabled || string.Equals(request.Mode, "direct", StringComparison.Ordinal);
         if (direct ? !connection.CanConnectDirect : !connection.CanConnect)
         {
             return Results.Problem(
@@ -391,7 +393,7 @@ public static class ApiEndpoints
             asset.CompanyName,
             connection.Label,
             // Connessione diretta: niente jump host e niente password di RustDesk.
-            direct ? null : new RedeemGateway(connection.GatewayPeerId!, settings.RustDesk.ConnectionPassword),
+            direct ? null : new RedeemGateway(connection.GatewayPeerId!, settings.RustDesk.ConnectionPassword, settings.RustDesk.ClientPath),
             new RedeemTarget(connection.Host!, connection.Port),
             credential,
             $"launcher-{asset.Asset.Id}-{connection.Key.Replace(':', '-')}",

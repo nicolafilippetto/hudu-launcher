@@ -80,7 +80,7 @@ public static class Format
         c.CanConnect
             ? $"{ProtocolName(c.Protocol)} {c.Host}:{c.Port} tramite RustDesk {c.GatewayPeerId} ({c.GatewaySource}) oppure diretta"
             : c.CanConnectDirect
-                ? $"{ProtocolName(c.Protocol)} {c.Host}:{c.Port}: solo diretta ({string.Join(", ", c.Issues)})"
+                ? $"{ProtocolName(c.Protocol)} {c.Host}:{c.Port}: connessione diretta" + (c.Issues.Count > 0 ? $" ({string.Join(", ", c.Issues)})" : "")
                 : "Non collegabile: " + string.Join(", ", c.Issues);
 }
 
@@ -97,6 +97,9 @@ public sealed class LayoutInfo(SettingsService settings, AppDbContext db)
     public int OfflineMaxAssets => settings.Portal.OfflineMaxAssets;
 
     public int OfflineMinutes => settings.Portal.OfflineMinutes;
+
+    /// <summary>false = RustDesk spento: solo connessioni dirette, niente gateway.</summary>
+    public bool RustDeskEnabled => settings.RustDesk.Enabled;
 
     /// <summary>Richieste di accesso da approvare (mostrate agli amministratori).</summary>
     public int PendingUsers => db.PortalUsers.Count(u => u.Status == Data.PortalUserStatus.Pending);

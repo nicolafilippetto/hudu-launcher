@@ -401,7 +401,12 @@
         var button = event.target.closest("[data-connect]");
         if (button && !button.disabled) {
             event.stopPropagation();
-            openConnectMenu(button);
+            // RustDesk spento: esiste solo la connessione diretta, niente menu.
+            if (document.body.getAttribute("data-rustdesk") === "off") {
+                startConnection(button, "direct");
+            } else {
+                openConnectMenu(button);
+            }
             return;
         }
         if (connectMenu && !event.target.closest(".connect-menu")) { closeConnectMenu(); }

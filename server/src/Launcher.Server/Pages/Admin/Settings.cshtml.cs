@@ -87,8 +87,15 @@ public sealed class SettingsModel(SettingsService settings, AuditService audit, 
         return RedirectToPage(null, null, "hudu");
     }
 
-    public async Task<IActionResult> OnPostRustDeskAsync(string? apiUrl, string? apiToken, string? addressBook, string? connectionPassword, bool clearPassword)
+    public async Task<IActionResult> OnPostRustDeskAsync(string? apiUrl, string? apiToken, string? addressBook, string? connectionPassword, bool clearPassword,
+        bool enabled, string? clientPath)
     {
+        var path = clientPath?.Trim().Trim('"');
+        if (!string.IsNullOrEmpty(path) && !RustDeskSettings.IsValidClientPath(path))
+        {
+            return Error("Percorso del client RustDesk non valido: serve un percorso completo di un .exe, es. C:\\Program Files\\RustDesk\\rustdesk.exe.", "rustdesk");
+        }
+
         if (!string.IsNullOrWhiteSpace(apiUrl) && (!Uri.TryCreate(apiUrl.Trim(), UriKind.Absolute, out var uri) || uri.Scheme is not ("https" or "http")))
         {
             return Error("Indirizzo API di RustDesk non valido (es. https://rustdesk.azienda.it).", "rustdesk");
@@ -100,6 +107,8 @@ public sealed class SettingsModel(SettingsService settings, AuditService audit, 
             [SettingKeys.RustDeskApiToken] = apiToken ?? "",
             [SettingKeys.RustDeskAddressBook] = string.IsNullOrWhiteSpace(addressBook) ? null : addressBook.Trim(),
             [SettingKeys.RustDeskConnectionPassword] = clearPassword ? null : connectionPassword ?? "",
+            [SettingKeys.RustDeskEnabled] = enabled.ToString(),
+            [SettingKeys.RustDeskClientPath] = string.IsNullOrEmpty(path) ? null : path,
         };
         await SaveAsync(values, "RustDesk");
         return RedirectToPage(null, null, "rustdesk");

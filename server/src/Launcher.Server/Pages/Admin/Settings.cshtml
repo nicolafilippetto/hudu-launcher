@@ -144,14 +144,26 @@
 <section class="card" id="rustdesk">
     <h2 class="card-title"><svg><use href="#i-plug" /></svg>RustDesk</h2>
     <p class="muted small">
-        Token creato nella console di RustDesk Server Pro (Settings → Tokens) con permesso "Address Book" in lettura.
-        La password di connessione viene consegnata al connettore solo al momento della connessione.
+        RustDesk serve per raggiungere le reti dei clienti tramite un jump host. Se non lo usi, lascialo spento:
+        il portale mostra solo la connessione diretta (dal cliente o in VPN) e nasconde gateway e rubrica.
     </p>
     <form method="post" asp-page-handler="RustDesk" class="grid grid-2">
+        <label class="check span-all">
+            <input type="checkbox" name="enabled" value="true" checked="@Model.RustDesk.Enabled" />
+            <span>
+                Usa RustDesk come jump host
+                <small class="muted block">Token creato nella console di RustDesk Server Pro (Settings → Tokens) con permesso "Address Book" in lettura. La password di connessione viene consegnata al Launcher solo al momento della connessione.</small>
+            </span>
+        </label>
         <label class="field"><span>Indirizzo API</span><input class="input" name="apiUrl" value="@Model.RustDesk.ApiUrl" placeholder="https://rustdesk.azienda.it" autocomplete="off" /></label>
         <label class="field"><span>Token API</span><input class="input mono" type="password" name="apiToken" placeholder="@SecretHint(SettingKeys.RustDeskApiToken)" autocomplete="new-password" /></label>
         <label class="field"><span>Rubrica condivisa (vuoto = tutte)</span><input class="input" name="addressBook" value="@Model.RustDesk.AddressBook" autocomplete="off" /></label>
         <label class="field"><span>Password di connessione ai dispositivi</span><input class="input mono" type="password" name="connectionPassword" placeholder="@SecretHint(SettingKeys.RustDeskConnectionPassword)" autocomplete="new-password" /></label>
+        <label class="field span-all">
+            <span>Percorso del client RustDesk sui PC (facoltativo)</span>
+            <input class="input mono" name="clientPath" value="@Model.RustDesk.ClientPath" placeholder="Automatico: link rustdesk:// registrato, C:\Program Files\RustDesk o una cartella con &quot;rustdesk&quot; nel nome" autocomplete="off" spellcheck="false" />
+            <small class="muted">Per i client personalizzati di RustDesk Server Pro. Il Launcher lo usa solo se il file esiste dentro Programmi; un criterio Intune (RustDeskPath) ha la precedenza.</small>
+        </label>
         <label class="check span-all"><input type="checkbox" name="clearPassword" value="true" /><span>Cancella la password di connessione salvata</span></label>
         <div class="actions span-all">
             <button class="btn btn-primary" type="submit">Salva</button>

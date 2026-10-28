@@ -388,3 +388,33 @@ public sealed class OfflineCacheTests
         Assert.Empty(cache.Items);
     }
 }
+
+public sealed class RustDeskClientPathTests
+{
+    private static readonly string Root = Path.Combine(Path.GetTempPath(), "Programmi-di-prova");
+
+    [Fact]
+    public void Accepts_only_executables_inside_program_files()
+    {
+        Assert.True(RustDeskClientPath.IsAllowed(Path.Combine(Root, "Azienda-RustDesk-Client", "client.exe"), [Root]));
+        Assert.True(RustDeskClientPath.IsAllowed(Path.Combine(Root, "RustDesk", "RUSTDESK.EXE"), [Root]));
+
+        Assert.False(RustDeskClientPath.IsAllowed(null, [Root]));
+        Assert.False(RustDeskClientPath.IsAllowed("rustdesk.exe", [Root]));
+        Assert.False(RustDeskClientPath.IsAllowed(Path.Combine(Root, "RustDesk", "rustdesk.bat"), [Root]));
+        Assert.False(RustDeskClientPath.IsAllowed(Path.Combine(Path.GetTempPath(), "Scaricati", "rustdesk.exe"), [Root]));
+        // ".." non permette di uscire dalla cartella ammessa.
+        Assert.False(RustDeskClientPath.IsAllowed(Path.Combine(Root, "..", "Scaricati", "rustdesk.exe"), [Root]));
+        // Una cartella che inizia con lo stesso nome non è la stessa cartella.
+        Assert.False(RustDeskClientPath.IsAllowed(Root + "-falsa" + Path.DirectorySeparatorChar + "rustdesk.exe", [Root]));
+    }
+
+    [Fact]
+    public void Gateway_carries_the_client_path_from_the_portal()
+    {
+        var info = System.Text.Json.JsonSerializer.Deserialize<GatewayInfo>(
+            """{"id":"123456789","password":"x","clientPath":"C:\\Program Files\\RustDesk\\rustdesk.exe"}""",
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
+        Assert.Equal(@"C:\Program Files\RustDesk\rustdesk.exe", info.ClientPath);
+    }
+}

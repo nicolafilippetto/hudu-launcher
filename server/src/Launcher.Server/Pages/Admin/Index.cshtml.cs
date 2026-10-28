@@ -15,6 +15,7 @@ public sealed class IndexModel(AppDbContext db, SettingsService settings, SyncSe
     public bool SyncRunning => sync.IsRunning;
     public List<ChecklistItem> Checklist { get; } = [];
     public int CompaniesWithoutGateway { get; private set; }
+    public bool RustDeskEnabled => settings.RustDesk.Enabled;
     public int AssetsWithOverrides { get; private set; }
     public int ConnectionsLast7Days { get; private set; }
     public string TimeZone => settings.Portal.TimeZone;
@@ -54,10 +55,17 @@ public sealed class IndexModel(AppDbContext db, SettingsService settings, SyncSe
 
         Checklist.Add(new ChecklistItem(settings.Hudu.IsConfigured, "Hudu",
             settings.Hudu.IsConfigured ? settings.Hudu.BaseUrl! : "Indirizzo e chiave API da impostare", "/Admin/Settings#hudu"));
-        Checklist.Add(new ChecklistItem(settings.RustDesk.IsApiConfigured, "Rubrica RustDesk",
-            settings.RustDesk.IsApiConfigured ? settings.RustDesk.ApiUrl! : "Facoltativa ma consigliata: abbina i dispositivi agli asset", "/Admin/Settings#rustdesk"));
-        Checklist.Add(new ChecklistItem(!string.IsNullOrEmpty(settings.RustDesk.ConnectionPassword), "Password di connessione RustDesk",
-            string.IsNullOrEmpty(settings.RustDesk.ConnectionPassword) ? "Senza, RustDesk la chiederà a ogni connessione" : "Impostata", "/Admin/Settings#rustdesk"));
+        if (settings.RustDesk.Enabled)
+        {
+            Checklist.Add(new ChecklistItem(settings.RustDesk.IsApiConfigured, "Rubrica RustDesk",
+                settings.RustDesk.IsApiConfigured ? settings.RustDesk.ApiUrl! : "Facoltativa ma consigliata: abbina i dispositivi agli asset", "/Admin/Settings#rustdesk"));
+            Checklist.Add(new ChecklistItem(!string.IsNullOrEmpty(settings.RustDesk.ConnectionPassword), "Password di connessione RustDesk",
+                string.IsNullOrEmpty(settings.RustDesk.ConnectionPassword) ? "Senza, RustDesk la chiederà a ogni connessione" : "Impostata", "/Admin/Settings#rustdesk"));
+        }
+        else
+        {
+            Checklist.Add(new ChecklistItem(true, "RustDesk", "Spento: solo connessioni dirette (dal cliente o in VPN)", "/Admin/Settings#rustdesk"));
+        }
         Checklist.Add(new ChecklistItem(enabledLayouts > 0, "Layout collegabili",
             enabledLayouts > 0 ? $"{enabledLayouts} layout abilitati" : "Nessun layout abilitato: lancia una sincronizzazione e abilitali", "/Admin/Layouts"));
         Checklist.Add(new ChecklistItem(usableBreakGlass > 1, "Accessi di emergenza",

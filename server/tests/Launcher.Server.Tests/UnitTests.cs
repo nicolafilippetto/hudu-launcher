@@ -7,6 +7,7 @@ using Launcher.Server.Integrations;
 using Launcher.Server.Inventory;
 using Launcher.Server.Pages;
 using Launcher.Server.Security;
+using Launcher.Server.Settings;
 
 namespace Launcher.Server.Tests;
 
@@ -444,5 +445,47 @@ public sealed class EntraCredentialTests
             IssuerSigningKey = new Microsoft.IdentityModel.Tokens.X509SecurityKey(publicCertificate),
         }).GetAwaiter().GetResult();
         Assert.True(result.IsValid, result.Exception?.Message);
+    }
+}
+
+public sealed class RustDeskOptionalTests
+{
+    [Theory]
+    [InlineData(@"C:\Program Files\RustDesk\rustdesk.exe", true)]
+    [InlineData(@"D:\Programmi\Azienda-RustDesk-Client\client.EXE", true)]
+    [InlineData(@"rustdesk.exe", false)]
+    [InlineData(@"C:\Program Files\RustDesk\rustdesk.bat", false)]
+    [InlineData(@"C:\Program Files\..\Users\x\rustdesk.exe", false)]
+    [InlineData(@"\\server\share\rustdesk.exe", false)]
+    [InlineData(@"C:\Program Files\Rust|Desk\rustdesk.exe", false)]
+    public void Client_path_must_be_a_full_windows_exe_path(string path, bool valid) =>
+        Assert.Equal(valid, RustDeskSettings.IsValidClientPath(path));
+
+    [Fact]
+    public void Without_rustdesk_there_are_no_gateways_and_no_gateway_issues()
+    {
+        var asset = new CachedAsset { Id = 1, CompanyId = 1, LayoutId = 28, LayoutName = "VM", Name = "SRV01", IpamAddresses = "10.0.0.10", OperatingSystem = "Windows Server 2022" };
+        var ctx = new ResolutionContext
+        {
+            Companies = new Dictionary<int, CachedCompany> { [1] = new() { Id = 1, Name = "Cliente" } },
+            Layouts = new Dictionary<int, LayoutConfig>(),
+            AssetSettings = new Dictionary<int, AssetSetting>(),
+            Extras = Array.Empty<ExtraConnection>().ToLookup(e => e.AssetId),
+            CompanySettings = new Dictionary<int, CompanySetting> { [1] = new() { CompanyId = 1, GatewayPeerId = "123456789" } },
+            Passwords = new Dictionary<int, CachedPassword>(),
+            PasswordsByAsset = Array.Empty<CachedPassword>().ToLookup(p => p.AssetId!.Value),
+            Peers = new Dictionary<string, CachedPeer> { ["999"] = new() { Id = "999", Hostname = "SRV01" } },
+            PeersByName = ConnectionResolver.IndexPeersByName([new CachedPeer { Id = "999", Hostname = "SRV01" }]),
+            HuduCompanyGateways = new Dictionary<int, string>(),
+            Favorites = new HashSet<int>(),
+            RustDeskEnabled = false,
+        };
+        var primary = ConnectionResolver.Resolve(asset, ctx).Primary!;
+        Assert.Null(primary.GatewayPeerId);
+        Assert.False(primary.CanConnect);
+        Assert.True(primary.CanConnectDirect);
+        // Nemmeno RustDesk sull'asset stesso (che porterebbe a "localhost").
+        Assert.Equal("10.0.0.10", primary.Host);
+        Assert.DoesNotContain(primary.Issues, i => i.Contains("gateway", StringComparison.OrdinalIgnoreCase));
     }
 }

@@ -50,8 +50,10 @@ public sealed class RustDeskTunnels
     /// <summary>Scatta quando i tunnel vengono riaperti: le sessioni aperte possono riconnettersi.</summary>
     public event Action? Restarted;
 
-    public async Task<Tunnel> OpenAsync(string peerId, string? password, string remoteHost, int remotePort, IProgress<string>? progress, CancellationToken ct)
+    public async Task<Tunnel> OpenAsync(string peerId, string? password, string remoteHost, int remotePort, IProgress<string>? progress,
+        string? portalClientPath, CancellationToken ct)
     {
+        UsePortalClientPath(portalClientPath);
         var exe = LocateExecutable();
         var rule = new TunnelRule(FreePort(), remoteHost, remotePort);
         PeerConfigFile.Validate(rule);
@@ -237,14 +239,47 @@ public sealed class RustDeskTunnels
 
     public static string LocateExecutable() =>
         TryLocateExecutable() ?? throw new RustDeskException(
-            "Client RustDesk non trovato. Installalo, oppure indica il percorso nel registro " +
-            @"(HKCU\Software\HuduLauncher, valore RustDeskPath).");
+            "Client RustDesk non trovato. Installalo, oppure indica il percorso nel portale (Impostazioni → RustDesk) " +
+            @"o nel registro (HKCU\Software\HuduLauncher, valore RustDeskPath).");
+
+    /// <summary>Percorso indicato dall'admin del portale, già verificato (dentro Programmi ed esistente).</summary>
+    private static string? _portalClientPath;
+
+    private static void UsePortalClientPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            _portalClientPath = null;
+            return;
+        }
+
+        var roots = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+        };
+        if (RustDeskClientPath.IsAllowed(path, roots) && File.Exists(path))
+        {
+            _portalClientPath = path;
+        }
+        else
+        {
+            _portalClientPath = null;
+            Log.Info("Percorso del client RustDesk indicato dal portale ignorato (non è un .exe esistente in Programmi): " + path);
+        }
+    }
 
     private static string? TryLocateExecutable()
     {
+        // Prima il criterio del PC (Intune/registro), poi il portale, poi il rilevamento automatico.
         if (ConnectorSettings.RustDeskPath is { } configured && File.Exists(configured))
         {
             return configured;
+        }
+
+        if (_portalClientPath is { } portal && File.Exists(portal))
+        {
+            return portal;
         }
 
         // Il programma registrato per i link rustdesk:// (vale anche per i client personalizzati).

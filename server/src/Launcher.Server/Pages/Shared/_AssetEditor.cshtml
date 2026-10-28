@@ -1,3 +1,4 @@
+@inject Launcher.Server.Pages.LayoutInfo Info
 @model EditorViewModel
 @{
     var asset = Model.Asset.Asset;
@@ -50,9 +51,12 @@
         <div><span>IP nell'IPAM di Hudu</span><strong class="mono" title="@string.Join(", ", ipam)">@(ipam.Count == 0 ? "—" : string.Join(", ", ipam))</strong></div>
         <div><span>Sistema operativo</span><strong>@(asset.OperatingSystem ?? "—")</strong></div>
         <div><span>Hostname</span><strong class="mono">@(asset.Hostname ?? "—")</strong></div>
-        <div><span>ID RustDesk in Hudu</span><strong class="mono">@(asset.RustDeskId ?? "—")</strong></div>
+        @if (Info.RustDeskEnabled)
+        {
+            <div><span>ID RustDesk in Hudu</span><strong class="mono">@(asset.RustDeskId ?? "—")</strong></div>
+        }
     </div>
-    <p class="muted small">I campi vuoti usano i dati di Hudu e della rubrica RustDesk. Compila solo ciò che va corretto.</p>
+    <p class="muted small">I campi vuoti usano i dati di Hudu@(Info.RustDeskEnabled ? " e della rubrica RustDesk" : ""). Compila solo ciò che va corretto.</p>
     @if (ipam.Count == 0)
     {
         <div class="alert alert-warn">
@@ -116,10 +120,18 @@
                     }
                 </select>
             </label>
-            <label class="field">
-                <span>Gateway RustDesk</span>
-                <input class="input mono" name="Gateway" list="peer-list" data-peer-input value="@setting?.GatewayPeerId" placeholder="@autoGateway" autocomplete="off" spellcheck="false" />
-            </label>
+            @if (Info.RustDeskEnabled)
+            {
+                <label class="field">
+                    <span>Gateway RustDesk</span>
+                    <input class="input mono" name="Gateway" list="peer-list" data-peer-input value="@setting?.GatewayPeerId" placeholder="@autoGateway" autocomplete="off" spellcheck="false" />
+                </label>
+            }
+            else
+            {
+                @* RustDesk spento: il gateway salvato resta, se un giorno si riattiva. *@
+                <input type="hidden" name="Gateway" value="@setting?.GatewayPeerId" />
+            }
         </div>
         <div class="grid grid-2">
             <label class="field">
@@ -166,7 +178,7 @@
     <fieldset class="card-fieldset">
         <legend>Connessioni aggiuntive</legend>
         <p class="muted small">Ad esempio l'interfaccia web di gestione, una seconda porta SSH o un altro indirizzo dello stesso oggetto.</p>
-        <div class="extras" data-extras>
+        <div class="extras @(Info.RustDeskEnabled ? "" : "no-gateway")" data-extras>
             @for (var i = 0; i < Model.Extras.Count; i++)
             {
                 var extra = Model.Extras[i];
@@ -189,7 +201,7 @@
                             <option value="@p.Id" selected="@(extra.PasswordId == p.Id)">@PasswordLabel(p)</option>
                         }
                     </select>
-                    <input class="input mono" name="Extras[@i].Gateway" value="@extra.GatewayPeerId" list="peer-list" data-peer-input placeholder="Gateway (auto)" aria-label="Gateway" />
+                    <input class="input mono" type="@(Info.RustDeskEnabled ? "text" : "hidden")" name="Extras[@i].Gateway" value="@extra.GatewayPeerId" list="peer-list" data-peer-input placeholder="Gateway (auto)" aria-label="Gateway" />
                     <button type="button" class="btn btn-ghost btn-icon" data-extra-delete title="Rimuovi"><svg><use href="#i-trash" /></svg></button>
                 </div>
             }
@@ -213,7 +225,7 @@
                         <option value="@p.Id">@PasswordLabel(p)</option>
                     }
                 </select>
-                <input class="input mono" name="Extras[__i__].Gateway" list="peer-list" data-peer-input placeholder="Gateway (auto)" aria-label="Gateway" />
+                <input class="input mono" type="@(Info.RustDeskEnabled ? "text" : "hidden")" name="Extras[__i__].Gateway" list="peer-list" data-peer-input placeholder="Gateway (auto)" aria-label="Gateway" />
                 <button type="button" class="btn btn-ghost btn-icon" data-extra-delete title="Rimuovi"><svg><use href="#i-trash" /></svg></button>
             </div>
         </template>

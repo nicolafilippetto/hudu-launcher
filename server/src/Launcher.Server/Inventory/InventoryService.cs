@@ -8,7 +8,7 @@ public sealed record CompanySummary(int Id, string Name, string? Nickname, int A
 public sealed record CompanyView(CachedCompany Company, string? GatewayPeerId, string? GatewaySource, IReadOnlyList<IGrouping<string, ResolvedAsset>> Groups);
 
 /// <summary>Letture dell'inventario in cache per il portale e per il connettore.</summary>
-public sealed class InventoryService(AppDbContext db)
+public sealed class InventoryService(AppDbContext db, Settings.SettingsService settings)
 {
     public const int SearchLimit = 60;
 
@@ -163,6 +163,7 @@ public sealed class InventoryService(AppDbContext db)
             PeersByName = ConnectionResolver.IndexPeersByName(peers),
             HuduCompanyGateways = huduGateways,
             Favorites = favorites,
+            RustDeskEnabled = settings.RustDesk.Enabled,
         };
     }
 }

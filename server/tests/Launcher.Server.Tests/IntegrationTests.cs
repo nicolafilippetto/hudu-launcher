@@ -955,6 +955,51 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
         }
     }
 
+    [Fact]
+    public async Task Without_rustdesk_only_direct_connections_exist()
+    {
+        var client = await SignedInClientAsync("tecnico@example.com");
+        await SetSettingAsync(SettingKeys.RustDeskEnabled, "False");
+        try
+        {
+            var page = await client.GetStringAsync(new Uri("/?c=1", UriKind.Relative), TestContext.Current.CancellationToken);
+            Assert.Contains("data-rustdesk=\"off\"", page, StringComparison.Ordinal);
+            Assert.DoesNotContain("gateway-box", page, StringComparison.Ordinal);
+            Assert.DoesNotContain("Nessun gateway RustDesk", page, StringComparison.Ordinal);
+            var editor = await client.GetStringAsync(new Uri("/?handler=Editor&assetId=10", UriKind.Relative), TestContext.Current.CancellationToken);
+            Assert.Contains("type=\"hidden\" name=\"Gateway\"", editor, StringComparison.Ordinal);
+
+            // Anche chiedendo il jump host, il biglietto è per la connessione diretta.
+            var ticket = await CreateTicketAsync(client);
+            var redeem = await RedeemAsync(ticket, factory.CreateConnectorToken("tecnico@example.com"));
+            Assert.Equal(HttpStatusCode.OK, redeem.StatusCode);
+            var body = await redeem.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+            Assert.Equal(JsonValueKind.Null, body.GetProperty("gateway").ValueKind);
+        }
+        finally
+        {
+            await SetSettingAsync(SettingKeys.RustDeskEnabled, "True");
+        }
+    }
+
+    [Fact]
+    public async Task Gateway_connection_tells_the_launcher_which_rustdesk_client_to_use()
+    {
+        var client = await SignedInClientAsync("tecnico@example.com");
+        await SetSettingAsync(SettingKeys.RustDeskClientPath, @"C:\Program Files\Azienda-RustDesk-Client\client.exe");
+        try
+        {
+            var ticket = await CreateTicketAsync(client);
+            var redeem = await RedeemAsync(ticket, factory.CreateConnectorToken("tecnico@example.com"));
+            var gateway = (await redeem.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken)).GetProperty("gateway");
+            Assert.Equal(@"C:\Program Files\Azienda-RustDesk-Client\client.exe", gateway.GetProperty("clientPath").GetString());
+        }
+        finally
+        {
+            await SetSettingAsync(SettingKeys.RustDeskClientPath, "");
+        }
+    }
+
     private async Task SetUserStatusAsync(string email, PortalUserStatus status)
     {
         using var scope = factory.Services.CreateScope();

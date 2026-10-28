@@ -118,7 +118,7 @@ public sealed class SyncService(
 
             List<CachedPeer>? peers = null;
             string? peerError = null;
-            if (settings.RustDesk.IsApiConfigured)
+            if (settings.RustDesk.UsesAddressBook)
             {
                 try
                 {

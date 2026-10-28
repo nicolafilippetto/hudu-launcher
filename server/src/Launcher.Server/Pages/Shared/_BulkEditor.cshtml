@@ -1,3 +1,4 @@
+@inject Launcher.Server.Pages.LayoutInfo Info
 @model BulkEditorViewModel
 @{
     var form = Model.Form;
@@ -40,6 +41,8 @@
 
     <fieldset class="card-fieldset">
         <legend>Connessione principale</legend>
+        @if (Info.RustDeskEnabled)
+        {
         <div class="grid grid-2">
             <label class="field">
                 <span>Gateway RustDesk</span>
@@ -54,6 +57,7 @@
                 <input class="input mono" name="Gateway" list="peer-list" data-peer-input data-bulk-gateway value="@form.Gateway" placeholder="ID RustDesk o nome dalla rubrica" autocomplete="off" spellcheck="false" />
             </label>
         </div>
+        }
         <div class="grid grid-2">
             <label class="field">
                 <span>Credenziale (da Hudu)</span>

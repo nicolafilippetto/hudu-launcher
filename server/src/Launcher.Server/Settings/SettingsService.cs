@@ -31,6 +31,10 @@ public static class SettingKeys
     public const string RustDeskApiToken = "rustdesk.apiToken";
     public const string RustDeskAddressBook = "rustdesk.addressBook";
     public const string RustDeskConnectionPassword = "rustdesk.connectionPassword";
+    /// <summary>"True"/"False": jump host RustDesk attivo. Se manca, attivo solo se RustDesk è configurato.</summary>
+    public const string RustDeskEnabled = "rustdesk.enabled";
+    /// <summary>Percorso del client RustDesk sui PC (client personalizzati); vuoto = rilevamento automatico.</summary>
+    public const string RustDeskClientPath = "rustdesk.clientPath";
 
     public const string EntraTenantId = "entra.tenantId";
     public const string EntraClientId = "entra.clientId";
@@ -64,9 +68,27 @@ public sealed record HuduSettings(string? BaseUrl, string? ApiKey, int SyncMinut
     public bool IsConfigured => !string.IsNullOrWhiteSpace(BaseUrl) && !string.IsNullOrWhiteSpace(ApiKey);
 }
 
-public sealed record RustDeskSettings(string? ApiUrl, string? ApiToken, string? AddressBook, string? ConnectionPassword)
+public sealed record RustDeskSettings(
+    string? ApiUrl,
+    string? ApiToken,
+    string? AddressBook,
+    string? ConnectionPassword,
+    bool Enabled = true,
+    string? ClientPath = null)
 {
     public bool IsApiConfigured => !string.IsNullOrWhiteSpace(ApiUrl) && !string.IsNullOrWhiteSpace(ApiToken);
+
+    /// <summary>Rubrica letta solo se RustDesk è attivo e l'API è configurata.</summary>
+    public bool UsesAddressBook => Enabled && IsApiConfigured;
+
+    /// <summary>
+    /// Percorso Windows assoluto di un .exe, senza "..": il Launcher lo accetta poi solo se il file
+    /// esiste dentro Programmi, così il portale non può fargli avviare un programma qualsiasi.
+    /// </summary>
+    public static bool IsValidClientPath(string path) =>
+        path.Length <= 260
+        && System.Text.RegularExpressions.Regex.IsMatch(path, @"^[A-Za-z]:\\[^<>:""|?*\r\n]+\.exe$", System.Text.RegularExpressions.RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100))
+        && !path.Split('\\').Contains("..");
 }
 
 public sealed record EntraSettings(
@@ -223,11 +245,23 @@ public sealed class SettingsService(IDbContextFactory<AppDbContext> dbFactory, I
         GetInt(SettingKeys.HuduSyncMinutes, 15, 5, 1440),
         GetInt(SettingKeys.HuduPageSize, 500, 25, 1000));
 
-    public RustDeskSettings RustDesk => new(
-        Get(SettingKeys.RustDeskApiUrl),
-        Get(SettingKeys.RustDeskApiToken),
-        Get(SettingKeys.RustDeskAddressBook),
-        Get(SettingKeys.RustDeskConnectionPassword));
+    public RustDeskSettings RustDesk
+    {
+        get
+        {
+            var apiUrl = Get(SettingKeys.RustDeskApiUrl);
+            var connectionPassword = Get(SettingKeys.RustDeskConnectionPassword);
+            // Senza scelta esplicita: attivo se RustDesk è configurato, altrimenti solo connessioni dirette.
+            var configured = !string.IsNullOrWhiteSpace(apiUrl) || !string.IsNullOrEmpty(connectionPassword);
+            return new RustDeskSettings(
+                apiUrl,
+                Get(SettingKeys.RustDeskApiToken),
+                Get(SettingKeys.RustDeskAddressBook),
+                connectionPassword,
+                GetBool(SettingKeys.RustDeskEnabled, configured),
+                Get(SettingKeys.RustDeskClientPath));
+        }
+    }
 
     public EntraSettings Entra => new(
         Get(SettingKeys.EntraTenantId),

@@ -58,7 +58,7 @@ il portale a tutto il tenant.
 
 Documentare l'esistenza della chiave (scopo, data, rotazione) **senza** il valore.
 
-### RustDesk Server Pro
+### RustDesk Server Pro (facoltativo: senza RustDesk il portale usa solo connessioni dirette)
 
 **Console web → Settings → Tokens → Create**
 - Permesso **Address Book: lettura** (eventualmente anche *Device: lettura*)
@@ -239,7 +239,10 @@ leggono più (vanno reinseriti dalla sezione admin).
      mese prima della scadenza la pagina di stato lo segnala; il rinnovo è lo stesso percorso e
      la credenziale attuale resta valida finché il nuovo certificato non è attivo.
    - *Hudu*: indirizzo `https://yourcompany.huducloud.com` e chiave → **Prova**
-   - *RustDesk*: indirizzo API, token, password di connessione → **Prova**
+   - *RustDesk* (facoltativo): **Usa RustDesk come jump host**, indirizzo API, token, password di
+     connessione → **Prova**. Per un client personalizzato (RustDesk Server Pro) si può indicare il
+     percorso dell'eseguibile; il Launcher lo usa solo se il file esiste dentro Programmi. Con
+     RustDesk spento il portale nasconde gateway e rubrica e apre solo connessioni dirette.
    - *Portale*: reti ammesse per l'accesso admin di emergenza (solo reti interne o VPN).
      L'opzione *connessioni senza Microsoft 365* lascia usare il Launcher agli admin entrati con
      utente locale: biglietto monouso valido solo dallo stesso IP del browser, registrato come
@@ -314,7 +317,7 @@ Chiave `HKCU\Software\Policies\HuduLauncher` (o `HKLM\...` per tutto il PC):
 | Valore | Tipo | Uso |
 |---|---|---|
 | `PortalUrl` | Stringa | Indirizzo del portale, se non inserito in compilazione |
-| `RustDeskPath` | Stringa | Percorso del client RustDesk, se non è trovato da solo (link `rustdesk://` registrato, `C:\Program Files\RustDesk` o una cartella con "rustdesk" nel nome) |
+| `RustDeskPath` | Stringa | Percorso del client RustDesk, se non è trovato da solo (link `rustdesk://` registrato, `C:\Program Files\RustDesk` o una cartella con "rustdesk" nel nome). Ha la precedenza sul percorso impostato nel portale |
 
 ### Niente richiesta "Aprire hudulauncher?" nel browser
 
