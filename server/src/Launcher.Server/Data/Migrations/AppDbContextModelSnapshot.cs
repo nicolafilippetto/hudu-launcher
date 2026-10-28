@@ -414,6 +414,62 @@ namespace Launcher.Server.Data.Migrations
                     b.ToTable("LayoutConfigs");
                 });
 
+            modelBuilder.Entity("Launcher.Server.Data.PortalUser", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("DecidedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DecidedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DisplayName")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("FirstSeenAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsAdmin")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastIp")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("LastLoginAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ObjectId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TenantId", "ObjectId")
+                        .IsUnique();
+
+                    b.ToTable("PortalUsers");
+                });
+
             modelBuilder.Entity("Launcher.Server.Data.Setting", b =>
                 {
                     b.Property<string>("Key")

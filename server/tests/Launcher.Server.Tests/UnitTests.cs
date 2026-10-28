@@ -412,3 +412,37 @@ public sealed class IpamTests
         Assert.Equal((null, null), ConnectionResolver.ResolveHost(null, Asset(null)));
     }
 }
+
+public sealed class EntraCredentialTests
+{
+    [Fact]
+    public void Assertion_is_signed_with_the_certificate_as_entra_expects()
+    {
+        var (certificate, key) = EntraCredential.Generate("Hudu Launcher (test)", TimeProvider.System);
+        var info = EntraCredential.Describe(certificate)!;
+        Assert.True(info.NotAfter > DateTimeOffset.UtcNow.AddYears(1));
+        Assert.False(info.ExpiresSoon(TimeProvider.System));
+
+        var tenant = Guid.NewGuid().ToString();
+        var client = Guid.NewGuid().ToString();
+        var assertion = EntraCredential.CreateAssertion(tenant, client, certificate, key, TimeProvider.System);
+        var jwt = new Microsoft.IdentityModel.JsonWebTokens.JsonWebToken(assertion);
+        Assert.Equal("PS256", jwt.Alg);
+        Assert.Equal(Microsoft.IdentityModel.Tokens.Base64UrlEncoder.Encode(System.Security.Cryptography.SHA256.HashData(info.RawData)),
+            jwt.GetHeaderValue<string>("x5t#S256"));
+        Assert.Equal(client, jwt.Issuer);
+        Assert.Equal(client, jwt.Subject);
+        Assert.Equal($"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token", Assert.Single(jwt.Audiences));
+        Assert.True(jwt.ValidTo - jwt.ValidFrom <= TimeSpan.FromMinutes(5));
+
+        // La firma si verifica con la sola parte pubblica, quella caricata in Entra.
+        using var publicCertificate = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadCertificate(info.RawData);
+        var result = new Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler().ValidateTokenAsync(assertion, new Microsoft.IdentityModel.Tokens.TokenValidationParameters
+        {
+            ValidIssuer = client,
+            ValidAudience = $"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+            IssuerSigningKey = new Microsoft.IdentityModel.Tokens.X509SecurityKey(publicCertificate),
+        }).GetAwaiter().GetResult();
+        Assert.True(result.IsValid, result.Exception?.Message);
+    }
+}

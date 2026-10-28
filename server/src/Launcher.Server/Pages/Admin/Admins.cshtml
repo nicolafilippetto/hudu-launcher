@@ -1,39 +1,33 @@
 @page
 @model Launcher.Server.Pages.Admin.AdminsModel
 @{
-    ViewData["Title"] = "Amministratori";
+    ViewData["Title"] = "Accessi di emergenza";
     ViewData["AdminSection"] = "admins";
 }
 <div class="page-head">
     <div>
-        <h1>Amministratori</h1>
+        <h1>Accessi di emergenza</h1>
         <p class="muted">
-            Chi accede con Microsoft 365 con una di queste email è amministratore, tutti gli altri sono tecnici.
-            L'accesso locale (password + app di autenticazione) serve solo per le emergenze ed è limitato alle reti ammesse.
+            Account locali (password + app di autenticazione), sempre amministratori, per entrare quando Microsoft 365
+            non funziona e per approvare i primi utenti. Funzionano solo dalle reti ammesse. Gli amministratori che
+            entrano con Microsoft 365 si gestiscono in <a href="/Admin/Users">Utenti</a>.
         </p>
     </div>
 </div>
 
 <section class="card">
-    <h2 class="card-title">Aggiungi amministratore</h2>
-    <form method="post" asp-page-handler="Add" class="grid grid-3" data-breakglass-form>
-        <label class="field"><span>Email (Microsoft 365)</span><input class="input" type="email" name="email" required autocomplete="off" /></label>
+    <h2 class="card-title">Aggiungi accesso di emergenza</h2>
+    <form method="post" asp-page-handler="Add" class="grid grid-3">
+        <label class="field"><span>Email (nome utente)</span><input class="input" type="email" name="email" required autocomplete="off" /></label>
         <label class="field"><span>Nome</span><input class="input" name="displayName" autocomplete="off" /></label>
         <div></div>
-        <label class="check span-all">
-            <input type="checkbox" name="createLocal" value="true" checked data-breakglass-toggle />
-            <span>
-                Crea anche l'accesso locale di emergenza (break-glass)
-                <small class="muted block">Utente locale con password e app di autenticazione, per entrare se Microsoft 365 non funziona. Solo dalle reti ammesse.</small>
-            </span>
-        </label>
-        <label class="field span-2" data-breakglass-field>
-            <span>Password di emergenza (almeno 14 caratteri, maiuscole, minuscole e numeri)</span>
+        <label class="field span-2">
+            <span>Password (almeno 14 caratteri, maiuscole, minuscole e numeri)</span>
             <span class="input-row">
-                <input class="input mono" type="text" name="password" minlength="14" autocomplete="new-password" spellcheck="false" required data-breakglass-password />
+                <input class="input mono" type="text" name="password" minlength="14" autocomplete="new-password" spellcheck="false" required />
                 <button type="button" class="btn btn-secondary" data-generate-password>Genera</button>
             </span>
-            <small class="muted">Salvala subito in Hudu (Password dell'azienda) e consegnala all'interessato: qui non sarà più visibile.</small>
+            <small class="muted">Salvala subito in un luogo sicuro e consegnala all'interessato: qui non sarà più visibile. Al primo accesso configurerà l'app di autenticazione.</small>
         </label>
         <div class="actions align-end"><button class="btn btn-primary" type="submit"><svg><use href="#i-plus" /></svg>Aggiungi</button></div>
     </form>
@@ -53,7 +47,7 @@
                     <td>
                         @if (admin.Local is null)
                         {
-                            <span class="muted">non attivo</span>
+                            <span class="chip chip-warn">password da impostare</span>
                         }
                         else
                         {
@@ -71,7 +65,7 @@
                             <header class="modal-head">
                                 <div>
                                     <h2>@admin.Entry.Email</h2>
-                                    <p class="muted small">@(admin.Local is null ? "Solo accesso con Microsoft 365" : "Accesso locale di emergenza attivo")</p>
+                                    <p class="muted small">@(admin.Local is null ? "Nessuna password impostata: non utilizzabile" : "Accesso locale di emergenza attivo")</p>
                                 </div>
                                 <button type="button" class="btn btn-ghost btn-icon" data-close-modal title="Chiudi"><svg><use href="#i-x" /></svg></button>
                             </header>
@@ -102,9 +96,9 @@
                                         <button class="btn btn-ghost btn-sm" type="submit">Rimuovi accesso locale</button>
                                     </form>
                                 }
-                                <form method="post" asp-page-handler="Remove" data-confirm="Togliere i permessi di amministratore a @admin.Entry.Email?">
+                                <form method="post" asp-page-handler="Remove" data-confirm="Eliminare l'accesso di emergenza di @admin.Entry.Email?">
                                     <input type="hidden" name="id" value="@admin.Entry.Id" />
-                                    <button class="btn btn-danger btn-sm" type="submit"><svg><use href="#i-trash" /></svg>Rimuovi amministratore</button>
+                                    <button class="btn btn-danger btn-sm" type="submit"><svg><use href="#i-trash" /></svg>Elimina accesso di emergenza</button>
                                 </form>
                             </div>
                         </dialog>

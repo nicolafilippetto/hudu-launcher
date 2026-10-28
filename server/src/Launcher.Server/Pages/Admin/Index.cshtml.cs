@@ -23,7 +23,10 @@ public sealed class IndexModel(AppDbContext db, SettingsService settings, SyncSe
     {
         State = await db.SyncStates.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct);
         var enabledLayouts = await db.LayoutConfigs.CountAsync(l => l.Enabled, ct);
-        var admins = await db.Admins.CountAsync(ct);
+        var breakGlass = await db.Admins.Select(a => a.Email.ToUpper()).ToListAsync(ct);
+        var usableBreakGlass = await db.Users.CountAsync(u => u.NormalizedEmail != null && breakGlass.Contains(u.NormalizedEmail), ct);
+        var entraAdmins = await db.PortalUsers.CountAsync(u => u.Status == PortalUserStatus.Approved && u.IsAdmin, ct);
+        var pending = await db.PortalUsers.CountAsync(u => u.Status == PortalUserStatus.Pending, ct);
 
         if (NetworkAllowList.HasUntrustedProxy(HttpContext))
         {
@@ -39,7 +42,16 @@ public sealed class IndexModel(AppDbContext db, SettingsService settings, SyncSe
         }
 
         Checklist.Add(new ChecklistItem(settings.Entra.IsConfigured, "Microsoft 365",
-            settings.Entra.IsConfigured ? "Configurato" : "Tenant, client ID e segreto da impostare", "/Admin/Settings#entra"));
+            settings.Entra.IsConfigured ? "Configurato" : "Tenant, client ID e credenziale (certificato o segreto) da impostare", "/Admin/Settings#entra"));
+        if (settings.Entra.IsConfigured)
+        {
+            var certificate = EntraCredential.Describe(settings.Entra.Certificate);
+            Checklist.Add(certificate is null
+                ? new ChecklistItem(false, "Credenziale Microsoft 365", "Segreto client: consigliato passare al certificato", "/Admin/Settings#entra")
+                : new ChecklistItem(certificate.NotAfter - DateTimeOffset.UtcNow > TimeSpan.FromDays(30), "Credenziale Microsoft 365",
+                    $"Certificato, scade il {certificate.NotAfter:dd/MM/yyyy}", "/Admin/Settings#entra"));
+        }
+
         Checklist.Add(new ChecklistItem(settings.Hudu.IsConfigured, "Hudu",
             settings.Hudu.IsConfigured ? settings.Hudu.BaseUrl! : "Indirizzo e chiave API da impostare", "/Admin/Settings#hudu"));
         Checklist.Add(new ChecklistItem(settings.RustDesk.IsApiConfigured, "Rubrica RustDesk",
@@ -48,8 +60,14 @@ public sealed class IndexModel(AppDbContext db, SettingsService settings, SyncSe
             string.IsNullOrEmpty(settings.RustDesk.ConnectionPassword) ? "Senza, RustDesk la chiederà a ogni connessione" : "Impostata", "/Admin/Settings#rustdesk"));
         Checklist.Add(new ChecklistItem(enabledLayouts > 0, "Layout collegabili",
             enabledLayouts > 0 ? $"{enabledLayouts} layout abilitati" : "Nessun layout abilitato: lancia una sincronizzazione e abilitali", "/Admin/Layouts"));
-        Checklist.Add(new ChecklistItem(admins > 1, "Amministratori",
-            admins > 1 ? $"{admins} amministratori" : "Un solo amministratore: aggiungine un secondo", "/Admin/Admins"));
+        Checklist.Add(new ChecklistItem(usableBreakGlass > 1, "Accessi di emergenza",
+            usableBreakGlass > 1 ? $"{usableBreakGlass} accessi di emergenza" : "Uno solo: aggiungine un secondo, per non restare chiusi fuori", "/Admin/Admins"));
+        Checklist.Add(new ChecklistItem(entraAdmins > 0, "Amministratori con Microsoft 365",
+            entraAdmins > 0 ? (entraAdmins == 1 ? "1 amministratore" : $"{entraAdmins} amministratori") : "Nessuno: entra con Microsoft 365 e approva il tuo utente come amministratore", "/Admin/Users"));
+        if (pending > 0)
+        {
+            Checklist.Add(new ChecklistItem(false, "Richieste di accesso", pending == 1 ? "1 utente in attesa di approvazione" : $"{pending} utenti in attesa di approvazione", "/Admin/Users"));
+        }
 
         var companiesWithAssets = await db.Assets.Where(a => a.IsConnectable).Select(a => a.CompanyId).Distinct().ToListAsync(ct);
         var withGateway = (await db.CompanySettings.Where(c => c.GatewayPeerId != null).Select(c => c.CompanyId).ToListAsync(ct))

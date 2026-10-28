@@ -1,0 +1,152 @@
+@page
+@model Launcher.Server.Pages.Admin.UsersModel
+@{
+    ViewData["Title"] = "Utenti";
+    ViewData["AdminSection"] = "users";
+}
+@functions {
+    private static string Short(string objectId) => objectId.Length > 8 ? objectId[..8] + "…" : objectId;
+}
+<div class="page-head">
+    <div>
+        <h1>Utenti</h1>
+        <p class="muted">
+            Chi accede con Microsoft 365 per la prima volta resta in attesa finché un amministratore non lo approva.
+            Gli utenti sono riconosciuti dal loro identificativo Entra (object ID), non dall'email: bloccare o rimuovere
+            toglie l'accesso entro un minuto, anche al Launcher. Chi viene rimosso, se rientra, torna in attesa.
+        </p>
+    </div>
+</div>
+
+<section class="card">
+    <h2 class="card-title">In attesa di approvazione <span class="count">@Model.Pending.Count</span></h2>
+    @if (Model.Pending.Count == 0)
+    {
+        <p class="muted small">Nessuna richiesta.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table class="table">
+                <thead><tr><th>Nome</th><th>Email</th><th>Richiesta</th><th>IP</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var user in Model.Pending)
+                    {
+                        <tr>
+                            <td><strong>@(user.DisplayName ?? "—")</strong></td>
+                            <td><span title="Object ID @user.ObjectId">@user.Email</span></td>
+                            <td class="small muted">@Format.Relative(user.FirstSeenAt)</td>
+                            <td class="small muted mono">@user.LastIp</td>
+                            <td class="row-actions">
+                                <form method="post" asp-page-handler="Approve" class="inline">
+                                    <input type="hidden" name="id" value="@user.Id" />
+                                    <button class="btn btn-primary btn-sm" type="submit">Approva</button>
+                                </form>
+                                <form method="post" asp-page-handler="Approve" class="inline" data-confirm="Approvare @user.Email come amministratore?">
+                                    <input type="hidden" name="id" value="@user.Id" />
+                                    <input type="hidden" name="admin" value="true" />
+                                    <button class="btn btn-secondary btn-sm" type="submit">Come admin</button>
+                                </form>
+                                <form method="post" asp-page-handler="Block" class="inline" data-confirm="Rifiutare e bloccare @user.Email?">
+                                    <input type="hidden" name="id" value="@user.Id" />
+                                    <button class="btn btn-ghost btn-sm" type="submit">Rifiuta</button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+<section class="card">
+    <h2 class="card-title">Utenti approvati <span class="count">@Model.Approved.Count</span></h2>
+    @if (Model.Approved.Count == 0)
+    {
+        <p class="muted small">Ancora nessuno: approva le richieste qui sopra.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table class="table">
+                <thead><tr><th>Nome</th><th>Email</th><th>Ruolo</th><th>Ultimo accesso</th><th>Approvato</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var user in Model.Approved)
+                    {
+                        var self = Model.IsSelf(user);
+                        <tr>
+                            <td><strong>@(user.DisplayName ?? "—")</strong>@if (self) { <span class="chip">tu</span> }</td>
+                            <td><span title="Object ID @user.ObjectId">@user.Email</span></td>
+                            <td><span class="chip @(user.IsAdmin ? "chip-ok" : "")">@(user.IsAdmin ? "Amministratore" : "Tecnico")</span></td>
+                            <td class="small muted">@(user.LastLoginAt is null ? "—" : Format.Relative(user.LastLoginAt.Value))</td>
+                            <td class="small muted">@(user.DecidedAt is null ? "—" : Format.Relative(user.DecidedAt.Value))@(user.DecidedBy is null ? "" : $" da {user.DecidedBy}")</td>
+                            <td class="row-actions">
+                                @if (!self)
+                                {
+                                    <button type="button" class="btn btn-ghost btn-sm" data-open-dialog="user-@user.Id">Gestisci</button>
+                                    <dialog class="modal modal-sm" id="user-@user.Id" aria-label="Gestisci @user.Email">
+                                        <header class="modal-head">
+                                            <div>
+                                                <h2>@(user.DisplayName ?? user.Email)</h2>
+                                                <p class="muted small">@user.Email · object ID <span class="mono">@Short(user.ObjectId)</span></p>
+                                            </div>
+                                            <button type="button" class="btn btn-ghost btn-icon" data-close-modal title="Chiudi"><svg><use href="#i-x" /></svg></button>
+                                        </header>
+                                        <div class="modal-pad stack">
+                                            <form method="post" asp-page-handler="SetAdmin">
+                                                <input type="hidden" name="id" value="@user.Id" />
+                                                <input type="hidden" name="admin" value="@(user.IsAdmin ? "false" : "true")" />
+                                                <button class="btn btn-secondary btn-sm" type="submit">@(user.IsAdmin ? "Togli i permessi di amministratore" : "Rendi amministratore")</button>
+                                            </form>
+                                            <form method="post" asp-page-handler="Block" data-confirm="Bloccare @user.Email? Perde l'accesso entro un minuto.">
+                                                <input type="hidden" name="id" value="@user.Id" />
+                                                <button class="btn btn-ghost btn-sm" type="submit">Blocca</button>
+                                            </form>
+                                            <form method="post" asp-page-handler="Remove" data-confirm="Rimuovere @user.Email? Se rientra dovrà essere approvato di nuovo.">
+                                                <input type="hidden" name="id" value="@user.Id" />
+                                                <button class="btn btn-danger btn-sm" type="submit"><svg><use href="#i-trash" /></svg>Rimuovi</button>
+                                            </form>
+                                        </div>
+                                    </dialog>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@if (Model.Blocked.Count > 0)
+{
+    <section class="card">
+        <h2 class="card-title">Bloccati <span class="count">@Model.Blocked.Count</span></h2>
+        <div class="table-wrap">
+            <table class="table">
+                <thead><tr><th>Nome</th><th>Email</th><th>Bloccato</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var user in Model.Blocked)
+                    {
+                        <tr>
+                            <td><strong>@(user.DisplayName ?? "—")</strong></td>
+                            <td><span title="Object ID @user.ObjectId">@user.Email</span></td>
+                            <td class="small muted">@(user.DecidedAt is null ? "—" : Format.Relative(user.DecidedAt.Value))@(user.DecidedBy is null ? "" : $" da {user.DecidedBy}")</td>
+                            <td class="row-actions">
+                                <form method="post" asp-page-handler="Approve" class="inline" data-confirm="Riattivare @user.Email come tecnico?">
+                                    <input type="hidden" name="id" value="@user.Id" />
+                                    <button class="btn btn-secondary btn-sm" type="submit">Riattiva</button>
+                                </form>
+                                <form method="post" asp-page-handler="Remove" class="inline" data-confirm="Rimuovere @user.Email dall'elenco? Se rientra tornerà in attesa di approvazione.">
+                                    <input type="hidden" name="id" value="@user.Id" />
+                                    <button class="btn btn-ghost btn-sm" type="submit">Rimuovi</button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}

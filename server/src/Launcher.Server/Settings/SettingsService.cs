@@ -35,10 +35,16 @@ public static class SettingKeys
     public const string EntraTenantId = "entra.tenantId";
     public const string EntraClientId = "entra.clientId";
     public const string EntraClientSecret = "entra.clientSecret";
+    /// <summary>Certificato attivo (pubblico, Base64) e la sua chiave privata (segreta).</summary>
+    public const string EntraCertificate = "entra.certificate";
+    public const string EntraCertificateKey = "entra.certificateKey";
+    /// <summary>Nuovo certificato generato, da caricare in Entra e provare prima di attivarlo.</summary>
+    public const string EntraCertificateNext = "entra.certificateNext";
+    public const string EntraCertificateNextKey = "entra.certificateNextKey";
 
     public static readonly FrozenSet<string> Secrets = new[]
     {
-        HuduApiKey, RustDeskApiToken, RustDeskConnectionPassword, EntraClientSecret,
+        HuduApiKey, RustDeskApiToken, RustDeskConnectionPassword, EntraClientSecret, EntraCertificateKey, EntraCertificateNextKey,
     }.ToFrozenSet();
 }
 
@@ -63,10 +69,22 @@ public sealed record RustDeskSettings(string? ApiUrl, string? ApiToken, string? 
     public bool IsApiConfigured => !string.IsNullOrWhiteSpace(ApiUrl) && !string.IsNullOrWhiteSpace(ApiToken);
 }
 
-public sealed record EntraSettings(string? TenantId, string? ClientId, string? ClientSecret)
+public sealed record EntraSettings(
+    string? TenantId,
+    string? ClientId,
+    string? ClientSecret,
+    string? Certificate = null,
+    string? CertificateKey = null,
+    string? NextCertificate = null,
+    string? NextCertificateKey = null)
 {
+    /// <summary>Il portale si presenta a Entra con il certificato (consigliato) invece del segreto.</summary>
+    public bool UsesCertificate => !string.IsNullOrEmpty(Certificate) && !string.IsNullOrEmpty(CertificateKey);
+
+    public bool HasNextCertificate => !string.IsNullOrEmpty(NextCertificate) && !string.IsNullOrEmpty(NextCertificateKey);
+
     public bool IsConfigured =>
-        Guid.TryParse(TenantId, out _) && Guid.TryParse(ClientId, out _) && !string.IsNullOrWhiteSpace(ClientSecret);
+        Guid.TryParse(TenantId, out _) && Guid.TryParse(ClientId, out _) && (UsesCertificate || !string.IsNullOrWhiteSpace(ClientSecret));
 
     /// <summary>Scope che il connettore Windows chiede a Entra per chiamare l'API.</summary>
     public string ConnectorScope => $"api://{ClientId}/{ConnectorScopeName}";
@@ -214,7 +232,11 @@ public sealed class SettingsService(IDbContextFactory<AppDbContext> dbFactory, I
     public EntraSettings Entra => new(
         Get(SettingKeys.EntraTenantId),
         Get(SettingKeys.EntraClientId),
-        Get(SettingKeys.EntraClientSecret));
+        Get(SettingKeys.EntraClientSecret),
+        Get(SettingKeys.EntraCertificate),
+        Get(SettingKeys.EntraCertificateKey),
+        Get(SettingKeys.EntraCertificateNext),
+        Get(SettingKeys.EntraCertificateNextKey));
 
     private bool GetBool(string key, bool fallback) =>
         bool.TryParse(Get(key), out var value) ? value : fallback;

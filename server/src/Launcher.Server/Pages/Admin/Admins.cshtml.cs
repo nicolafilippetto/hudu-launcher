@@ -25,7 +25,7 @@ public sealed class AdminsModel(AppDbContext db, UserManager<IdentityUser> users
         }).ToList();
     }
 
-    public async Task<IActionResult> OnPostAddAsync(string? email, string? displayName, bool createLocal, string? password, CancellationToken ct)
+    public async Task<IActionResult> OnPostAddAsync(string? email, string? displayName, string? password, CancellationToken ct)
     {
         var normalized = email?.Trim().ToLowerInvariant();
         if (string.IsNullOrEmpty(normalized) || !new EmailAddressAttribute().IsValid(normalized))
@@ -36,25 +36,16 @@ public sealed class AdminsModel(AppDbContext db, UserManager<IdentityUser> users
 
         if (await db.Admins.AnyAsync(a => a.Email == normalized, ct))
         {
-            FlashError = "È già un amministratore.";
+            FlashError = "Esiste già un accesso di emergenza con questa email.";
             return RedirectToPage();
         }
 
-        if (createLocal)
+        // Prima l'utente locale: se la password non va bene, non si aggiunge nulla.
+        var error = string.IsNullOrEmpty(password) ? "Indicare la password." : await SetLocalPasswordAsync(normalized, password);
+        if (error is not null)
         {
-            // Prima l'utente locale: se la password non va bene, non si aggiunge nemmeno l'admin.
-            if (string.IsNullOrEmpty(password))
-            {
-                FlashError = "Indicare la password di emergenza oppure togliere la spunta.";
-                return RedirectToPage();
-            }
-
-            var error = await SetLocalPasswordAsync(normalized, password);
-            if (error is not null)
-            {
-                FlashError = error;
-                return RedirectToPage();
-            }
+            FlashError = error;
+            return RedirectToPage();
         }
 
         db.Admins.Add(new AdminEntry
@@ -65,9 +56,8 @@ public sealed class AdminsModel(AppDbContext db, UserManager<IdentityUser> users
             CreatedBy = Email,
         });
         await db.SaveChangesAsync(ct);
-        await audit.WriteAsync(new AuditEntry("admin.add", Email, Target: normalized, Details: createLocal ? "con accesso locale di emergenza" : null), HttpContext, ct);
-        Flash = $"{normalized} è ora amministratore (al prossimo accesso con Microsoft 365, o entro 5 minuti se già collegato)."
-                + (createLocal ? " Accesso di emergenza creato: al primo accesso locale configurerà l'app di autenticazione." : "");
+        await audit.WriteAsync(new AuditEntry("admin.add", Email, Target: normalized), HttpContext, ct);
+        Flash = $"Accesso di emergenza creato per {normalized}: al primo accesso locale configurerà l'app di autenticazione.";
         return RedirectToPage();
     }
 
@@ -85,9 +75,9 @@ public sealed class AdminsModel(AppDbContext db, UserManager<IdentityUser> users
             return RedirectToPage();
         }
 
-        if (await db.Admins.CountAsync(ct) <= 1)
+        if (!await OtherUsableBreakGlassAsync(entry.Email, ct))
         {
-            FlashError = "Deve restare almeno un amministratore.";
+            FlashError = "Deve restare almeno un altro accesso di emergenza utilizzabile (con password).";
             return RedirectToPage();
         }
 
@@ -100,7 +90,7 @@ public sealed class AdminsModel(AppDbContext db, UserManager<IdentityUser> users
         db.Admins.Remove(entry);
         await db.SaveChangesAsync(ct);
         await audit.WriteAsync(new AuditEntry("admin.remove", Email, Target: entry.Email), HttpContext, ct);
-        Flash = $"{entry.Email} non è più amministratore.";
+        Flash = $"Accesso di emergenza di {entry.Email} eliminato.";
         return RedirectToPage();
     }
 
@@ -158,12 +148,28 @@ public sealed class AdminsModel(AppDbContext db, UserManager<IdentityUser> users
             return "MFA azzerata: al prossimo accesso locale andrà riconfigurata.";
         }, "MFA azzerata", ct);
 
-    public async Task<IActionResult> OnPostRemoveLocalAsync(int id, CancellationToken ct) =>
-        await WithLocalUserAsync(id, async user =>
+    public async Task<IActionResult> OnPostRemoveLocalAsync(int id, CancellationToken ct)
+    {
+        var entry = await db.Admins.FindAsync([id], ct);
+        if (entry is not null && !await OtherUsableBreakGlassAsync(entry.Email, ct))
+        {
+            FlashError = "Deve restare almeno un altro accesso di emergenza utilizzabile (con password).";
+            return RedirectToPage();
+        }
+
+        return await WithLocalUserAsync(id, async user =>
         {
             await users.DeleteAsync(user);
-            return "Accesso locale rimosso: resta l'accesso con Microsoft 365.";
+            return "Password rimossa: questo accesso di emergenza non è più utilizzabile.";
         }, "accesso locale rimosso", ct);
+    }
+
+    /// <summary>Esiste un altro accesso di emergenza con password (per non restare chiusi fuori).</summary>
+    private async Task<bool> OtherUsableBreakGlassAsync(string email, CancellationToken ct)
+    {
+        var others = await db.Admins.Where(a => a.Email != email).Select(a => a.Email.ToUpper()).ToListAsync(ct);
+        return await db.Users.AnyAsync(u => u.NormalizedEmail != null && others.Contains(u.NormalizedEmail), ct);
+    }
 
     public async Task<IActionResult> OnPostUnlockAsync(int id, CancellationToken ct) =>
         await WithLocalUserAsync(id, async user =>

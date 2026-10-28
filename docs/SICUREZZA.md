@@ -9,7 +9,7 @@ Stato: ottobre 2026.
 |---|---|---|
 | Password dei clienti | **Non salvate.** Lette da Hudu solo al momento della connessione, consegnate al Launcher e scartate | Mai su disco, mai nei log |
 | Elenco asset, IP, nomi delle credenziali e nomi utente | Cache SQLite nel volume Docker | Solo metadati, nessun segreto |
-| Chiave API di Hudu, token RustDesk, password di connessione RustDesk, segreto Entra | Database, **cifrati** (ASP.NET Data Protection, AES) | Le chiavi di cifratura sono a loro volta cifrate (AES-GCM) con la chiave master, fuori dal database (Docker secret, file 400 di proprietà del container) |
+| Chiave API di Hudu, token RustDesk, password di connessione RustDesk, chiave privata del certificato Entra | Database, **cifrati** (ASP.NET Data Protection, AES) | Le chiavi di cifratura sono a loro volta cifrate (AES-GCM) con la chiave master, fuori dal database (Docker secret, file 400 di proprietà del container) |
 | Account admin di emergenza | Database (ASP.NET Identity) | Password con hash PBKDF2, MFA TOTP obbligatoria, codici di recupero monouso |
 | Registro accessi | Database | Chi, cosa, quando, da quale IP; conservazione configurabile |
 
@@ -27,12 +27,18 @@ server (se la licenza lo consente), rotazione periodica, alert sugli accessi API
 
 ## 3. Chi può fare cosa
 
-- **Tecnici**: accesso con Microsoft 365 (OIDC con PKCE). Chi entra lo decide Entra: assegnazione
-  utente obbligatoria all'app e Accesso condizionale con MFA.
-- **Admin**: elenco gestito nel portale; accesso locale di emergenza solo da reti interne, con MFA.
+- **Utenti Microsoft 365**: accesso con OIDC (codice + PKCE), solo dal proprio tenant. Al primo accesso
+  l'utente resta **in attesa** e non vede nulla finché un amministratore non lo approva (come tecnico o
+  admin). È riconosciuto dall'**object ID** Entra, immutabile, non dall'email; bloccato o rimosso perde
+  portale e Launcher entro un minuto. In Entra restano consigliati assegnazione utente obbligatoria e
+  Accesso condizionale con MFA: le due barriere sono indipendenti.
+- **Accessi di emergenza**: utenti locali, sempre admin, password + MFA TOTP, solo da reti interne.
+- **Credenziale del portale verso Entra**: certificato generato dal portale (RSA 3072, 2 anni); la chiave
+  privata è cifrata nel database e non si scarica, in Entra c'è solo il certificato pubblico. Al login il
+  portale firma un'asserzione valida 5 minuti invece di inviare un segreto.
 - **Launcher (Windows)**: per ricevere una credenziale serve un **biglietto** monouso (256 bit casuali,
   30 secondi, legato all'utente; nel database c'è solo l'hash) **e** un token Microsoft 365 dello stesso
-  utente con scope dedicato. Un link `hudulauncher://` contraffatto non contiene host né credenziali e
+  utente, ancora approvato nel portale, con scope dedicato. Un link `hudulauncher://` contraffatto non contiene host né credenziali e
   viene rifiutato.
 - **Connessione diretta** (senza RustDesk): stesso biglietto e stessa autenticazione; il Launcher non
   riceve la password di RustDesk, che non gli serve.
@@ -66,7 +72,7 @@ server (se la licenza lo consente), rotazione periodica, alert sugli accessi API
 | SAST multi-linguaggio e segreti | Semgrep 1.182 (regole C#, JavaScript, OWASP Top 10, segreti, Dockerfile, GitHub Actions) | 6 segnalazioni: 4 corrette (attesa sugli aggiornamenti Dependabot), 2 falsi positivi motivati nel codice → **0 aperte** |
 | Dipendenze | `dotnet list package --vulnerable` + Dependabot | Nessuna libreria vulnerabile |
 | DAST | OWASP ZAP 2.16.1, scansione attiva **con sessione da amministratore**, in modalità produzione | 1 difetto reale: il pulsante Esci non inviava il token antiforgery (logout in errore, nessun rischio CSRF perché la richiesta veniva rifiutata) → **corretto e coperto da test**. Altri avvisi analizzati: falsi positivi ("XSLT" dal testo "Microsoft 365") o comportamenti voluti (IP dei clienti mostrati ai tecnici autenticati) |
-| Test automatici | 88 test server, 62 Launcher | Includono: biglietti rubati/scaduti/riusati, token di altro tenant o senza scope, solo lettura verso Hudu, antiforgery, ruoli |
+| Test automatici | 92 test server, 62 Launcher | Includono: biglietti rubati/scaduti/riusati, token di altro tenant o senza scope, utenti in attesa o bloccati, asserzione del certificato, solo lettura verso Hudu, antiforgery, ruoli |
 
 In CI (GitHub Actions) girano a ogni modifica, e ogni settimana anche senza modifiche:
 

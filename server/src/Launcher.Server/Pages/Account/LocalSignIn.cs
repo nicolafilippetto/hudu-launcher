@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Identity;
 namespace Launcher.Server.Pages.Account;
 
 /// <summary>Passaggi comuni del login locale: utente in attesa di MFA e accesso finale.</summary>
-public sealed class LocalSignIn(UserManager<IdentityUser> users, PortalPrincipalFactory principals, SettingsService settings, AuditService audit)
+public sealed class LocalSignIn(UserManager<IdentityUser> users, SettingsService settings, AuditService audit)
 {
     public async Task<IdentityUser?> GetPendingUserAsync(HttpContext http)
     {
@@ -26,7 +26,7 @@ public sealed class LocalSignIn(UserManager<IdentityUser> users, PortalPrincipal
     public async Task CompleteAsync(HttpContext http, IdentityUser user, string detail)
     {
         await http.SignOutAsync(AuthSchemes.MfaPending);
-        var principal = await principals.CreateAsync(user.Email!, user.Email, null, LauncherClaims.MethodLocal, http.RequestAborted);
+        var principal = PortalPrincipalFactory.Create(user.Email!, user.Email, LauncherClaims.MethodLocal, isAdmin: true);
         await http.SignInAsync(AuthSchemes.Portal, principal, new AuthenticationProperties
         {
             IsPersistent = false,

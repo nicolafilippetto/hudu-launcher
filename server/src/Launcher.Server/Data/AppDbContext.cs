@@ -12,6 +12,7 @@ namespace Launcher.Server.Data;
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : IdentityDbContext<IdentityUser>(options)
 {
     public DbSet<AdminEntry> Admins => Set<AdminEntry>();
+    public DbSet<PortalUser> PortalUsers => Set<PortalUser>();
     public DbSet<Setting> Settings => Set<Setting>();
     public DbSet<BrandingAsset> Branding => Set<BrandingAsset>();
     public DbSet<LayoutConfig> LayoutConfigs => Set<LayoutConfig>();
@@ -39,6 +40,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
         {
             e.HasIndex(x => x.Email).IsUnique();
             e.Property(x => x.Email).HasMaxLength(320);
+        });
+        builder.Entity<PortalUser>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.ObjectId }).IsUnique();
+            e.HasIndex(x => x.Status);
+            e.Property(x => x.TenantId).HasMaxLength(64);
+            e.Property(x => x.ObjectId).HasMaxLength(64);
+            e.Property(x => x.Email).HasMaxLength(320);
+            e.Property(x => x.DisplayName).HasMaxLength(256);
         });
         builder.Entity<Setting>().HasKey(x => x.Key);
         builder.Entity<BrandingAsset>().HasKey(x => x.Kind);

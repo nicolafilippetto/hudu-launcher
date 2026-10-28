@@ -15,20 +15,17 @@ public sealed record AuditEntry(
     string? Details = null);
 
 /// <summary>
-/// Registro degli accessi: chi ha fatto cosa, quando e da dove. Ogni evento va anche nei log
-/// dell'applicazione, così può essere inoltrato a un SIEM.
+/// Registro degli accessi: chi ha fatto cosa, quando e da dove, nel database (Amministrazione →
+/// Registro accessi). Nei log dell'applicazione va solo una riga senza dati personali né testo
+/// inserito dagli utenti (numero dell'evento, azione, esito), utile a un SIEM per gli allarmi:
+/// i dettagli restano nel portale, accessibile solo agli amministratori.
 /// </summary>
 public sealed class AuditService(IDbContextFactory<AppDbContext> dbFactory, ILogger<AuditService> logger)
 {
     public async Task WriteAsync(AuditEntry entry, HttpContext? httpContext = null, CancellationToken cancellationToken = default)
     {
-        var ip = httpContext?.Connection.RemoteIpAddress?.ToString();
-        logger.LogInformation(
-            "AUDIT {Action} utente={User} esito={Success} cliente={Company} asset={AssetId}:{AssetName} destinazione={Target} ip={Ip} {Details}",
-            entry.Action, entry.UserEmail, entry.Success ? "ok" : "negato", entry.CompanyName, entry.AssetId, entry.AssetName, entry.Target, ip, entry.Details);
-
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-        db.AuditEvents.Add(new AuditEvent
+        var audit = new AuditEvent
         {
             At = DateTimeOffset.UtcNow,
             Action = entry.Action,
@@ -38,34 +35,49 @@ public sealed class AuditService(IDbContextFactory<AppDbContext> dbFactory, ILog
             AssetId = entry.AssetId,
             AssetName = entry.AssetName,
             Target = entry.Target,
-            Ip = ip,
+            Ip = httpContext?.Connection.RemoteIpAddress?.ToString(),
             Details = entry.Details,
-        });
+        };
+        db.AuditEvents.Add(audit);
         await db.SaveChangesAsync(cancellationToken);
+
+        // Le azioni sono costanti del codice ("login", "ticket.create"…): nessun dato dell'utente.
+        var action = Descriptions.ContainsKey(entry.Action) ? entry.Action : "altro";
+        logger.LogInformation("AUDIT #{Id} {Action} {Outcome}", audit.Id, action, entry.Success ? "ok" : "negato");
     }
 
-    public static string Describe(string action) => action switch
+    /// <summary>Azioni del registro e descrizione per il portale.</summary>
+    private static readonly Dictionary<string, string> Descriptions = new(StringComparer.Ordinal)
     {
-        "login" => "Accesso",
-        "login.local" => "Accesso locale",
-        "logout" => "Uscita",
-        "ticket.create" => "Connessione richiesta",
-        "ticket.redeem" => "Credenziali consegnate al connettore",
-        "ticket.reject" => "Biglietto rifiutato",
-        "password.copy" => "Password copiata",
-        "asset.update" => "Mappatura asset modificata",
-        "company.update" => "Gateway cliente modificato",
-        "settings.update" => "Impostazioni modificate",
-        "layouts.update" => "Layout modificati",
-        "admin.add" => "Admin aggiunto",
-        "admin.remove" => "Admin rimosso",
-        "admin.local" => "Accesso locale configurato",
-        "branding.update" => "Logo/favicon modificati",
-        "sync" => "Sincronizzazione",
-        "ratelimit" => "Limite di richieste superato",
-        "setup" => "Configurazione iniziale",
-        _ => action,
+        ["login"] = "Accesso",
+        ["login.local"] = "Accesso locale",
+        ["logout"] = "Uscita",
+        ["ticket.create"] = "Connessione richiesta",
+        ["ticket.redeem"] = "Credenziali consegnate al connettore",
+        ["ticket.reject"] = "Biglietto rifiutato",
+        ["offline.prepare"] = "Cache offline preparata",
+        ["offline.redeem"] = "Cache offline consegnata",
+        ["password.copy"] = "Password copiata",
+        ["asset.update"] = "Mappatura asset modificata",
+        ["company.update"] = "Gateway cliente modificato",
+        ["settings.update"] = "Impostazioni modificate",
+        ["layouts.update"] = "Layout modificati",
+        ["user.request"] = "Richiesta di accesso",
+        ["user.approve"] = "Utente approvato",
+        ["user.block"] = "Utente bloccato",
+        ["user.remove"] = "Utente rimosso",
+        ["user.role"] = "Ruolo utente modificato",
+        ["admin.add"] = "Accesso di emergenza aggiunto",
+        ["admin.remove"] = "Accesso di emergenza rimosso",
+        ["admin.local"] = "Accesso locale configurato",
+        ["branding.update"] = "Logo/favicon modificati",
+        ["sync"] = "Sincronizzazione",
+        ["sync.company"] = "Aggiornamento di un cliente",
+        ["ratelimit"] = "Limite di richieste superato",
+        ["setup"] = "Configurazione iniziale",
     };
+
+    public static string Describe(string action) => Descriptions.GetValueOrDefault(action, action);
 }
 
 /// <summary>Pulizia periodica: biglietti scaduti e registro oltre la conservazione impostata.</summary>

@@ -1,5 +1,7 @@
+@inject Launcher.Server.Pages.LayoutInfo Info
 @{
     Layout = "_Layout";
+    var pendingUsers = Info.PendingUsers;
     var current = ViewData["AdminSection"] as string;
     string Active(string section) => section == current ? "active" : "";
 }
@@ -10,7 +12,13 @@
             <a class="nav-item @Active("status")" href="/Admin"><svg><use href="#i-refresh" /></svg>Stato e sincronizzazione</a>
             <a class="nav-item @Active("settings")" href="/Admin/Settings"><svg><use href="#i-settings" /></svg>Impostazioni</a>
             <a class="nav-item @Active("layouts")" href="/Admin/Layouts"><svg><use href="#i-layers" /></svg>Layout Hudu</a>
-            <a class="nav-item @Active("admins")" href="/Admin/Admins"><svg><use href="#i-shield" /></svg>Amministratori</a>
+            <a class="nav-item @Active("users")" href="/Admin/Users"><svg><use href="#i-user" /></svg><span>Utenti</span>
+                @if (pendingUsers > 0)
+                {
+                    <span class="badge" title="Richieste di accesso da approvare">@pendingUsers</span>
+                }
+            </a>
+            <a class="nav-item @Active("admins")" href="/Admin/Admins"><svg><use href="#i-shield" /></svg>Accessi di emergenza</a>
             <a class="nav-item @Active("branding")" href="/Admin/Branding"><svg><use href="#i-image" /></svg>Aspetto</a>
             <a class="nav-item @Active("audit")" href="/Admin/Audit"><svg><use href="#i-history" /></svg>Registro accessi</a>
         </div>

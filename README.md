@@ -47,7 +47,8 @@ Ogni connessione, e ogni credenziale consegnata, finisce nel registro accessi de
 - **Modifiche in blocco** su più asset (gateway, credenziale, protocollo, visibilità).
 - **Cache d'emergenza**: fino a N connessioni preparate in anticipo, tenute solo in memoria per un
   tempo limitato, utilizzabili anche senza internet.
-- **Accesso con Microsoft 365** (Entra ID) e amministratori di emergenza locali con MFA.
+- **Accesso con Microsoft 365** (Entra ID) con approvazione dei nuovi utenti nel portale, credenziale
+  dell'app con certificato e accessi di emergenza locali con MFA.
 - Tema chiaro e scuro, interfaccia in italiano.
 
 ## Sicurezza in breve
@@ -56,6 +57,8 @@ Ogni connessione, e ogni credenziale consegnata, finisce nel registro accessi de
   che non sia una lettura.
 - Le password non vengono salvate: si leggono al momento della connessione e non si possono copiare
   né dal portale né dal Launcher.
+- Ogni nuovo utente Microsoft 365 va approvato da un amministratore; gli utenti sono riconosciuti
+  dall'object ID di Entra, non dall'email, e bloccarli toglie l'accesso entro un minuto.
 - Link monouso da 256 bit, legati all'utente e validi 30 secondi; il Launcher deve presentare anche
   un token Microsoft 365 dello stesso utente.
 - Content Security Policy rigorosa, protezione CSRF, limiti per IP, blocco degli account, container

@@ -350,7 +350,7 @@ public static class ApiEndpoints
         }
 
         if (ticket.AuthMethod == LauncherClaims.MethodLocal
-            && (!settings.Portal.AllowLocalAdminConnections || !await principals.IsAdminAsync(ticket.UserEmail, ct)))
+            && (!settings.Portal.AllowLocalAdminConnections || !await principals.IsBreakGlassAsync(ticket.UserEmail, ct)))
         {
             await audit.WriteAsync(new AuditEntry("ticket.reject", ticket.UserEmail, Success: false, AssetId: ticket.AssetId > 0 ? ticket.AssetId : null,
                 Details: "Connessioni senza 365 disattivate o utente non più admin"), http, ct);

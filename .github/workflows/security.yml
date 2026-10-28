@@ -51,13 +51,20 @@ jobs:
           path: semgrep.sarif
           retention-days: 30
 
+      # Semgrep mette nel SARIF anche i risultati soppressi nel codice (nosemgrep, con la motivazione
+      # accanto) e Code scanning li mostrerebbe come aperti: si caricano solo quelli non soppressi.
+      - name: Solo risultati aperti
+        if: always()
+        run: |
+          jq '.runs[].results |= map(select((.suppressions // []) | length == 0))' semgrep.sarif > semgrep-open.sarif
+
       # In Security → Code scanning (gratuito nei repository pubblici). Le pull request da fork
       # hanno un token in sola lettura: lì resta solo il rapporto qui sopra.
       - name: Code scanning
         if: always() && !github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
-          sarif_file: semgrep.sarif
+          sarif_file: semgrep-open.sarif
           category: semgrep
 
   dependencies:

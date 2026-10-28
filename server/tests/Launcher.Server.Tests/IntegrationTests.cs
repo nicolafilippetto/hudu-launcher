@@ -85,9 +85,13 @@ public class LauncherFactory : WebApplicationFactory<Program>
                 ["preferred_username"] = email,
                 ["name"] = email,
                 ["tid"] = tenant,
+                ["oid"] = ObjectIdOf(email),
                 ["scp"] = scope,
             },
         });
+
+    /// <summary>Object ID Entra finto ma stabile per un'email di prova.</summary>
+    public static string ObjectIdOf(string email) => "oid-" + email.ToLowerInvariant();
 
     public async Task SeedAsync()
     {
@@ -113,6 +117,15 @@ public class LauncherFactory : WebApplicationFactory<Program>
         }
 
         db.Admins.Add(new AdminEntry { Email = "capo@example.com", CreatedAt = DateTimeOffset.UtcNow });
+        foreach (var (email, admin) in new[] { ("tecnico@example.com", false), ("capo@example.com", true), ("ladro@example.com", false) })
+        {
+            db.PortalUsers.Add(new PortalUser
+            {
+                TenantId = TenantId, ObjectId = ObjectIdOf(email), Email = email, Status = PortalUserStatus.Approved,
+                IsAdmin = admin, FirstSeenAt = DateTimeOffset.UtcNow,
+            });
+        }
+
         db.LayoutConfigs.Add(new LayoutConfig { LayoutId = 28, LayoutName = "Virtual Machines", Enabled = true, IpFieldLabel = "IP Address" });
         db.Companies.Add(new CachedCompany { Id = 1, Name = "Cliente Uno" });
         db.Companies.Add(new CachedCompany { Id = 2, Name = "Cliente Due" });
@@ -206,8 +219,22 @@ public class LauncherFactory : WebApplicationFactory<Program>
                     return;
                 }
 
+                // Come dopo il login: utente 365 approvato (dal database) o accesso di emergenza locale.
+                var email = http.Request.Query["email"].ToString();
+                var method = http.Request.Query["method"].FirstOrDefault() ?? LauncherClaims.MethodEntra;
                 var factory = http.RequestServices.GetRequiredService<PortalPrincipalFactory>();
-                var principal = await factory.CreateAsync(http.Request.Query["email"]!, null, "oid", http.Request.Query["method"].FirstOrDefault() ?? LauncherClaims.MethodEntra);
+                var user = await factory.FindApprovedAsync(TenantId, ObjectIdOf(email));
+                var principal = method == LauncherClaims.MethodLocal || user is null
+                    ? PortalPrincipalFactory.Create(email, null, method, isAdmin: await factory.IsBreakGlassAsync(email), TenantId, ObjectIdOf(email))
+                    : PortalPrincipalFactory.Create(user);
+                if (http.Request.Query.ContainsKey("stale"))
+                {
+                    // Sessione da ricontrollare subito (ultima verifica oltre un minuto fa).
+                    var identity = (System.Security.Claims.ClaimsIdentity)principal.Identity!;
+                    identity.RemoveClaim(identity.FindFirst(LauncherClaims.ValidatedAt));
+                    identity.AddClaim(new System.Security.Claims.Claim(LauncherClaims.ValidatedAt, DateTimeOffset.UtcNow.AddMinutes(-2).ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                }
+
                 await http.SignInAsync(AuthSchemes.Portal, principal);
             });
             next(app);
@@ -220,11 +247,11 @@ public class LauncherFactory : WebApplicationFactory<Program>
 [Collection("Server")]
 public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFixture<LauncherFactory>
 {
-    private async Task<HttpClient> SignedInClientAsync(string email, string method = LauncherClaims.MethodEntra)
+    private async Task<HttpClient> SignedInClientAsync(string email, string method = LauncherClaims.MethodEntra, bool stale = false)
     {
         await factory.SeedAsync();
         var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = true, BaseAddress = new Uri("https://localhost") });
-        var response = await client.GetAsync(new Uri($"/test-signin?email={email}&method={method}", UriKind.Relative), TestContext.Current.CancellationToken);
+        var response = await client.GetAsync(new Uri($"/test-signin?email={email}&method={method}{(stale ? "&stale=1" : "")}", UriKind.Relative), TestContext.Current.CancellationToken);
         response.EnsureSuccessStatusCode();
         return client;
     }
@@ -710,11 +737,11 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
     }
 
     [Fact]
-    public async Task New_admin_can_get_a_break_glass_account()
+    public async Task Break_glass_accounts_always_need_a_strong_password()
     {
         var client = await SignedInClientAsync("capo@example.com");
         var page = await client.GetStringAsync(new Uri("/Admin/Admins", UriKind.Relative), TestContext.Current.CancellationToken);
-        Assert.Contains("data-breakglass-form", page, StringComparison.Ordinal);
+        Assert.Contains("Accessi di emergenza", page, StringComparison.Ordinal);
         var token = TokenRegex().Match(page).Groups[1].Value;
 
         async Task<HttpResponseMessage> AddAsync(string email, string? password) =>
@@ -722,116 +749,217 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
             {
                 ["__RequestVerificationToken"] = token,
                 ["email"] = email,
-                ["createLocal"] = password is null ? "false" : "true",
                 ["password"] = password ?? "",
             }), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Redirect, (await AddAsync("debole@example.com", "corta")).StatusCode);
         Assert.Equal(HttpStatusCode.Redirect, (await AddAsync("nuovo@example.com", "Emergenza-2026-Lunga")).StatusCode);
-        Assert.Equal(HttpStatusCode.Redirect, (await AddAsync("solo365@example.com", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Redirect, (await AddAsync("senzapassword@example.com", null)).StatusCode);
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.False(await db.Admins.AnyAsync(a => a.Email == "debole@example.com", TestContext.Current.CancellationToken));
         Assert.True(await db.Admins.AnyAsync(a => a.Email == "nuovo@example.com", TestContext.Current.CancellationToken));
         Assert.True(await db.Users.AnyAsync(u => u.Email == "nuovo@example.com", TestContext.Current.CancellationToken));
-        Assert.True(await db.Admins.AnyAsync(a => a.Email == "solo365@example.com", TestContext.Current.CancellationToken));
-        Assert.False(await db.Users.AnyAsync(u => u.Email == "solo365@example.com", TestContext.Current.CancellationToken));
+        Assert.False(await db.Admins.AnyAsync(a => a.Email == "senzapassword@example.com", TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task Editor_accepts_only_ipam_addresses()
+    public async Task First_365_login_waits_for_approval_and_creates_no_session()
+    {
+        await factory.SeedAsync();
+        using var scope = factory.Services.CreateScope();
+        var services = scope.ServiceProvider;
+        var events = new EntraOidcEvents(services.GetRequiredService<PortalPrincipalFactory>(), services.GetRequiredService<SettingsService>(), services.GetRequiredService<Audit.AuditService>());
+
+        async Task<Microsoft.AspNetCore.Authentication.OpenIdConnect.TokenValidatedContext> LoginAsync(string oid, string email)
+        {
+            var http = new DefaultHttpContext { RequestServices = services };
+            var principal = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim("tid", LauncherFactory.TenantId), new Claim("oid", oid), new Claim("preferred_username", email), new Claim("name", "Nuovo Tecnico")], "test"));
+            var context = new Microsoft.AspNetCore.Authentication.OpenIdConnect.TokenValidatedContext(
+                http, new AuthenticationScheme(AuthSchemes.Entra, null, typeof(Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectHandler)),
+                new Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectOptions(), principal, new AuthenticationProperties());
+            await events.TokenValidated(context);
+            return context;
+        }
+
+        // Primo accesso: utente registrato in attesa, nessuna sessione, solo il messaggio.
+        var first = await LoginAsync("oid-nuovo", "nuovo.tecnico@example.com");
+        Assert.True(first.Result?.Handled);
+        Assert.Equal("/Account/Login?status=pending", first.Response.Headers.Location.ToString());
+
+        var db = services.GetRequiredService<AppDbContext>();
+        var user = await db.PortalUsers.SingleAsync(u => u.ObjectId == "oid-nuovo", TestContext.Current.CancellationToken);
+        Assert.Equal(PortalUserStatus.Pending, user.Status);
+        Assert.Equal("Nuovo Tecnico", user.DisplayName);
+
+        // Stessa email ma altro object ID (es. account ricreato o omonimo): è un altro utente, sempre in attesa.
+        var clone = await LoginAsync("oid-altro", "nuovo.tecnico@example.com");
+        Assert.True(clone.Result?.Handled);
+        Assert.Equal(2, await db.PortalUsers.CountAsync(u => u.Email == "nuovo.tecnico@example.com", TestContext.Current.CancellationToken));
+
+        // Approvato: accesso come tecnico, con l'identità presa dal database.
+        user.Status = PortalUserStatus.Approved;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var approved = await LoginAsync("oid-nuovo", "nuovo.tecnico@example.com");
+        Assert.Null(approved.Result);
+        Assert.Equal("oid-nuovo", approved.Principal!.FindFirstValue(LauncherClaims.ObjectId));
+        Assert.False(approved.Principal.IsAdmin());
+
+        // Bloccato: resta fuori.
+        user.Status = PortalUserStatus.Blocked;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var blocked = await LoginAsync("oid-nuovo", "nuovo.tecnico@example.com");
+        Assert.Equal("/Account/Login?status=blocked", blocked.Response.Headers.Location.ToString());
+    }
+
+    [Fact]
+    public async Task Blocked_user_loses_portal_session_and_launcher()
+    {
+        var ticket = await CreateTicketAsync(await SignedInClientAsync("tecnico@example.com"));
+        var client = await SignedInClientAsync("tecnico@example.com", stale: true);
+        await SetUserStatusAsync("tecnico@example.com", PortalUserStatus.Blocked);
+        try
+        {
+            // Sessione ricontrollata: l'utente bloccato viene rimandato al login.
+            var page = await client.GetAsync(new Uri("/", UriKind.Relative), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.Redirect, page.StatusCode);
+            Assert.Contains("/Account/Login", page.Headers.Location!.ToString(), StringComparison.Ordinal);
+
+            // Il Launcher, anche con un token 365 valido, non riceve più nulla.
+            var redeem = await RedeemAsync(ticket, factory.CreateConnectorToken("tecnico@example.com"));
+            Assert.Equal(HttpStatusCode.Unauthorized, redeem.StatusCode);
+        }
+        finally
+        {
+            await SetUserStatusAsync("tecnico@example.com", PortalUserStatus.Approved);
+        }
+    }
+
+    [Fact]
+    public async Task Launcher_rejects_users_never_approved()
     {
         var client = await SignedInClientAsync("tecnico@example.com");
+        var ticket = await CreateTicketAsync(client);
+        var stranger = await RedeemAsync(ticket, factory.CreateConnectorToken("sconosciuto@example.com"));
+        Assert.Equal(HttpStatusCode.Unauthorized, stranger.StatusCode);
+    }
+
+    [Fact]
+    public async Task Admins_approve_and_remove_users_but_not_themselves()
+    {
+        await factory.SeedAsync();
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            await db.Assets.Where(a => a.Id == 10).ExecuteUpdateAsync(u => u.SetProperty(a => a.IpamAddresses, "10.0.0.10\n10.0.1.10"), TestContext.Current.CancellationToken);
+            db.PortalUsers.Add(new PortalUser { TenantId = LauncherFactory.TenantId, ObjectId = "oid-attesa", Email = "attesa@example.com", FirstSeenAt = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
-        try
+        var technician = await SignedInClientAsync("tecnico@example.com");
+        var denied = await technician.GetAsync(new Uri("/Admin/Users", UriKind.Relative), TestContext.Current.CancellationToken);
+        Assert.Contains("AccessDenied", denied.Headers.Location!.ToString(), StringComparison.Ordinal);
+
+        var admin = await SignedInClientAsync("capo@example.com");
+        var page = await admin.GetStringAsync(new Uri("/Admin/Users", UriKind.Relative), TestContext.Current.CancellationToken);
+        Assert.Contains("attesa@example.com", page, StringComparison.Ordinal);
+        var token = TokenRegex().Match(page).Groups[1].Value;
+
+        async Task<int> IdOfAsync(string email)
         {
-            var editor = await client.GetStringAsync(new Uri("/?handler=Editor&assetId=10", UriKind.Relative), TestContext.Current.CancellationToken);
-            Assert.Contains("<option value=\"10.0.1.10\">", editor, StringComparison.Ordinal);
-            var page = await client.GetStringAsync(new Uri("/?c=1", UriKind.Relative), TestContext.Current.CancellationToken);
-            var token = TokenRegex().Match(page).Groups[1].Value;
-
-            async Task<HttpResponseMessage> SaveAsync(string host) =>
-                await client.PostAsync(new Uri("/?handler=SaveAsset", UriKind.Relative), new FormUrlEncodedContent(new Dictionary<string, string>
-                {
-                    ["__RequestVerificationToken"] = token,
-                    ["AssetId"] = "10",
-                    ["Host"] = host,
-                }), TestContext.Current.CancellationToken);
-
-            var rejected = await SaveAsync("192.168.99.99");
-            Assert.Equal(HttpStatusCode.UnprocessableEntity, rejected.StatusCode);
-            Assert.Contains("non è nell&#x27;IPAM", await rejected.Content.ReadAsStringAsync(TestContext.Current.CancellationToken), StringComparison.Ordinal);
-            Assert.Equal(HttpStatusCode.OK, (await SaveAsync("10.0.1.10")).StatusCode);
-
             using var scope = factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            Assert.Equal("10.0.1.10", (await db.AssetSettings.FindAsync([10], TestContext.Current.CancellationToken))?.Host);
+            return await scope.ServiceProvider.GetRequiredService<AppDbContext>().PortalUsers.Where(u => u.Email == email).Select(u => u.Id).SingleAsync(TestContext.Current.CancellationToken);
         }
-        finally
+
+        async Task PostAsync(string handler, int id)
         {
-            using var scope = factory.Services.CreateScope();
+            var form = new Dictionary<string, string> { ["__RequestVerificationToken"] = token, ["id"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture) };
+
+            var response = await admin.PostAsync(new Uri($"/Admin/Users?handler={handler}", UriKind.Relative), new FormUrlEncodedContent(form), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        }
+
+
+        var pendingId = await IdOfAsync("attesa@example.com");
+        await PostAsync("Approve", pendingId);
+        await PostAsync("Block", await IdOfAsync("capo@example.com"));
+        await PostAsync("Remove", await IdOfAsync("capo@example.com"));
+
+        using (var scope = factory.Services.CreateScope())
+        {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            await db.AssetSettings.Where(a => a.AssetId == 10).ExecuteDeleteAsync(TestContext.Current.CancellationToken);
-            await db.Assets.Where(a => a.Id == 10).ExecuteUpdateAsync(u => u.SetProperty(a => a.IpamAddresses, (string?)null), TestContext.Current.CancellationToken);
+            Assert.Equal(PortalUserStatus.Approved, (await db.PortalUsers.SingleAsync(u => u.Email == "attesa@example.com", TestContext.Current.CancellationToken)).Status);
+            var self = await db.PortalUsers.SingleAsync(u => u.Email == "capo@example.com", TestContext.Current.CancellationToken);
+            Assert.Equal(PortalUserStatus.Approved, self.Status);
+            Assert.True(self.IsAdmin);
+            Assert.True(await db.AuditEvents.AnyAsync(e => e.Action == "user.approve" && e.Target == "attesa@example.com", TestContext.Current.CancellationToken));
+        }
+
+        await PostAsync("Remove", pendingId);
+        using (var scope = factory.Services.CreateScope())
+        {
+            Assert.False(await scope.ServiceProvider.GetRequiredService<AppDbContext>().PortalUsers.AnyAsync(u => u.Email == "attesa@example.com", TestContext.Current.CancellationToken));
         }
     }
 
     [Fact]
-    public async Task Bulk_edit_sets_gateway_and_hides_assets_of_several_companies()
+    public async Task Certificate_replaces_the_client_secret_when_redeeming_the_code()
     {
-        var client = await SignedInClientAsync("tecnico@example.com");
-        var page = await client.GetStringAsync(new Uri("/?c=1", UriKind.Relative), TestContext.Current.CancellationToken);
+        await factory.SeedAsync();
+        var admin = await SignedInClientAsync("capo@example.com");
+        var page = await admin.GetStringAsync(new Uri("/Admin/Settings", UriKind.Relative), TestContext.Current.CancellationToken);
         var token = TokenRegex().Match(page).Groups[1].Value;
-        Assert.Contains("data-pick=\"10\"", page, StringComparison.Ordinal);
+        var generate = await admin.PostAsync(new Uri("/Admin/Settings?handler=GenerateCertificate", UriKind.Relative),
+            new FormUrlEncodedContent(new Dictionary<string, string> { ["__RequestVerificationToken"] = token }), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Redirect, generate.StatusCode);
 
-        async Task<HttpResponseMessage> BulkAsync(Dictionary<string, string> values)
-        {
-            values["__RequestVerificationToken"] = token;
-            values["AssetIds"] = "10,20";
-            return await client.PostAsync(new Uri("/?handler=Bulk", UriKind.Relative), new FormUrlEncodedContent(values), TestContext.Current.CancellationToken);
-        }
+        // Si scarica solo il certificato pubblico, mai la chiave privata.
+        var download = await admin.GetAsync(new Uri("/Admin/Settings?handler=Certificate&next=true", UriKind.Relative), TestContext.Current.CancellationToken);
+        Assert.Equal("application/pkix-cert", download.Content.Headers.ContentType?.MediaType);
+        using var downloaded = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadCertificate(await download.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken));
+        Assert.False(downloaded.HasPrivateKey);
 
+        using var scope = factory.Services.CreateScope();
+        var settings = scope.ServiceProvider.GetRequiredService<SettingsService>();
+        var entra = settings.Entra;
+        Assert.True(entra.HasNextCertificate);
+        Assert.False(entra.UsesCertificate);
         try
         {
-            var editor = await client.GetStringAsync(new Uri("/?handler=BulkEditor&ids=10,20", UriKind.Relative), TestContext.Current.CancellationToken);
-            Assert.Contains("2 clienti", editor, StringComparison.Ordinal);
-
-            // Credenziale di un cliente su asset di due clienti: rifiutata.
-            Assert.Equal(HttpStatusCode.UnprocessableEntity, (await BulkAsync(new() { ["PasswordId"] = "5" })).StatusCode);
-            Assert.Equal(HttpStatusCode.UnprocessableEntity, (await BulkAsync(new())).StatusCode);
-
-            var ok = await BulkAsync(new() { ["GatewayMode"] = "set", ["Gateway"] = "999888777", ["Visibility"] = "hide" });
-            Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
-
-            using (var scope = factory.Services.CreateScope())
+            // Come dopo "Prova e attiva" (la prova vera richiede Entra).
+            await settings.SaveAsync(new Dictionary<string, string?>
             {
-                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                var settings = await db.AssetSettings.AsNoTracking().Where(a => a.AssetId == 10 || a.AssetId == 20).ToListAsync(TestContext.Current.CancellationToken);
-                Assert.Equal(2, settings.Count);
-                Assert.All(settings, s => Assert.True(s.Hidden && s.GatewayPeerId == "999888777"));
-                Assert.Equal(2, await db.AuditEvents.CountAsync(e => e.Details!.StartsWith("Modifica in blocco"), TestContext.Current.CancellationToken));
-            }
-
-            // Tornare al gateway automatico e visibili elimina le impostazioni rimaste vuote.
-            Assert.Equal(HttpStatusCode.OK, (await BulkAsync(new() { ["GatewayMode"] = "auto", ["Visibility"] = "show" })).StatusCode);
-            using (var scope = factory.Services.CreateScope())
-            {
-                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                Assert.False(await db.AssetSettings.AnyAsync(a => a.AssetId == 10 || a.AssetId == 20, TestContext.Current.CancellationToken));
-            }
+                [SettingKeys.EntraCertificate] = entra.NextCertificate,
+                [SettingKeys.EntraCertificateKey] = entra.NextCertificateKey,
+            }, "test");
+            var events = new EntraOidcEvents(scope.ServiceProvider.GetRequiredService<PortalPrincipalFactory>(), settings, scope.ServiceProvider.GetRequiredService<Audit.AuditService>());
+            var request = new OpenIdConnectMessage { ClientSecret = "segreto" };
+            var context = new Microsoft.AspNetCore.Authentication.OpenIdConnect.AuthorizationCodeReceivedContext(
+                new DefaultHttpContext(), new AuthenticationScheme(AuthSchemes.Entra, null, typeof(Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectHandler)),
+                new Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectOptions(), new AuthenticationProperties()) { TokenEndpointRequest = request };
+            await events.AuthorizationCodeReceived(context);
+            Assert.Null(request.ClientSecret);
+            Assert.Equal(EntraCredential.AssertionType, request.ClientAssertionType);
+            Assert.Equal("PS256", new JsonWebToken(request.ClientAssertion).Alg);
         }
         finally
         {
-            using var scope = factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            await db.AssetSettings.Where(a => a.AssetId == 10 || a.AssetId == 20).ExecuteDeleteAsync(TestContext.Current.CancellationToken);
+            await settings.SaveAsync(new Dictionary<string, string?>
+            {
+                [SettingKeys.EntraCertificate] = null,
+                [SettingKeys.EntraCertificateKey] = null,
+                [SettingKeys.EntraCertificateNext] = null,
+                [SettingKeys.EntraCertificateNextKey] = null,
+            }, "test");
         }
+    }
+
+    private async Task SetUserStatusAsync(string email, PortalUserStatus status)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await db.PortalUsers.Where(u => u.Email == email).ExecuteUpdateAsync(u => u.SetProperty(x => x.Status, status), TestContext.Current.CancellationToken);
     }
 
     [GeneratedRegex("<form method=\"post\" action=\"/Account/Logout\">.*?</form>", RegexOptions.Singleline)]

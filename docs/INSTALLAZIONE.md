@@ -16,8 +16,10 @@ Una sola registrazione serve sia al portale web sia all'app Windows.
    - Tipi di account: *Solo account in questa directory organizzativa*
    - URI di reindirizzamento: piattaforma **Web**, `https://launcher.example.com/signin-oidc`
 2. Annotare **ID applicazione (client)** e **ID directory (tenant)**.
-3. **Certificati e segreti → Nuovo segreto client** (scadenza 24 mesi). Copiare il *valore*: va
-   inserito nel portale. Mettere un promemoria per il rinnovo.
+3. **Credenziale dell'app: certificato** (consigliato, nessun segreto da copiare). Il certificato
+   si genera dal portale dopo l'installazione (sezione 4) e qui si carica solo la parte pubblica:
+   **Certificati e segreti → Certificati → Carica certificato**. In alternativa, un **segreto client**
+   (Certificati e segreti → Nuovo segreto client), da passare poi al certificato.
 4. **Esponi un'API**
    - URI ID applicazione: accettare `api://<client-id>`
    - **Aggiungi un ambito**: nome `Launcher.Connect`, consenso *Amministratori e utenti*,
@@ -35,8 +37,12 @@ Una sola registrazione serve sia al portale web sia all'app Windows.
 9. **Accesso condizionale** (consigliato): criterio sull'app *Hudu Launcher* con MFA
    obbligatoria e dispositivo conforme o aggiunto a Entra.
 
-Gli **amministratori del portale** non si decidono in Entra: si aggiungono dal portale
-(Amministrazione → Amministratori) con la loro email 365.
+**Chi entra lo decide anche il portale.** Al primo accesso con Microsoft 365 l'utente resta *in
+attesa* (nessun accesso) finché un amministratore non lo approva in **Amministrazione → Utenti**,
+come tecnico o come amministratore. Gli utenti sono riconosciuti dal loro *object ID* Entra, non
+dall'email; bloccarli o rimuoverli toglie l'accesso al portale e al Launcher entro un minuto. Così
+un errore di configurazione in Entra (ad esempio l'assegnazione obbligatoria dimenticata) non apre
+il portale a tutto il tenant.
 
 ---
 
@@ -204,7 +210,8 @@ portale, il blocco account e le regole del WAF.
   (es. `10.0.10.0/24`), non tutte le reti private; connessioni senza 365 **spente**.
 - WAF: solo HTTPS, limite di richieste per IP, blocco geografico se possibile, e
   `/Account/LocalLogin` e `/Setup` raggiungibili solo dagli IP interni.
-- Almeno due amministratori con accesso di emergenza e MFA configurata.
+- Almeno due accessi di emergenza con MFA configurata.
+- Credenziale Entra con **certificato** (niente segreto client) e utenti approvati uno per uno.
 
 ### Aggiornamento, backup, ripristino
 
@@ -222,11 +229,15 @@ leggono più (vanno reinseriti dalla sezione admin).
 ## 4. Configurazione iniziale del portale
 
 1. Aprire `https://launcher.example.com/Setup` e inserire il token preso dai log, la propria
-   email 365 e una password robusta: si crea il primo amministratore con accesso locale.
+   email e una password robusta: si crea il primo **accesso di emergenza** (amministratore locale).
 2. Al primo accesso locale si configura la verifica in due passaggi (Microsoft Authenticator) e si
    salvano i codici di recupero, ad esempio come password in Hudu.
 3. **Amministrazione → Impostazioni**
-   - *Microsoft 365*: tenant ID, client ID, segreto → **Prova**
+   - *Microsoft 365*: tenant ID e client ID → **Salva**; poi **Genera certificato**, scaricare il
+     `.cer`, caricarlo in Entra (Certificati e segreti → Certificati) e premere **Prova e attiva**.
+     La chiave privata resta cifrata nel portale e non si scarica. Il certificato dura 2 anni: un
+     mese prima della scadenza la pagina di stato lo segnala; il rinnovo è lo stesso percorso e
+     la credenziale attuale resta valida finché il nuovo certificato non è attivo.
    - *Hudu*: indirizzo `https://yourcompany.huducloud.com` e chiave → **Prova**
    - *RustDesk*: indirizzo API, token, password di connessione → **Prova**
    - *Portale*: reti ammesse per l'accesso admin di emergenza (solo reti interne o VPN).
@@ -252,9 +263,11 @@ leggono più (vanno reinseriti dalla sezione admin).
    IP del layout; se ne ha più di uno, chiede di scegliere quello giusto (vale il campo IP del
    layout, se coincide con uno di questi). Dopo una modifica in Hudu, **Aggiorna da Hudu** nella
    pagina del cliente rilegge subito solo quel cliente (al massimo una volta al minuto).
-6. **Amministratori**: aggiungere le email 365 degli altri admin.
-7. Uscire e rientrare con **Accedi con Microsoft 365**: da quel momento l'accesso locale serve
-   solo per le emergenze.
+6. **Accessi di emergenza**: crearne almeno un secondo (password robusta + app di autenticazione).
+7. Entrare con **Accedi con Microsoft 365**: la richiesta finisce in attesa. Con l'accesso di
+   emergenza approvarla in **Utenti → Come admin**; da quel momento l'accesso locale serve solo per
+   le emergenze. I colleghi che entrano dopo si approvano allo stesso modo (il pulsante Admin mostra
+   quante richieste sono in attesa).
 
 ---
 

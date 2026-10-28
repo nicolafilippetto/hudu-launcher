@@ -53,7 +53,7 @@ public sealed class LocalLoginModel(SettingsService settings, UserManager<Identi
 
         var email = LoginEmail.Trim().ToLowerInvariant();
         var user = await users.FindByEmailAsync(email);
-        if (user is null || await users.IsLockedOutAsync(user) || !await principals.IsAdminAsync(email))
+        if (user is null || await users.IsLockedOutAsync(user) || !await principals.IsBreakGlassAsync(email))
         {
             await audit.WriteAsync(new AuditEntry("login.local", email, Success: false, Details: user is null ? "utente inesistente" : "bloccato o non admin"), HttpContext);
             Error = generic;

@@ -213,6 +213,11 @@ input[type="file"].input { padding: 5px; height: auto; }
 .input-row { display: flex; gap: 6px; }
 .input-row .input { flex: 1; min-width: 0; }
 .actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
+form.inline { display: inline-flex; margin: 0; }
+.credential-box { margin-top: 16px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.credential-box h3 { font-size: 13.5px; margin-bottom: 8px; }
+.credential-box p { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.steps { margin: 8px 0 10px; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
 .inline-form { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 
 .switch { position: relative; display: inline-block; width: 36px; height: 20px; }
@@ -319,6 +324,8 @@ input[type="file"].input { padding: 5px; height: auto; }
 .company-list { flex: 1; overflow-y: auto; min-height: 0; padding-right: 2px; }
 .company-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .company-count, .count { font-size: 11.5px; color: var(--muted); background: var(--surface-2); border-radius: 999px; padding: 0 7px; font-weight: 600; }
+.badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--primary); color: var(--primary-contrast); font-size: 11px; font-weight: 700; line-height: 1; }
+.nav-item .badge { margin-left: auto; }
 .company-item.active .company-count { background: var(--primary); color: var(--primary-contrast); }
 
 .content { padding: 22px 28px 60px; min-width: 0; }

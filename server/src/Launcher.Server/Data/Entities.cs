@@ -10,7 +10,7 @@ public enum ConnectionProtocol
     Https = 5,
 }
 
-/// <summary>Amministratore del portale. Chi accede con 365 e ha questa email è admin.</summary>
+/// <summary>Accesso di emergenza (break-glass): utente locale con password e MFA, sempre amministratore.</summary>
 public sealed class AdminEntry
 {
     public int Id { get; set; }
@@ -18,6 +18,36 @@ public sealed class AdminEntry
     public string? DisplayName { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public string? CreatedBy { get; set; }
+}
+
+public enum PortalUserStatus
+{
+    /// <summary>Primo accesso con Microsoft 365: nessun accesso finché un amministratore non approva.</summary>
+    Pending = 0,
+    Approved = 1,
+    /// <summary>Bloccato: resta tale anche ai prossimi accessi.</summary>
+    Blocked = 2,
+}
+
+/// <summary>
+/// Utente Microsoft 365 riconosciuto dal suo identificativo immutabile (tenant + object ID), non
+/// dall'email. Al primo accesso finisce in attesa; può entrare solo dopo l'approvazione di un
+/// amministratore. Email e nome si aggiornano a ogni accesso e servono solo per la visualizzazione.
+/// </summary>
+public sealed class PortalUser
+{
+    public int Id { get; set; }
+    public required string TenantId { get; set; }
+    public required string ObjectId { get; set; }
+    public required string Email { get; set; }
+    public string? DisplayName { get; set; }
+    public PortalUserStatus Status { get; set; }
+    public bool IsAdmin { get; set; }
+    public DateTimeOffset FirstSeenAt { get; set; }
+    public DateTimeOffset? LastLoginAt { get; set; }
+    public string? LastIp { get; set; }
+    public DateTimeOffset? DecidedAt { get; set; }
+    public string? DecidedBy { get; set; }
 }
 
 /// <summary>Impostazione del portale. I valori segreti sono cifrati.</summary>

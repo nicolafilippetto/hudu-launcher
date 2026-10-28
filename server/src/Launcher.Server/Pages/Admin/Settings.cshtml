@@ -16,18 +16,68 @@
     <h2 class="card-title"><svg><use href="#i-shield" /></svg>Microsoft 365 (Entra ID)</h2>
     <p class="muted small">
         Registrazione app in Entra con URI di reindirizzamento web <code>@Model.RedirectUri</code>.
-        Chi può entrare si decide in Entra: "Assegnazione utente obbligatoria" sull'app aziendale e gruppi assegnati.
-        Gli admin del portale sono quelli nell'elenco "Amministratori"; tutti gli altri utenti sono tecnici.
+        Chi entra con Microsoft 365 per la prima volta va approvato in <a href="/Admin/Users">Utenti</a>; in Entra conviene
+        comunque attivare "Assegnazione utente obbligatoria" e l'Accesso condizionale sull'app.
     </p>
     <form method="post" asp-page-handler="Entra" class="grid grid-3">
         <label class="field"><span>ID tenant</span><input class="input mono" name="tenantId" value="@Model.Entra.TenantId" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" /></label>
         <label class="field"><span>ID applicazione (client)</span><input class="input mono" name="clientId" value="@Model.Entra.ClientId" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" /></label>
-        <label class="field"><span>Segreto client</span><input class="input mono" type="password" name="clientSecret" placeholder="@SecretHint(SettingKeys.EntraClientSecret)" autocomplete="new-password" /></label>
+        @if (!Model.Entra.UsesCertificate)
+        {
+            <label class="field"><span>Segreto client (in alternativa al certificato)</span><input class="input mono" type="password" name="clientSecret" placeholder="@SecretHint(SettingKeys.EntraClientSecret)" autocomplete="new-password" /></label>
+        }
         <div class="actions span-all">
             <button class="btn btn-primary" type="submit">Salva</button>
             <button class="btn btn-secondary" type="submit" asp-page-handler="TestEntra">Prova</button>
         </div>
     </form>
+
+    <div class="credential-box">
+        <h3>Credenziale dell'app</h3>
+        @if (Model.Certificate is { } active)
+        {
+            <p>
+                <span class="chip @(Model.CertificateExpiresSoon ? "chip-warn" : "chip-ok")">Certificato attivo</span>
+                <span class="small muted">impronta <span class="mono">@active.Thumbprint</span>, scade il @active.NotAfter.ToString("dd/MM/yyyy")</span>
+                <a class="small" href="?handler=Certificate">Scarica (.cer)</a>
+            </p>
+            @if (Model.CertificateExpiresSoon)
+            {
+                <p class="small text-warn">Il certificato scade entro 30 giorni: generane uno nuovo e attivalo prima della scadenza.</p>
+            }
+        }
+        else
+        {
+            <p>
+                <span class="chip @(Model.HasSecret(SettingKeys.EntraClientSecret) ? "chip-warn" : "")">@(Model.HasSecret(SettingKeys.EntraClientSecret) ? "Segreto client" : "Nessuna credenziale")</span>
+                <span class="small muted">Consigliato il certificato: la chiave privata resta cifrata in questo server e in Entra si carica solo la parte pubblica.</span>
+            </p>
+        }
+
+        @if (Model.NextCertificate is { } next)
+        {
+            <ol class="small steps">
+                <li><a href="?handler=Certificate&amp;next=true">Scarica il nuovo certificato (.cer)</a> — impronta <span class="mono">@next.Thumbprint</span>, scade il @next.NotAfter.ToString("dd/MM/yyyy").</li>
+                <li>In Entra: Registrazione app → Certificati e segreti → Certificati → Carica certificato.</li>
+                <li>Prova e attiva: fino ad allora resta valida la credenziale attuale.</li>
+            </ol>
+            <div class="actions">
+                <form method="post" asp-page-handler="DiscardCertificate" class="inline" data-confirm="Scartare il nuovo certificato?">
+                    <button class="btn btn-ghost btn-sm" type="submit">Scarta</button>
+                </form>
+                <form method="post" asp-page-handler="ActivateCertificate" class="inline">
+                    <button class="btn btn-primary btn-sm" type="submit">Prova e attiva</button>
+                </form>
+            </div>
+        }
+        else
+        {
+            <form method="post" asp-page-handler="GenerateCertificate" class="inline">
+                <button class="btn btn-secondary btn-sm" type="submit">@(Model.Certificate is null ? "Genera certificato" : "Genera un nuovo certificato (rinnovo)")</button>
+            </form>
+        }
+    </div>
+
     @if (Model.Entra.IsConfigured)
     {
         <p class="muted small">Scope per il connettore Windows: <code>@Model.Entra.ConnectorScope</code></p>

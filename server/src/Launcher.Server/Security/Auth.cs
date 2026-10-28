@@ -42,6 +42,7 @@ public static class LauncherClaims
 {
     public const string AuthMethod = "auth_method";
     public const string ObjectId = "oid";
+    public const string TenantId = "tid";
     public const string ValidatedAt = "validated_at";
     public const string MethodEntra = "entra";
     public const string MethodLocal = "local";
@@ -66,22 +67,63 @@ public static class LauncherClaims
     }
 }
 
-/// <summary>Costruisce l'identità del portale e decide il ruolo (admin se l'email è nell'elenco).</summary>
+/// <summary>
+/// Identità del portale. Gli utenti Microsoft 365 sono riconosciuti da tenant + object ID e
+/// devono essere approvati da un amministratore; gli accessi di emergenza locali sono sempre admin.
+/// </summary>
 public sealed class PortalPrincipalFactory(IDbContextFactory<AppDbContext> dbFactory)
 {
-    public async Task<bool> IsAdminAsync(string email, CancellationToken cancellationToken = default)
+    /// <summary>true se l'email è un accesso di emergenza (break-glass) locale.</summary>
+    public async Task<bool> IsBreakGlassAsync(string email, CancellationToken cancellationToken = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
         var normalized = email.Trim().ToLowerInvariant();
         return await db.Admins.AnyAsync(a => a.Email == normalized, cancellationToken);
     }
 
-    public async Task<ClaimsPrincipal> CreateAsync(string email, string? name, string? objectId, string authMethod, CancellationToken cancellationToken = default)
+    /// <summary>Utente 365 approvato, oppure null (sconosciuto, in attesa o bloccato).</summary>
+    public async Task<PortalUser?> FindApprovedAsync(string? tenantId, string? objectId, CancellationToken cancellationToken = default)
     {
-        var isAdmin = await IsAdminAsync(email, cancellationToken);
+        if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(objectId))
+        {
+            return null;
+        }
+
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        return await db.PortalUsers.AsNoTracking().FirstOrDefaultAsync(
+            u => u.TenantId == tenantId && u.ObjectId == objectId && u.Status == PortalUserStatus.Approved, cancellationToken);
+    }
+
+    /// <summary>
+    /// Registra un accesso con Microsoft 365: al primo accesso crea l'utente in attesa di
+    /// approvazione, poi aggiorna email, nome, data e IP. Restituisce l'utente e se è nuovo.
+    /// </summary>
+    public async Task<(PortalUser User, bool IsNew)> RegisterEntraLoginAsync(
+        string tenantId, string objectId, string email, string? name, string? ip, CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var user = await db.PortalUsers.FirstOrDefaultAsync(u => u.TenantId == tenantId && u.ObjectId == objectId, cancellationToken);
+        var isNew = user is null;
+        if (user is null)
+        {
+            user = new PortalUser { TenantId = tenantId, ObjectId = objectId, Email = email, Status = PortalUserStatus.Pending, FirstSeenAt = now };
+            db.PortalUsers.Add(user);
+        }
+
+        user.Email = email;
+        user.DisplayName = string.IsNullOrWhiteSpace(name) ? null : name.Trim()[..Math.Min(name.Trim().Length, 256)];
+        user.LastLoginAt = now;
+        user.LastIp = ip;
+        await db.SaveChangesAsync(cancellationToken);
+        return (user, isNew);
+    }
+
+    public static ClaimsPrincipal Create(string email, string? name, string authMethod, bool isAdmin, string? tenantId = null, string? objectId = null)
+    {
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, email),
+            new(ClaimTypes.NameIdentifier, objectId ?? email),
             new(ClaimTypes.Email, email),
             new(ClaimTypes.Name, string.IsNullOrWhiteSpace(name) ? email : name),
             new(ClaimTypes.Role, Roles.Technician),
@@ -93,13 +135,17 @@ public sealed class PortalPrincipalFactory(IDbContextFactory<AppDbContext> dbFac
             claims.Add(new Claim(ClaimTypes.Role, Roles.Admin));
         }
 
-        if (!string.IsNullOrWhiteSpace(objectId))
+        if (!string.IsNullOrWhiteSpace(objectId) && !string.IsNullOrWhiteSpace(tenantId))
         {
             claims.Add(new Claim(LauncherClaims.ObjectId, objectId));
+            claims.Add(new Claim(LauncherClaims.TenantId, tenantId));
         }
 
         return new ClaimsPrincipal(new ClaimsIdentity(claims, AuthSchemes.Portal, ClaimTypes.Name, ClaimTypes.Role));
     }
+
+    public static ClaimsPrincipal Create(PortalUser user) =>
+        Create(user.Email, user.DisplayName, LauncherClaims.MethodEntra, user.IsAdmin, user.TenantId, user.ObjectId);
 }
 
 /// <summary>
@@ -147,7 +193,8 @@ public sealed class EntraOptionsSetup(SettingsService settings) :
         {
             options.Authority = $"https://login.microsoftonline.com/{entra.TenantId}/v2.0";
             options.ClientId = entra.ClientId;
-            options.ClientSecret = entra.ClientSecret;
+            // Con il certificato non si invia alcun segreto: l'asserzione si aggiunge in AuthorizationCodeReceived.
+            options.ClientSecret = entra.UsesCertificate ? null : entra.ClientSecret;
             options.TokenValidationParameters.ValidIssuer = $"https://login.microsoftonline.com/{entra.TenantId}/v2.0";
         }
         else
@@ -200,27 +247,55 @@ public sealed class EntraOidcEvents(PortalPrincipalFactory principals, SettingsS
         return Task.CompletedTask;
     }
 
+    /// <summary>Scambio del codice: con il certificato il portale si presenta con un'asserzione firmata.</summary>
+    public override Task AuthorizationCodeReceived(AuthorizationCodeReceivedContext context)
+    {
+        var entra = settings.Entra;
+        if (entra.UsesCertificate && context.TokenEndpointRequest is { } request)
+        {
+            request.ClientSecret = null;
+            request.ClientAssertionType = EntraCredential.AssertionType;
+            request.ClientAssertion = EntraCredential.CreateAssertion(entra.TenantId!, entra.ClientId!, entra.Certificate!, entra.CertificateKey!, TimeProvider.System);
+        }
+
+        return Task.CompletedTask;
+    }
+
     public override async Task TokenValidated(Microsoft.AspNetCore.Authentication.OpenIdConnect.TokenValidatedContext context)
     {
         var principal = context.Principal!;
         var tenantId = principal.FindFirstValue("tid");
+        var objectId = principal.FindFirstValue("oid");
         var email = LauncherClaims.EmailFromEntra(principal);
-        if (!string.Equals(tenantId, settings.Entra.TenantId, StringComparison.OrdinalIgnoreCase) || email is null)
+        if (!string.Equals(tenantId, settings.Entra.TenantId, StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(objectId) || email is null)
         {
-            await audit.WriteAsync(new AuditEntry("login", email, Success: false, Details: "Token Entra senza email o di un altro tenant"), context.HttpContext);
+            await audit.WriteAsync(new AuditEntry("login", email, Success: false, Details: "Token Entra senza identificativo o di un altro tenant"), context.HttpContext);
             context.Fail("Utente non valido.");
             return;
         }
 
-        context.Principal = await principals.CreateAsync(
-            email,
-            principal.FindFirstValue("name"),
-            principal.FindFirstValue("oid"),
-            LauncherClaims.MethodEntra,
-            context.HttpContext.RequestAborted);
+        var (user, isNew) = await principals.RegisterEntraLoginAsync(
+            tenantId!.ToLowerInvariant(), objectId, email, principal.FindFirstValue("name"),
+            context.HttpContext.Connection.RemoteIpAddress?.ToString(), context.HttpContext.RequestAborted);
+        if (isNew)
+        {
+            await audit.WriteAsync(new AuditEntry("user.request", email, Details: "Primo accesso con Microsoft 365: in attesa di approvazione"), context.HttpContext);
+        }
+
+        if (user.Status != PortalUserStatus.Approved)
+        {
+            // Autenticato da Microsoft ma non autorizzato: nessuna sessione, solo un messaggio.
+            var blocked = user.Status == PortalUserStatus.Blocked;
+            await audit.WriteAsync(new AuditEntry("login", email, Success: false, Details: blocked ? "utente bloccato" : "in attesa di approvazione"), context.HttpContext);
+            context.Response.Redirect("/Account/Login?status=" + (blocked ? "blocked" : "pending"));
+            context.HandleResponse();
+            return;
+        }
+
+        context.Principal = PortalPrincipalFactory.Create(user);
         context.Properties!.IsPersistent = false;
         context.Properties.ExpiresUtc = DateTimeOffset.UtcNow.AddHours(settings.Portal.SessionHours);
-        await audit.WriteAsync(new AuditEntry("login", email, Details: "Microsoft 365"), context.HttpContext);
+        await audit.WriteAsync(new AuditEntry("login", user.Email, Details: "Microsoft 365"), context.HttpContext);
     }
 
     public override Task RemoteFailure(RemoteFailureContext context)
@@ -231,38 +306,45 @@ public sealed class EntraOidcEvents(PortalPrincipalFactory principals, SettingsS
     }
 }
 
-/// <summary>Il token del connettore deve contenere lo scope del Launcher e venire dal tenant giusto.</summary>
-public sealed class ConnectorJwtEvents(SettingsService settings) : JwtBearerEvents
+/// <summary>
+/// Il token del connettore deve contenere lo scope del Launcher, venire dal tenant giusto ed
+/// essere di un utente approvato nel portale (riconosciuto dall'object ID, non dall'email).
+/// </summary>
+public sealed class ConnectorJwtEvents(SettingsService settings, PortalPrincipalFactory principals) : JwtBearerEvents
 {
-    public override Task TokenValidated(Microsoft.AspNetCore.Authentication.JwtBearer.TokenValidatedContext context)
+    public override async Task TokenValidated(Microsoft.AspNetCore.Authentication.JwtBearer.TokenValidatedContext context)
     {
         var principal = context.Principal!;
         var scopes = (principal.FindFirstValue("scp") ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var tenantId = principal.FindFirstValue("tid");
-        var email = LauncherClaims.EmailFromEntra(principal);
         if (!scopes.Contains(EntraSettings.ConnectorScopeName, StringComparer.Ordinal)
-            || !string.Equals(tenantId, settings.Entra.TenantId, StringComparison.OrdinalIgnoreCase)
-            || email is null)
+            || !string.Equals(tenantId, settings.Entra.TenantId, StringComparison.OrdinalIgnoreCase))
         {
             context.Fail("Token non valido per il Launcher.");
-            return Task.CompletedTask;
+            return;
+        }
+
+        var user = await principals.FindApprovedAsync(tenantId!.ToLowerInvariant(), principal.FindFirstValue("oid"), context.HttpContext.RequestAborted);
+        if (user is null)
+        {
+            context.Fail("Utente non approvato nel portale.");
+            return;
         }
 
         var identity = new ClaimsIdentity(
-            [new Claim(ClaimTypes.Email, email), new Claim(ClaimTypes.Name, principal.FindFirstValue("name") ?? email)],
+            [new Claim(ClaimTypes.Email, user.Email), new Claim(ClaimTypes.Name, user.DisplayName ?? user.Email)],
             AuthSchemes.Connector, ClaimTypes.Name, ClaimTypes.Role);
         context.Principal = new ClaimsPrincipal(identity);
-        return Task.CompletedTask;
     }
 }
 
 /// <summary>
-/// Ricontrolla la sessione ogni 5 minuti: un admin rimosso dall'elenco perde subito il ruolo,
-/// un account locale eliminato perde la sessione.
+/// Ricontrolla la sessione ogni minuto: un utente bloccato o rimosso, o un accesso di emergenza
+/// eliminato, perde la sessione; un cambio di ruolo vale subito.
 /// </summary>
 public sealed class PortalCookieEvents(PortalPrincipalFactory principals, IDbContextFactory<AppDbContext> dbFactory) : CookieAuthenticationEvents
 {
-    private static readonly TimeSpan RevalidateEvery = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan RevalidateEvery = TimeSpan.FromMinutes(1);
 
     public override async Task ValidatePrincipal(CookieValidatePrincipalContext context)
     {
@@ -275,33 +357,35 @@ public sealed class PortalCookieEvents(PortalPrincipalFactory principals, IDbCon
             return;
         }
 
+        var ct = context.HttpContext.RequestAborted;
         var email = principal.GetEmail();
-        var method = principal.FindFirstValue(LauncherClaims.AuthMethod);
-        if (email is null)
+        ClaimsPrincipal? renewed = null;
+        if (principal.FindFirstValue(LauncherClaims.AuthMethod) == LauncherClaims.MethodLocal && email is not null)
         {
-            context.RejectPrincipal();
-            return;
-        }
-
-        if (method == LauncherClaims.MethodLocal)
-        {
-            await using var db = await dbFactory.CreateDbContextAsync(context.HttpContext.RequestAborted);
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
             var normalized = email.ToUpperInvariant();
-            var exists = await db.Users.AnyAsync(u => u.NormalizedEmail == normalized, context.HttpContext.RequestAborted);
-            if (!exists || !await principals.IsAdminAsync(email, context.HttpContext.RequestAborted))
+            if (await db.Users.AnyAsync(u => u.NormalizedEmail == normalized, ct) && await principals.IsBreakGlassAsync(email, ct))
             {
-                context.RejectPrincipal();
-                await context.HttpContext.SignOutAsync(AuthSchemes.Portal);
-                return;
+                renewed = PortalPrincipalFactory.Create(email, principal.FindFirstValue(ClaimTypes.Name), LauncherClaims.MethodLocal, isAdmin: true);
+            }
+        }
+        else
+        {
+            var user = await principals.FindApprovedAsync(principal.FindFirstValue(LauncherClaims.TenantId), principal.FindFirstValue(LauncherClaims.ObjectId), ct);
+            if (user is not null)
+            {
+                renewed = PortalPrincipalFactory.Create(user);
             }
         }
 
-        context.ReplacePrincipal(await principals.CreateAsync(
-            email,
-            principal.FindFirstValue(ClaimTypes.Name),
-            principal.FindFirstValue(LauncherClaims.ObjectId),
-            method ?? LauncherClaims.MethodEntra,
-            context.HttpContext.RequestAborted));
+        if (renewed is null)
+        {
+            context.RejectPrincipal();
+            await context.HttpContext.SignOutAsync(AuthSchemes.Portal);
+            return;
+        }
+
+        context.ReplacePrincipal(renewed);
         context.ShouldRenew = true;
     }
 

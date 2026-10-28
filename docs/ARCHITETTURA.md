@@ -110,17 +110,19 @@ prendono da Hudu, e per il web il portale non invia nemmeno la credenziale al La
 | Biglietto intercettato o finito in cronologia | Monouso, 30 s, valido solo per l'utente a cui è stato emesso |
 | Accesso diretto al container saltando il WAF | Porta esposta solo verso il WAF; senza HTTPS inoltrato da un proxy fidato il portale rifiuta le richieste; l'identità si valida comunque |
 | Brute force sull'accesso admin di emergenza | Solo da reti ammesse, blocco dopo 5 tentativi, limite per IP, MFA TOTP obbligatoria |
-| Tecnico che lascia l'azienda | Disabilitazione in 365: accesso perso al portale e a RustDesk |
+| Tecnico che lascia l'azienda | Blocco o rimozione in Amministrazione → Utenti (effetto entro un minuto) e disabilitazione in 365 |
 | Nessuna tracciabilità nel registro Hudu (vede solo "chiave API") | Registro del server: utente, ora, asset, protocollo, IP |
 
 ### 4.3 Identità
 
-- **Browser:** il portale fa da sé il login OIDC con Entra (codice + PKCE). Basta l'email: se è
-  nell'elenco admin del portale l'utente è amministratore, altrimenti tecnico. Chi può entrare si
-  decide in Entra (assegnazione obbligatoria + gruppi).
+- **Browser:** il portale fa da sé il login OIDC con Entra (codice + PKCE), presentandosi con un
+  certificato (asserzione firmata) invece di un segreto. L'utente è identificato da tenant + object
+  ID: al primo accesso resta in attesa finché un amministratore non lo approva nel portale, come
+  tecnico o amministratore. Assegnazione obbligatoria e gruppi in Entra restano una seconda barriera.
 - **Connettore:** client pubblico MSAL con broker di Windows (WAM) sulla stessa registrazione
   dell'app; chiede lo scope `api://<client-id>/Launcher.Connect`. Il server valida il token
-  (firma, emittente, audience, tenant, scope) e confronta l'email con quella del biglietto.
+  (firma, emittente, audience, tenant, scope), verifica che l'object ID sia di un utente approvato e
+  che sia lo stesso utente del biglietto.
 - **Accesso locale di emergenza:** solo admin, password + TOTP obbligatorio, solo dalle reti
   ammesse nelle impostazioni.
 

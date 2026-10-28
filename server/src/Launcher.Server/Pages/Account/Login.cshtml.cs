@@ -15,7 +15,7 @@ public sealed class LoginModel(SettingsService settings, SetupState setup) : Lau
 
     public string? ReturnUrl { get; private set; }
 
-    public IActionResult OnGet(string? returnUrl, string? error, bool loggedOut)
+    public IActionResult OnGet(string? returnUrl, string? error, string? status, bool loggedOut)
     {
         if (setup.IsActive)
         {
@@ -29,8 +29,10 @@ public sealed class LoginModel(SettingsService settings, SetupState setup) : Lau
 
         ReturnUrl = SafeReturnUrl(returnUrl);
         LocalAvailable = NetworkAllowList.Contains(settings.Portal.LocalLoginNetworks, HttpContext.Connection.RemoteIpAddress);
-        Message = error switch
+        Message = (error ?? status) switch
         {
+            "pending" => "Richiesta di accesso registrata. Un amministratore deve approvarla: dopo potrai entrare con Microsoft 365.",
+            "blocked" => "Il tuo accesso al portale è stato bloccato da un amministratore.",
             "entra-not-configured" => "L'accesso con Microsoft 365 non è ancora configurato. Un amministratore deve completarlo dalla sezione admin.",
             "entra-failed" => "Accesso con Microsoft 365 non riuscito o annullato. Se non sei abilitato all'app, chiedi l'accesso al reparto IT.",
             _ => loggedOut ? "Sei uscito dal portale." : null,

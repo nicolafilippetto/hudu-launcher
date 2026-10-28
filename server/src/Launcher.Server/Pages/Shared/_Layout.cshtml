@@ -47,7 +47,14 @@
         <nav class="topnav">
             @if (User.IsAdmin())
             {
-                <a class="btn btn-ghost" href="/Admin" title="Amministrazione"><svg><use href="#i-settings" /></svg><span class="hide-sm">Admin</span></a>
+                var pendingUsers = Info.PendingUsers;
+                <a class="btn btn-ghost" href="@(pendingUsers > 0 ? "/Admin/Users" : "/Admin")" title="@(pendingUsers > 0 ? $"Amministrazione: {pendingUsers} richieste di accesso da approvare" : "Amministrazione")">
+                    <svg><use href="#i-settings" /></svg><span class="hide-sm">Admin</span>
+                    @if (pendingUsers > 0)
+                    {
+                        <span class="badge">@pendingUsers</span>
+                    }
+                </a>
             }
             <button type="button" class="btn btn-ghost btn-icon" data-theme-toggle title="Tema">
                 <svg class="theme-light"><use href="#i-sun" /></svg>

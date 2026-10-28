@@ -46,7 +46,9 @@ public static class Format
         {
             < 60 => "pochi secondi fa",
             < 3600 => $"{(int)delta.TotalMinutes} min fa",
+            < 7200 => "1 ora fa",
             < 86400 => $"{(int)delta.TotalHours} ore fa",
+            < 172800 => "ieri",
             _ => $"{(int)delta.TotalDays} giorni fa",
         };
     }
@@ -95,4 +97,7 @@ public sealed class LayoutInfo(SettingsService settings, AppDbContext db)
     public int OfflineMaxAssets => settings.Portal.OfflineMaxAssets;
 
     public int OfflineMinutes => settings.Portal.OfflineMinutes;
+
+    /// <summary>Richieste di accesso da approvare (mostrate agli amministratori).</summary>
+    public int PendingUsers => db.PortalUsers.Count(u => u.Status == Data.PortalUserStatus.Pending);
 }

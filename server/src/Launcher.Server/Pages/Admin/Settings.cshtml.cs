@@ -7,8 +7,14 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Launcher.Server.Pages.Admin;
 
-public sealed class SettingsModel(SettingsService settings, AuditService audit, IServiceProvider services, IHttpClientFactory httpFactory, IHostEnvironment environment) : LauncherPageModel
+public sealed class SettingsModel(SettingsService settings, AuditService audit, IServiceProvider services, IHttpClientFactory httpFactory, IHostEnvironment environment, TimeProvider time) : LauncherPageModel
 {
+    public EntraCertificateInfo? Certificate => EntraCredential.Describe(settings.Entra.Certificate);
+
+    public EntraCertificateInfo? NextCertificate => settings.Entra.HasNextCertificate ? EntraCredential.Describe(settings.Entra.NextCertificate) : null;
+
+    public bool CertificateExpiresSoon => Certificate?.ExpiresSoon(time) == true;
+
     public PortalSettings Portal => settings.Portal;
     public HuduSettings Hudu => settings.Hudu;
     public RustDeskSettings RustDesk => settings.RustDesk;
@@ -195,43 +201,125 @@ public sealed class SettingsModel(SettingsService settings, AuditService audit, 
         return RedirectToPage(null, null, "rustdesk");
     }
 
-    /// <summary>Verifica tenant e segreto chiedendo a Entra un token "client credentials".</summary>
+    /// <summary>Verifica tenant e credenziale attiva (certificato o segreto) con un token "client credentials".</summary>
     public async Task<IActionResult> OnPostTestEntraAsync(CancellationToken ct)
     {
         var entra = settings.Entra;
         if (!entra.IsConfigured)
         {
-            FlashError = "Completa tenant ID, client ID e segreto.";
+            FlashError = "Completa tenant ID, client ID e la credenziale (certificato o segreto).";
             return RedirectToPage(null, null, "entra");
         }
 
-        using var client = httpFactory.CreateClient();
-        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        var error = entra.UsesCertificate
+            ? await TryCredentialAsync(entra, entra.Certificate!, entra.CertificateKey!, null, ct)
+            : await TryCredentialAsync(entra, null, null, entra.ClientSecret, ct);
+        if (error is null)
         {
-            ["client_id"] = entra.ClientId!,
-            ["client_secret"] = entra.ClientSecret!,
-            ["grant_type"] = "client_credentials",
-            ["scope"] = "https://graph.microsoft.com/.default",
-        });
-        try
-        {
-            using var response = await client.PostAsync(new Uri($"https://login.microsoftonline.com/{entra.TenantId}/oauth2/v2.0/token"), content, ct);
-            if (response.IsSuccessStatusCode)
-            {
-                Flash = "Microsoft 365 risponde: tenant, client ID e segreto sono corretti.";
-            }
-            else
-            {
-                var body = await response.Content.ReadAsStringAsync(ct);
-                FlashError = "Entra ha rifiutato i dati: " + ExtractAadError(body);
-            }
+            Flash = $"Microsoft 365 risponde: tenant, client ID e {(entra.UsesCertificate ? "certificato" : "segreto")} sono corretti.";
         }
-        catch (Exception ex) when (HuduClient.IsNetworkError(ex, ct))
+        else
         {
-            FlashError = "Entra non raggiungibile: " + HuduClient.NetworkErrorText(ex);
+            FlashError = error;
         }
 
         return RedirectToPage(null, null, "entra");
+    }
+
+    /// <summary>
+    /// Nuovo certificato: si genera qui (la chiave privata non lascia il server), si carica il
+    /// certificato pubblico in Entra e poi si prova e attiva. Fino ad allora resta valida la
+    /// credenziale attuale, così il login non si interrompe.
+    /// </summary>
+    public async Task<IActionResult> OnPostGenerateCertificateAsync()
+    {
+        var (certificate, key) = EntraCredential.Generate($"Hudu Launcher ({Request.Host.Host})", time);
+        await SaveAsync(new Dictionary<string, string?>
+        {
+            [SettingKeys.EntraCertificateNext] = certificate,
+            [SettingKeys.EntraCertificateNextKey] = key,
+        }, "Microsoft 365: nuovo certificato generato");
+        Flash = "Certificato generato. Scaricalo, caricalo in Entra (Registrazione app → Certificati e segreti → Certificati) e poi premi \"Prova e attiva\".";
+        return RedirectToPage(null, null, "entra");
+    }
+
+    /// <summary>Certificato pubblico (.cer) da caricare in Entra; la chiave privata non si scarica.</summary>
+    public IActionResult OnGetCertificate(bool next)
+    {
+        var info = next ? NextCertificate : Certificate;
+        return info is null ? NotFound() : File(info.RawData, "application/pkix-cert", next ? "hudu-launcher-entra-nuovo.cer" : "hudu-launcher-entra.cer");
+    }
+
+    public async Task<IActionResult> OnPostActivateCertificateAsync(CancellationToken ct)
+    {
+        var entra = settings.Entra;
+        if (!entra.HasNextCertificate || !Guid.TryParse(entra.TenantId, out _) || !Guid.TryParse(entra.ClientId, out _))
+        {
+            FlashError = "Imposta tenant e client ID e genera prima un certificato.";
+            return RedirectToPage(null, null, "entra");
+        }
+
+        var error = await TryCredentialAsync(entra, entra.NextCertificate!, entra.NextCertificateKey!, null, ct);
+        if (error is not null)
+        {
+            FlashError = error + " Il certificato è stato caricato in Entra per questa app?";
+            return RedirectToPage(null, null, "entra");
+        }
+
+        // Attivo: il segreto non serve più e si elimina anche dal portale.
+        await SaveAsync(new Dictionary<string, string?>
+        {
+            [SettingKeys.EntraCertificate] = entra.NextCertificate,
+            [SettingKeys.EntraCertificateKey] = entra.NextCertificateKey,
+            [SettingKeys.EntraCertificateNext] = null,
+            [SettingKeys.EntraCertificateNextKey] = null,
+            [SettingKeys.EntraClientSecret] = null,
+        }, "Microsoft 365: certificato attivato");
+        Flash = "Certificato attivo: il portale accede a Entra senza segreto. Elimina il segreto client (e l'eventuale certificato precedente) dalla registrazione app in Entra.";
+        return RedirectToPage(null, null, "entra");
+    }
+
+    public async Task<IActionResult> OnPostDiscardCertificateAsync()
+    {
+        await SaveAsync(new Dictionary<string, string?>
+        {
+            [SettingKeys.EntraCertificateNext] = null,
+            [SettingKeys.EntraCertificateNextKey] = null,
+        }, "Microsoft 365: nuovo certificato scartato");
+        Flash = "Nuovo certificato scartato.";
+        return RedirectToPage(null, null, "entra");
+    }
+
+    /// <summary>Chiede a Entra un token "client credentials": null se la credenziale funziona, altrimenti l'errore.</summary>
+    private async Task<string?> TryCredentialAsync(EntraSettings entra, string? certificate, string? key, string? secret, CancellationToken ct)
+    {
+        var form = new Dictionary<string, string>
+        {
+            ["client_id"] = entra.ClientId!,
+            ["grant_type"] = "client_credentials",
+            ["scope"] = "https://graph.microsoft.com/.default",
+        };
+        if (certificate is not null && key is not null)
+        {
+            form["client_assertion_type"] = EntraCredential.AssertionType;
+            form["client_assertion"] = EntraCredential.CreateAssertion(entra.TenantId!, entra.ClientId!, certificate, key, time);
+        }
+        else
+        {
+            form["client_secret"] = secret ?? "";
+        }
+
+        using var client = httpFactory.CreateClient();
+        using var content = new FormUrlEncodedContent(form);
+        try
+        {
+            using var response = await client.PostAsync(new Uri($"https://login.microsoftonline.com/{entra.TenantId}/oauth2/v2.0/token"), content, ct);
+            return response.IsSuccessStatusCode ? null : "Entra ha rifiutato i dati: " + ExtractAadError(await response.Content.ReadAsStringAsync(ct));
+        }
+        catch (Exception ex) when (HuduClient.IsNetworkError(ex, ct))
+        {
+            return "Entra non raggiungibile: " + HuduClient.NetworkErrorText(ex);
+        }
     }
 
     private static string ExtractAadError(string body)
