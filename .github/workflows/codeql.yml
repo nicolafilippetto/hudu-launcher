@@ -1,0 +1,52 @@
+name: CodeQL
+
+# Analisi semantica del codice di GitHub (C#, JavaScript e workflow) con le regole di sicurezza
+# estese. Non attivare anche il "Default setup" di CodeQL nelle impostazioni: i due modi si escludono.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "41 4 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    # Code scanning è gratuito solo nei repository pubblici.
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [csharp, javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: ${{ matrix.language }}
+          # Analisi senza compilazione: il Launcher WPF si compila solo su Windows.
+          build-mode: none
+          queries: security-extended
+          config: |
+            paths-ignore:
+              - "**/Migrations/**"
+              - "**/xterm.js"
+              - "**/addon-fit.js"
+
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:${{ matrix.language }}

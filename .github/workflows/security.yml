@@ -2,7 +2,8 @@ name: Sicurezza
 
 # Analisi statica (SAST) e controllo delle dipendenze: a ogni modifica e ogni lunedì, anche senza
 # modifiche, perché nuove vulnerabilità vengono pubblicate di continuo. Gli analizzatori di
-# sicurezza .NET sono già attivi in ogni compilazione (AnalysisModeSecurity=All).
+# sicurezza .NET sono già attivi in ogni compilazione (AnalysisModeSecurity=All); CodeQL è in
+# codeql.yml. I risultati di Semgrep e CodeQL compaiono in Security → Code scanning.
 on:
   push:
   pull_request:
@@ -21,6 +22,9 @@ jobs:
   semgrep:
     name: Semgrep (SAST e segreti)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,6 +51,15 @@ jobs:
           path: semgrep.sarif
           retention-days: 30
 
+      # In Security → Code scanning (gratuito nei repository pubblici). Le pull request da fork
+      # hanno un token in sola lettura: lì resta solo il rapporto qui sopra.
+      - name: Code scanning
+        if: always() && !github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
   dependencies:
     name: Librerie vulnerabili
     runs-on: ubuntu-latest
@@ -68,3 +81,17 @@ jobs:
           done
           if grep -q "has the following vulnerable packages" vulnerable.txt; then status=1; fi
           exit $status
+
+  dependency-review:
+    name: Dipendenze nuove nella pull request
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Blocca le pull request che introducono librerie o azioni con vulnerabilità note.
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate

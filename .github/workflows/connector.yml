@@ -1,17 +1,12 @@
 name: Hudu Launcher per Windows
 
 on:
+  # Ogni modifica compila e prova il Launcher (minuti gratuiti nei repository pubblici).
   push:
-    paths:
-      - "connector/**"
-      - ".github/workflows/connector.yml"
+    branches: ["**"]
     # Un tag v1.2.3 pubblica l'installer nelle Release di GitHub.
-    tags:
-      - "v*"
+    tags: ["v*"]
   pull_request:
-    paths:
-      - "connector/**"
-      - ".github/workflows/connector.yml"
   workflow_dispatch:
 
 permissions:

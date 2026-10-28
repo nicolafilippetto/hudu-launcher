@@ -68,8 +68,15 @@ server (se la licenza lo consente), rotazione periodica, alert sugli accessi API
 | DAST | OWASP ZAP 2.16.1, scansione attiva **con sessione da amministratore**, in modalità produzione | 1 difetto reale: il pulsante Esci non inviava il token antiforgery (logout in errore, nessun rischio CSRF perché la richiesta veniva rifiutata) → **corretto e coperto da test**. Altri avvisi analizzati: falsi positivi ("XSLT" dal testo "Microsoft 365") o comportamenti voluti (IP dei clienti mostrati ai tecnici autenticati) |
 | Test automatici | 88 test server, 62 Launcher | Includono: biglietti rubati/scaduti/riusati, token di altro tenant o senza scope, solo lettura verso Hudu, antiforgery, ruoli |
 
-In CI (GitHub Actions, workflow **Sicurezza**) Semgrep e il controllo delle dipendenze girano a ogni
-modifica e ogni lunedì; gli analizzatori .NET girano in ogni compilazione.
+In CI (GitHub Actions) girano a ogni modifica, e ogni settimana anche senza modifiche:
+
+- **Semgrep** e controllo delle librerie vulnerabili (workflow *Sicurezza*);
+- **CodeQL** con le regole di sicurezza estese su C#, JavaScript e workflow (workflow *CodeQL*);
+- **revisione delle dipendenze** nelle pull request: blocca librerie o azioni con vulnerabilità note;
+- gli analizzatori .NET, in ogni compilazione.
+
+I risultati di Semgrep e CodeQL sono in **Security → Code scanning**. Le azioni di GitHub sono
+fissate per hash del commit e Dependabot propone gli aggiornamenti dopo 7 giorni dall'uscita.
 
 ## 6. Rischi residui e raccomandazioni
 
