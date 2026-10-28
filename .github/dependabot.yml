@@ -1,0 +1,36 @@
+# Aggiornamenti automatici delle dipendenze: Dependabot apre una pull request quando esce una
+# nuova versione. I test della pipeline dicono se l'aggiornamento è sicuro da unire.
+# Cooldown: si aspettano alcuni giorni dalla pubblicazione, per non prendere subito un pacchetto
+# compromesso o ritirato (attacchi alla catena di fornitura).
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /server
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      dotnet:
+        patterns: ["Microsoft.*", "System.*"]
+
+  - package-ecosystem: nuget
+    directory: /connector
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: docker
+    directory: /server
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

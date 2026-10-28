@@ -1,0 +1,81 @@
+@model CompanyView
+@{
+    var attention = Model.Groups.SelectMany(g => g).Count(a => a.NeedsAttention);
+    var showHidden = Context.Request.Query["hidden"] == "true";
+}
+<div class="page-head">
+    <div>
+        <h1>@Model.Company.Name</h1>
+        <div class="head-meta">
+            <span class="muted">@Model.Groups.Sum(g => g.Count()) asset</span>
+            @if (attention > 0)
+            {
+                <span class="chip chip-warn"><svg><use href="#i-alert" /></svg>@attention da sistemare</span>
+            }
+            @if (Model.Company.HuduUrl is not null)
+            {
+                <a class="link-subtle" href="@Model.Company.HuduUrl" target="_blank" rel="noopener noreferrer">Apri in Hudu <svg><use href="#i-external" /></svg></a>
+            }
+            <form method="post" asp-page="/Index" asp-page-handler="RefreshCompany" class="meta-form">
+                <input type="hidden" name="companyId" value="@Model.Company.Id" />
+                <button type="submit" class="link-subtle link-button" title="Rilegge da Hudu asset, IP e credenziali di questo cliente (al massimo una volta al minuto)">
+                    <svg class="inline"><use href="#i-refresh" /></svg>Aggiorna da Hudu
+                </button>
+            </form>
+            <a class="link-subtle" href="/?c=@Model.Company.Id&hidden=@(!showHidden)">
+                @(showHidden ? "Nascondi gli asset nascosti" : "Mostra anche gli asset nascosti")
+            </a>
+        </div>
+    </div>
+
+    <details class="gateway-box">
+        <summary>
+            <svg><use href="#i-plug" /></svg>
+            <span>
+                Gateway RustDesk:
+                @if (Model.GatewayPeerId is null)
+                {
+                    <strong class="text-warn">non impostato</strong>
+                }
+                else
+                {
+                    <strong>@Model.GatewayPeerId</strong> <span class="muted small">(@Model.GatewaySource)</span>
+                }
+            </span>
+            <svg class="chevron"><use href="#i-pencil" /></svg>
+        </summary>
+        <form method="post" asp-page-handler="CompanyGateway" class="gateway-form">
+            <input type="hidden" name="companyId" value="@Model.Company.Id" />
+            <label class="field">
+                <span>Dispositivo da cui si raggiunge la rete del cliente</span>
+                <input class="input" name="gateway" list="peer-list" data-peer-input value="@Model.GatewayPeerId" placeholder="ID RustDesk o nome dalla rubrica" autocomplete="off" />
+            </label>
+            <p class="muted small">Vale per tutti gli asset del cliente, salvo quelli con RustDesk installato o con un gateway impostato a mano.</p>
+            <div class="actions"><button class="btn btn-primary" type="submit">Salva</button></div>
+        </form>
+    </details>
+</div>
+
+@if (!Model.Groups.Any())
+{
+    <div class="empty">
+        <svg class="empty-icon"><use href="#i-server" /></svg>
+        <p>Nessun asset collegabile per questo cliente.</p>
+    </div>
+}
+
+@foreach (var group in Model.Groups)
+{
+    <section class="section">
+        <h2 class="section-title">
+            <input type="checkbox" class="pick-all" data-pick-all title="Seleziona tutto il gruppo" aria-label="Seleziona tutti: @group.Key" />
+            <svg><use href="#i-server" /></svg>@group.Key <span class="count">@group.Count()</span>
+        </h2>
+        <div class="asset-list">
+            @foreach (var asset in group)
+            {
+                <partial name="_AssetRow" model="asset" />
+            }
+        </div>
+    </section>
+}

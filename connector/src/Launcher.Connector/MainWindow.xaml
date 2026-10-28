@@ -1,0 +1,61 @@
+<Window x:Class="Launcher.Connector.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Hudu Launcher"
+        Width="1280" Height="820" MinWidth="720" MinHeight="480"
+        WindowStartupLocation="CenterScreen"
+        Icon="Assets/launcher.ico">
+    <Window.InputBindings>
+        <KeyBinding Key="W" Modifiers="Control" Command="{x:Static ApplicationCommands.Close}" />
+    </Window.InputBindings>
+    <Window.CommandBindings>
+        <CommandBinding Command="{x:Static ApplicationCommands.Close}" Executed="OnCloseTabCommand" />
+    </Window.CommandBindings>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TabControl x:Name="Tabs" Grid.Row="0" Padding="0" BorderThickness="0,1,0,0" />
+
+        <!-- Nessuna connessione aperta -->
+        <StackPanel x:Name="EmptyState" Grid.Row="0" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="460">
+            <TextBlock Style="{StaticResource Icon}" Text="&#xE7F4;" FontSize="48" HorizontalAlignment="Center" Opacity="0.5" />
+            <TextBlock Text="Nessuna connessione aperta" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,16,0,6" />
+            <TextBlock Style="{StaticResource Muted}" TextAlignment="Center"
+                       Text="Scegli un server nel portale e premi il pulsante di connessione: si aprirà qui, già autenticato." />
+            <Button x:Name="OpenPortalButton" Content="Apri il portale" HorizontalAlignment="Center" Margin="0,18,0,0" Padding="18,6" Click="OnOpenPortal" />
+            <!-- Cache d'emergenza: connessioni dirette preparate dal portale, usabili senza internet -->
+            <StackPanel x:Name="OfflinePanel" Margin="0,28,0,0" Visibility="Collapsed" />
+        </StackPanel>
+
+        <Border Grid.Row="1" Padding="12,5" BorderThickness="0,1,0,0" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button x:Name="OfflineButton" Style="{StaticResource ToolButton}" Click="OnOfflineMenu" Visibility="Collapsed"
+                            ToolTip="Connessioni dirette pronte da usare senza internet">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xE896;" Margin="0,0,6,0" />
+                            <TextBlock x:Name="OfflineButtonText" Text="Offline" />
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource ToolButton}" Click="OnOpenPortal" ToolTip="Apri il portale nel browser">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xE8A7;" Margin="0,0,6,0" />
+                            <TextBlock Text="Portale" />
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource ToolButton}" Click="OnOpenLogs" ToolTip="Apri la cartella dei registri">
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE9F9;" />
+                    </Button>
+                    <Button Style="{StaticResource ToolButton}" Click="OnOpenSettings" ToolTip="Impostazioni">
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE713;" />
+                    </Button>
+                </StackPanel>
+                <TextBlock x:Name="StatusText" Style="{StaticResource Muted}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

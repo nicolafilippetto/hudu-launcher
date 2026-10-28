@@ -1,0 +1,36 @@
+@inject LayoutInfo Info
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>@ViewData["Title"] · @Info.PortalName</title>
+    <link rel="icon" href="/branding/favicon" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <script src="~/js/theme.js" asp-append-version="true"></script>
+    <script src="~/js/site.js" asp-append-version="true" defer></script>
+</head>
+<body class="auth-body">
+    <partial name="_Icons" />
+    <main class="auth-card">
+        <div class="auth-brand">
+            @if (Info.HasLogo)
+            {
+                <img src="/branding/logo" alt="" class="auth-logo" />
+            }
+            else
+            {
+                <span class="brand-mark brand-mark-lg"><svg><use href="#i-plug" /></svg></span>
+            }
+            <h1>@Info.PortalName</h1>
+        </div>
+        @RenderBody()
+    </main>
+    <button type="button" class="btn btn-ghost btn-icon auth-theme" data-theme-toggle title="Tema">
+        <svg class="theme-light"><use href="#i-sun" /></svg>
+        <svg class="theme-dark"><use href="#i-moon" /></svg>
+        <svg class="theme-auto"><use href="#i-auto" /></svg>
+    </button>
+</body>
+</html>

@@ -1,0 +1,32 @@
+@page
+@model Launcher.Server.Pages.Account.LocalLoginModel
+@{
+    ViewData["Title"] = "Accesso amministratore";
+}
+<h2 class="auth-title">Accesso amministratore</h2>
+@if (!Model.Allowed)
+{
+    <div class="alert alert-danger">L'accesso locale non è consentito dalla rete da cui ti stai collegando.</div>
+    <p class="auth-alt"><a href="/Account/Login">Torna all'accesso con Microsoft 365</a></p>
+}
+else
+{
+    <partial name="_Flash" />
+    @if (Model.Error is not null)
+    {
+        <div class="alert alert-danger">@Model.Error</div>
+    }
+    <form method="post" class="stack">
+        <label class="field">
+            <span>Email</span>
+            <input class="input" asp-for="LoginEmail" type="email" autocomplete="username" autofocus />
+        </label>
+        <label class="field">
+            <span>Password</span>
+            <input class="input" asp-for="Password" autocomplete="current-password" />
+        </label>
+        <button type="submit" class="btn btn-primary btn-block">Continua</button>
+    </form>
+    <p class="muted small">Al passo successivo verrà chiesto il codice dell'app di autenticazione.</p>
+    <p class="auth-alt"><a href="/Account/Login">Accedi con Microsoft 365</a></p>
+}

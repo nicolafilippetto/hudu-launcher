@@ -1,0 +1,12 @@
+@{
+    var flash = TempData["Flash"] as string;
+    var error = TempData["FlashError"] as string;
+}
+@if (!string.IsNullOrEmpty(flash))
+{
+    <div class="alert alert-success" role="status">@flash</div>
+}
+@if (!string.IsNullOrEmpty(error))
+{
+    <div class="alert alert-danger" role="alert">@error</div>
+}

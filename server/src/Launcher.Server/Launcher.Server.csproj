@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Launcher.Server</RootNamespace>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- SAST a ogni compilazione: tutte le regole di sicurezza .NET (injection, crittografia, deserializzazione…). -->
+    <AnalysisModeSecurity>All</AnalysisModeSecurity>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <!-- Avvisi di stile/globalizzazione non rilevanti per questo progetto -->
+    <NoWarn>$(NoWarn);CA1720;CA1848;CA1873;CA1305;CA1307;CA1309;CA1310;CA1311;CA1304;CA1862;CA2007;CA1031;CA1054;CA1055;CA1056;CA1062;CA1716;CA1515;CA1711;CA1819;CA1308;CA5394;CA1002;CA2227;CA1822;CA1849;CA1852;CA1812</NoWarn>
+    <UserSecretsId>launcher-server</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.14" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.14" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.14" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.14" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.14">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="QRCoder" Version="1.8.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Launcher.Server.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,239 @@
+@model EditorViewModel
+@{
+    var asset = Model.Asset.Asset;
+    var setting = Model.Asset.Setting;
+    var primary = Model.Asset.Primary;
+    var protocols = Enum.GetValues<ConnectionProtocol>();
+    var linked = Model.Passwords.Where(p => p.AssetId == asset.Id).ToList();
+    var autoCredential = linked.Count switch
+    {
+        0 => "nessuna collegata in Hudu",
+        1 => $"{linked[0].Name}",
+        _ => $"{linked.Count} collegate: sceglierne una",
+    };
+    var ipam = asset.IpamList();
+    var (autoHost, _) = ConnectionResolver.ResolveHost(null, asset);
+    var legacyHost = setting?.Host is { } h && !ipam.Contains(h, StringComparer.OrdinalIgnoreCase) ? h : null;
+    var autoGateway = setting?.GatewayPeerId is null && primary?.GatewayPeerId is not null
+        ? $"Automatico: {primary.GatewayPeerId} ({primary.GatewaySource})"
+        : "Automatico";
+}
+@functions {
+    private static string PasswordLabel(CachedPassword p) =>
+        string.IsNullOrWhiteSpace(p.Username) ? p.Name : $"{p.Name} — {p.Username}";
+}
+
+<form method="post" asp-page="/Index" asp-page-handler="SaveAsset" class="editor" data-editor-form>
+    <input type="hidden" name="AssetId" value="@asset.Id" />
+
+    <header class="modal-head">
+        <div>
+            <h2 id="editor-title">@asset.Name</h2>
+            <p class="muted small">@Model.Asset.CompanyName · @asset.LayoutName</p>
+        </div>
+        <button type="button" class="btn btn-ghost btn-icon" data-close-modal title="Chiudi"><svg><use href="#i-x" /></svg></button>
+    </header>
+
+    @if (Model.Errors.Count > 0)
+    {
+        <div class="alert alert-danger">
+            <ul>
+                @foreach (var error in Model.Errors)
+                {
+                    <li>@error</li>
+                }
+            </ul>
+        </div>
+    }
+
+    <div class="hudu-facts">
+        <div><span>IP nell'IPAM di Hudu</span><strong class="mono" title="@string.Join(", ", ipam)">@(ipam.Count == 0 ? "—" : string.Join(", ", ipam))</strong></div>
+        <div><span>Sistema operativo</span><strong>@(asset.OperatingSystem ?? "—")</strong></div>
+        <div><span>Hostname</span><strong class="mono">@(asset.Hostname ?? "—")</strong></div>
+        <div><span>ID RustDesk in Hudu</span><strong class="mono">@(asset.RustDeskId ?? "—")</strong></div>
+    </div>
+    <p class="muted small">I campi vuoti usano i dati di Hudu e della rubrica RustDesk. Compila solo ciò che va corretto.</p>
+    @if (ipam.Count == 0)
+    {
+        <div class="alert alert-warn">
+            <strong>Nessun IP nell'IPAM di Hudu per questo asset.</strong>
+            Va caricato in Hudu (IP Addresses, collegato all'asset), poi premi "Aggiorna da Hudu" nella pagina del cliente.
+            @if (asset.PrimaryIp is not null)
+            {
+                <span>Per ora si usa @asset.PrimaryIp dal campo del layout.</span>
+            }
+            @if (asset.HuduUrl is not null)
+            {
+                <a href="@asset.HuduUrl" target="_blank" rel="noopener noreferrer">Apri in Hudu</a>
+            }
+        </div>
+    }
+    else if (setting?.Host is null && primary?.Issues.Any(i => i.Contains("sceglierne uno", StringComparison.Ordinal)) == true)
+    {
+        <div class="alert alert-warn"><strong>@ipam.Count IP nell'IPAM per questo asset:</strong> scegli quello da usare per la connessione.</div>
+    }
+
+    <fieldset class="card-fieldset">
+        <legend>Connessione principale</legend>
+        <div class="grid grid-3">
+            <label class="field">
+                <span>Protocollo</span>
+                <select class="input" name="Protocol">
+                    <option value="">Automatico (@Format.ProtocolName(Model.GuessedProtocol))</option>
+                    @foreach (var p in protocols)
+                    {
+                        <option value="@p" selected="@(setting?.Protocol == p)">@Format.ProtocolName(p)</option>
+                    }
+                </select>
+            </label>
+            <label class="field">
+                <span>Indirizzo IP (dall'IPAM)</span>
+                <select class="input mono" name="Host">
+                    <option value="">Automatico (@(autoHost ?? "nessun IP"))</option>
+                    @foreach (var ip in ipam)
+                    {
+                        <option value="@ip" selected="@(string.Equals(setting?.Host, ip, StringComparison.OrdinalIgnoreCase))">@ip</option>
+                    }
+                    @if (legacyHost is not null)
+                    {
+                        <option value="@legacyHost" selected>@legacyHost (non nell'IPAM)</option>
+                    }
+                </select>
+            </label>
+            <label class="field">
+                <span>Porta</span>
+                <input class="input mono" name="Port" value="@setting?.Port" inputmode="numeric" placeholder="@(primary?.Port.ToString() ?? "")" autocomplete="off" />
+            </label>
+        </div>
+        <div class="grid grid-2">
+            <label class="field">
+                <span>Credenziale (da Hudu)</span>
+                <select class="input" name="PasswordId">
+                    <option value="">Automatica (@autoCredential)</option>
+                    @foreach (var p in Model.Passwords)
+                    {
+                        <option value="@p.Id" selected="@(setting?.PasswordId == p.Id)">@PasswordLabel(p)@(p.AssetId == asset.Id ? " ★" : "")</option>
+                    }
+                </select>
+            </label>
+            <label class="field">
+                <span>Gateway RustDesk</span>
+                <input class="input mono" name="Gateway" list="peer-list" data-peer-input value="@setting?.GatewayPeerId" placeholder="@autoGateway" autocomplete="off" spellcheck="false" />
+            </label>
+        </div>
+        <div class="grid grid-2">
+            <label class="field">
+                <span>Nota per i tecnici</span>
+                <textarea class="input" name="Note" rows="2" maxlength="500" placeholder="es. Usare l'utente locale, il dominio è fuori uso">@setting?.Note</textarea>
+            </label>
+            <label class="check">
+                <input type="checkbox" name="Hidden" value="true" checked="@(setting?.Hidden == true)" />
+                <span>Nascondi questo asset (non collegabile o dismesso)</span>
+            </label>
+        </div>
+    </fieldset>
+
+    @{
+        var rdpOverrides = Model.RdpOverrides;
+    }
+    <details class="card-fieldset rdp-options" open="@(rdpOverrides.Count > 0)">
+        <summary>
+            <strong>Opzioni Desktop remoto</strong>
+            <span class="muted small">
+                @(rdpOverrides.Count == 0 ? "predefinite per tutti" : $"{rdpOverrides.Count} personalizzate per questo asset")
+            </span>
+        </summary>
+        <p class="muted small">Valgono per le connessioni RDP di questo asset. "Predefinito" segue le impostazioni dell'amministratore.</p>
+        <div class="grid grid-3">
+            @foreach (var option in RdpOptionCatalog.All)
+            {
+                var current = rdpOverrides.GetValueOrDefault(option.Key);
+                var inherited = RdpOptionCatalog.Effective(option.Key, Model.RdpDefaults);
+                <label class="field" title="@option.Hint">
+                    <span>@option.Label</span>
+                    <select class="input @(current is null ? "" : "is-overridden")" name="Rdp[@option.Key]">
+                        <option value="">Predefinito (@option.LabelOf(inherited))</option>
+                        @foreach (var choice in option.Choices)
+                        {
+                            <option value="@choice.Value" selected="@(current == choice.Value)">@choice.Label</option>
+                        }
+                    </select>
+                </label>
+            }
+        </div>
+    </details>
+
+    <fieldset class="card-fieldset">
+        <legend>Connessioni aggiuntive</legend>
+        <p class="muted small">Ad esempio l'interfaccia web di gestione, una seconda porta SSH o un altro indirizzo dello stesso oggetto.</p>
+        <div class="extras" data-extras>
+            @for (var i = 0; i < Model.Extras.Count; i++)
+            {
+                var extra = Model.Extras[i];
+                <div class="extra-row" data-extra-row>
+                    <input type="hidden" name="Extras[@i].Id" value="@extra.Id" />
+                    <input type="hidden" name="Extras[@i].Remove" value="false" data-extra-remove />
+                    <input class="input" name="Extras[@i].Label" value="@extra.Label" placeholder="Nome" maxlength="40" aria-label="Nome" />
+                    <select class="input" name="Extras[@i].Protocol" aria-label="Protocollo">
+                        @foreach (var p in protocols)
+                        {
+                            <option value="@p" selected="@(extra.Protocol == p)">@Format.ProtocolName(p)</option>
+                        }
+                    </select>
+                    <input class="input mono" name="Extras[@i].Host" value="@extra.Host" placeholder="Host (come principale)" aria-label="Host" list="ipam-list" autocomplete="off" />
+                    <input class="input mono" name="Extras[@i].Port" value="@extra.Port" placeholder="Porta" inputmode="numeric" aria-label="Porta" />
+                    <select class="input" name="Extras[@i].PasswordId" aria-label="Credenziale">
+                        <option value="">Nessuna credenziale</option>
+                        @foreach (var p in Model.Passwords)
+                        {
+                            <option value="@p.Id" selected="@(extra.PasswordId == p.Id)">@PasswordLabel(p)</option>
+                        }
+                    </select>
+                    <input class="input mono" name="Extras[@i].Gateway" value="@extra.GatewayPeerId" list="peer-list" data-peer-input placeholder="Gateway (auto)" aria-label="Gateway" />
+                    <button type="button" class="btn btn-ghost btn-icon" data-extra-delete title="Rimuovi"><svg><use href="#i-trash" /></svg></button>
+                </div>
+            }
+        </div>
+        <template data-extra-template>
+            <div class="extra-row" data-extra-row>
+                <input type="hidden" name="Extras[__i__].Remove" value="false" data-extra-remove />
+                <input class="input" name="Extras[__i__].Label" placeholder="Nome" maxlength="40" aria-label="Nome" />
+                <select class="input" name="Extras[__i__].Protocol" aria-label="Protocollo">
+                    @foreach (var p in protocols)
+                    {
+                        <option value="@p" selected="@(p == ConnectionProtocol.Https)">@Format.ProtocolName(p)</option>
+                    }
+                </select>
+                <input class="input mono" name="Extras[__i__].Host" placeholder="Host (come principale)" aria-label="Host" list="ipam-list" autocomplete="off" />
+                <input class="input mono" name="Extras[__i__].Port" placeholder="Porta" inputmode="numeric" aria-label="Porta" />
+                <select class="input" name="Extras[__i__].PasswordId" aria-label="Credenziale">
+                    <option value="">Nessuna credenziale</option>
+                    @foreach (var p in Model.Passwords)
+                    {
+                        <option value="@p.Id">@PasswordLabel(p)</option>
+                    }
+                </select>
+                <input class="input mono" name="Extras[__i__].Gateway" list="peer-list" data-peer-input placeholder="Gateway (auto)" aria-label="Gateway" />
+                <button type="button" class="btn btn-ghost btn-icon" data-extra-delete title="Rimuovi"><svg><use href="#i-trash" /></svg></button>
+            </div>
+        </template>
+        <datalist id="ipam-list">
+            @foreach (var ip in ipam)
+            {
+                <option value="@ip"></option>
+            }
+        </datalist>
+        <button type="button" class="btn btn-secondary btn-sm" data-extra-add data-next-index="@Model.Extras.Count"><svg><use href="#i-plus" /></svg>Aggiungi connessione</button>
+    </fieldset>
+
+    <footer class="modal-foot">
+        @if (setting is not null)
+        {
+            <span class="muted small">Ultima modifica: @setting.UpdatedBy, @Format.Relative(setting.UpdatedAt)</span>
+        }
+        <div class="actions">
+            <button type="button" class="btn btn-secondary" data-close-modal>Annulla</button>
+            <button type="submit" class="btn btn-primary">Salva</button>
+        </div>
+    </footer>
+</form>

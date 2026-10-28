@@ -1,0 +1,65 @@
+@page
+@model Launcher.Server.Pages.Admin.AuditModel
+@using Launcher.Server.Audit
+@{
+    ViewData["Title"] = "Registro accessi";
+    ViewData["AdminSection"] = "audit";
+}
+<div class="page-head">
+    <div>
+        <h1>Registro accessi</h1>
+        <p class="muted">Chi si è collegato a cosa, quali credenziali sono state consegnate e tutte le modifiche. Gli eventi vanno anche nei log del container.</p>
+    </div>
+</div>
+
+<form method="get" class="filters">
+    <input class="input" name="user" value="@Model.FilterUser" placeholder="Utente" />
+    <select class="input" name="action">
+        <option value="">Tutte le azioni</option>
+        @foreach (var action in Model.Actions)
+        {
+            <option value="@action" selected="@(action == Model.FilterAction)">@AuditService.Describe(action)</option>
+        }
+    </select>
+    <input class="input" name="q" value="@Model.FilterText" placeholder="Asset, cliente, IP, dettagli" />
+    <label class="check"><input type="checkbox" name="failures" value="true" checked="@Model.OnlyFailures" /><span>Solo negati</span></label>
+    <button class="btn btn-secondary" type="submit"><svg><use href="#i-search" /></svg>Filtra</button>
+</form>
+
+<div class="table-wrap">
+    <table class="table table-compact">
+        <thead>
+            <tr><th>Quando</th><th>Utente</th><th>Azione</th><th>Cliente / asset</th><th>Destinazione</th><th>Dettagli</th><th>IP</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var e in Model.Events)
+            {
+                <tr class="@(e.Success ? "" : "row-danger")">
+                    <td class="nowrap">@Format.DateTime(e.At, Model.TimeZone)</td>
+                    <td>@e.UserEmail</td>
+                    <td class="nowrap">@AuditService.Describe(e.Action)</td>
+                    <td>@e.CompanyName@(e.AssetName is null ? "" : " / " + e.AssetName)</td>
+                    <td class="mono small">@e.Target</td>
+                    <td class="small">@e.Details</td>
+                    <td class="mono small">@e.Ip</td>
+                </tr>
+            }
+            @if (Model.Events.Count == 0)
+            {
+                <tr><td colspan="7" class="muted">Nessun evento.</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+<div class="pager">
+    @if (Model.PageNumber > 1)
+    {
+        <a class="btn btn-secondary btn-sm" asp-route-user="@Model.FilterUser" asp-route-action="@Model.FilterAction" asp-route-q="@Model.FilterText" asp-route-failures="@Model.OnlyFailures" asp-route-p="@(Model.PageNumber - 1)">← Più recenti</a>
+    }
+    <span class="muted small">Pagina @Model.PageNumber</span>
+    @if (Model.HasMore)
+    {
+        <a class="btn btn-secondary btn-sm" asp-route-user="@Model.FilterUser" asp-route-action="@Model.FilterAction" asp-route-q="@Model.FilterText" asp-route-failures="@Model.OnlyFailures" asp-route-p="@(Model.PageNumber + 1)">Meno recenti →</a>
+    }
+</div>

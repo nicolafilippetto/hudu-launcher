@@ -1,0 +1,70 @@
+@page
+@model Launcher.Server.Pages.Admin.IndexModel
+@{
+    ViewData["Title"] = "Amministrazione";
+    ViewData["AdminSection"] = "status";
+}
+<div class="page-head">
+    <div>
+        <h1>Stato e sincronizzazione</h1>
+        <p class="muted">Inventario copiato da Hudu e dalla rubrica RustDesk. Le password non vengono mai salvate.</p>
+    </div>
+    <form method="post" asp-page-handler="Sync">
+        <button class="btn btn-primary" type="submit" disabled="@Model.SyncRunning">
+            <svg><use href="#i-refresh" /></svg>@(Model.SyncRunning ? "Sincronizzazione in corso…" : "Sincronizza ora")
+        </button>
+    </form>
+</div>
+
+<div class="stats">
+    <div class="stat"><span class="stat-value">@(Model.State?.Companies ?? 0)</span><span class="stat-label">clienti</span></div>
+    <div class="stat"><span class="stat-value">@(Model.State?.Assets ?? 0)</span><span class="stat-label">asset collegabili</span></div>
+    <div class="stat"><span class="stat-value">@(Model.State?.Passwords ?? 0)</span><span class="stat-label">credenziali (solo nomi)</span></div>
+    <div class="stat"><span class="stat-value">@(Model.State?.Peers ?? 0)</span><span class="stat-label">dispositivi RustDesk</span></div>
+    <div class="stat"><span class="stat-value">@Model.ConnectionsLast7Days</span><span class="stat-label">connessioni in 7 giorni</span></div>
+</div>
+
+<section class="card">
+    <h2 class="card-title">Ultima sincronizzazione</h2>
+    <dl class="kv">
+        <dt>Avviata</dt><dd>@Format.DateTime(Model.State?.LastStartedAt, Model.TimeZone)</dd>
+        <dt>Completata</dt><dd>@Format.DateTime(Model.State?.LastSuccessAt, Model.TimeZone) <span class="muted">(@Format.Relative(Model.State?.LastSuccessAt))</span></dd>
+        @if (!string.IsNullOrEmpty(Model.State?.LastError))
+        {
+            <dt>Errore</dt><dd class="text-danger">@Model.State.LastError</dd>
+        }
+    </dl>
+</section>
+
+<section class="card">
+    <h2 class="card-title">Configurazione</h2>
+    <ul class="checklist">
+        @foreach (var item in Model.Checklist)
+        {
+            <li class="@(item.Ok ? "ok" : "todo")">
+                <svg><use href="#@(item.Ok ? "i-shield" : "i-alert")" /></svg>
+                <div><strong>@item.Title</strong><span class="muted">@item.Detail</span></div>
+                @if (item.Link is not null)
+                {
+                    <a class="btn btn-ghost btn-sm" href="@item.Link">Apri</a>
+                }
+            </li>
+        }
+    </ul>
+</section>
+
+<section class="card">
+    <h2 class="card-title">Da sistemare</h2>
+    <ul class="checklist">
+        <li class="@(Model.CompaniesWithoutGateway == 0 ? "ok" : "todo")">
+            <svg><use href="#@(Model.CompaniesWithoutGateway == 0 ? "i-shield" : "i-alert")" /></svg>
+            <div><strong>@Model.CompaniesWithoutGateway clienti senza gateway RustDesk</strong>
+                <span class="muted">Si imposta dalla pagina del cliente, o con il campo ID RustDesk in Hudu.</span></div>
+        </li>
+        <li class="ok">
+            <svg><use href="#i-pencil" /></svg>
+            <div><strong>@Model.AssetsWithOverrides asset con correzioni dei tecnici</strong>
+                <span class="muted">Valori impostati a mano che hanno la precedenza su Hudu.</span></div>
+        </li>
+    </ul>
+</section>

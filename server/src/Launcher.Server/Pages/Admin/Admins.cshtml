@@ -1,0 +1,116 @@
+@page
+@model Launcher.Server.Pages.Admin.AdminsModel
+@{
+    ViewData["Title"] = "Amministratori";
+    ViewData["AdminSection"] = "admins";
+}
+<div class="page-head">
+    <div>
+        <h1>Amministratori</h1>
+        <p class="muted">
+            Chi accede con Microsoft 365 con una di queste email è amministratore, tutti gli altri sono tecnici.
+            L'accesso locale (password + app di autenticazione) serve solo per le emergenze ed è limitato alle reti ammesse.
+        </p>
+    </div>
+</div>
+
+<section class="card">
+    <h2 class="card-title">Aggiungi amministratore</h2>
+    <form method="post" asp-page-handler="Add" class="grid grid-3" data-breakglass-form>
+        <label class="field"><span>Email (Microsoft 365)</span><input class="input" type="email" name="email" required autocomplete="off" /></label>
+        <label class="field"><span>Nome</span><input class="input" name="displayName" autocomplete="off" /></label>
+        <div></div>
+        <label class="check span-all">
+            <input type="checkbox" name="createLocal" value="true" checked data-breakglass-toggle />
+            <span>
+                Crea anche l'accesso locale di emergenza (break-glass)
+                <small class="muted block">Utente locale con password e app di autenticazione, per entrare se Microsoft 365 non funziona. Solo dalle reti ammesse.</small>
+            </span>
+        </label>
+        <label class="field span-2" data-breakglass-field>
+            <span>Password di emergenza (almeno 14 caratteri, maiuscole, minuscole e numeri)</span>
+            <span class="input-row">
+                <input class="input mono" type="text" name="password" minlength="14" autocomplete="new-password" spellcheck="false" required data-breakglass-password />
+                <button type="button" class="btn btn-secondary" data-generate-password>Genera</button>
+            </span>
+            <small class="muted">Salvala subito in Hudu (Password dell'azienda) e consegnala all'interessato: qui non sarà più visibile.</small>
+        </label>
+        <div class="actions align-end"><button class="btn btn-primary" type="submit"><svg><use href="#i-plus" /></svg>Aggiungi</button></div>
+    </form>
+</section>
+
+<div class="table-wrap">
+    <table class="table">
+        <thead>
+            <tr><th>Email</th><th>Nome</th><th>Accesso locale</th><th>Aggiunto</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var admin in Model.Admins)
+            {
+                <tr>
+                    <td><strong>@admin.Entry.Email</strong></td>
+                    <td>@admin.Entry.DisplayName</td>
+                    <td>
+                        @if (admin.Local is null)
+                        {
+                            <span class="muted">non attivo</span>
+                        }
+                        else
+                        {
+                            <span class="chip @(admin.Local.TwoFactorEnabled ? "chip-ok" : "chip-warn")">@(admin.Local.TwoFactorEnabled ? "MFA attiva" : "MFA da configurare")</span>
+                            @if (admin.LockedOut)
+                            {
+                                <span class="chip chip-danger">bloccato</span>
+                            }
+                        }
+                    </td>
+                    <td class="small muted">@Format.Relative(admin.Entry.CreatedAt)@(admin.Entry.CreatedBy is null ? "" : $" da {admin.Entry.CreatedBy}")</td>
+                    <td class="row-actions">
+                        <button type="button" class="btn btn-ghost btn-sm" data-open-dialog="admin-@admin.Entry.Id">Gestisci</button>
+                        <dialog class="modal modal-sm" id="admin-@admin.Entry.Id" aria-label="Gestisci @admin.Entry.Email">
+                            <header class="modal-head">
+                                <div>
+                                    <h2>@admin.Entry.Email</h2>
+                                    <p class="muted small">@(admin.Local is null ? "Solo accesso con Microsoft 365" : "Accesso locale di emergenza attivo")</p>
+                                </div>
+                                <button type="button" class="btn btn-ghost btn-icon" data-close-modal title="Chiudi"><svg><use href="#i-x" /></svg></button>
+                            </header>
+                            <div class="modal-pad stack">
+                                <form method="post" asp-page-handler="SetLocal" class="stack">
+                                    <input type="hidden" name="id" value="@admin.Entry.Id" />
+                                    <label class="field">
+                                        <span>@(admin.Local is null ? "Attiva accesso locale con password" : "Nuova password locale")</span>
+                                        <input class="input" type="password" name="password" autocomplete="new-password" minlength="14" required />
+                                    </label>
+                                    <button class="btn btn-secondary btn-sm" type="submit">Imposta</button>
+                                </form>
+                                @if (admin.Local is not null)
+                                {
+                                    <form method="post" asp-page-handler="ResetMfa" data-confirm="Azzerare la MFA di @admin.Entry.Email?">
+                                        <input type="hidden" name="id" value="@admin.Entry.Id" />
+                                        <button class="btn btn-ghost btn-sm" type="submit">Azzera MFA</button>
+                                    </form>
+                                    @if (admin.LockedOut)
+                                    {
+                                        <form method="post" asp-page-handler="Unlock">
+                                            <input type="hidden" name="id" value="@admin.Entry.Id" />
+                                            <button class="btn btn-ghost btn-sm" type="submit">Sblocca</button>
+                                        </form>
+                                    }
+                                    <form method="post" asp-page-handler="RemoveLocal" data-confirm="Rimuovere l'accesso locale di @admin.Entry.Email?">
+                                        <input type="hidden" name="id" value="@admin.Entry.Id" />
+                                        <button class="btn btn-ghost btn-sm" type="submit">Rimuovi accesso locale</button>
+                                    </form>
+                                }
+                                <form method="post" asp-page-handler="Remove" data-confirm="Togliere i permessi di amministratore a @admin.Entry.Email?">
+                                    <input type="hidden" name="id" value="@admin.Entry.Id" />
+                                    <button class="btn btn-danger btn-sm" type="submit"><svg><use href="#i-trash" /></svg>Rimuovi amministratore</button>
+                                </form>
+                            </div>
+                        </dialog>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>

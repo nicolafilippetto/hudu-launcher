@@ -1,0 +1,29 @@
+@page
+@model Launcher.Server.Pages.Account.LoginModel
+@{
+    ViewData["Title"] = "Accesso";
+}
+@if (Model.Message is not null)
+{
+    <div class="alert alert-info">@Model.Message</div>
+}
+<partial name="_Flash" />
+
+<form method="post" asp-page-handler="Entra" class="stack">
+    <input type="hidden" name="returnUrl" value="@Model.ReturnUrl" />
+    <button type="submit" class="btn btn-primary btn-lg btn-block" disabled="@(!Model.EntraAvailable)">
+        <svg class="ms-logo" viewBox="0 0 21 21" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
+        Accedi con Microsoft 365
+    </button>
+    @if (!Model.EntraAvailable)
+    {
+        <p class="muted small">Microsoft 365 non è ancora configurato: un amministratore deve completarlo dalla sezione admin.</p>
+    }
+</form>
+
+@if (Model.LocalAvailable)
+{
+    <p class="auth-alt">
+        <a href="/Account/LocalLogin"><svg class="inline"><use href="#i-shield" /></svg>Accesso amministratore di emergenza</a>
+    </p>
+}

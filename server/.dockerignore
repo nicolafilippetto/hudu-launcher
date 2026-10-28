@@ -1,0 +1,9 @@
+**/bin/
+**/obj/
+**/data/
+**/*.db*
+tests/
+secrets/
+.vs/
+.vscode/
+*.md

@@ -1,0 +1,107 @@
+@model BulkEditorViewModel
+@{
+    var form = Model.Form;
+    var companies = Model.Assets.Select(a => a.CompanyName).Distinct().ToList();
+}
+
+<form method="post" asp-page="/Index" asp-page-handler="Bulk" class="editor" data-bulk-form>
+    <input type="hidden" name="AssetIds" value="@string.Join(",", Model.Assets.Select(a => a.Asset.Id))" />
+
+    <header class="modal-head">
+        <div>
+            <h2 id="editor-title">Modifica in blocco</h2>
+            <p class="muted small">@Model.Assets.Count asset · @(companies.Count == 1 ? companies[0] : $"{companies.Count} clienti")</p>
+        </div>
+        <button type="button" class="btn btn-ghost btn-icon" data-close-modal title="Chiudi"><svg><use href="#i-x" /></svg></button>
+    </header>
+
+    @if (Model.Errors.Count > 0)
+    {
+        <div class="alert alert-danger">
+            <ul>
+                @foreach (var error in Model.Errors)
+                {
+                    <li>@error</li>
+                }
+            </ul>
+        </div>
+    }
+
+    <details class="bulk-list">
+        <summary>Asset selezionati</summary>
+        <ul>
+            @foreach (var asset in Model.Assets)
+            {
+                <li><strong>@asset.Asset.Name</strong> <span class="muted small">@asset.CompanyName · @asset.Asset.LayoutName</span></li>
+            }
+        </ul>
+    </details>
+    <p class="muted small">Si applica solo ciò che cambi; il resto di ogni asset resta com'è.</p>
+
+    <fieldset class="card-fieldset">
+        <legend>Connessione principale</legend>
+        <div class="grid grid-2">
+            <label class="field">
+                <span>Gateway RustDesk</span>
+                <select class="input" name="GatewayMode">
+                    <option value="">Invariato</option>
+                    <option value="set" selected="@(form.GatewayMode == "set")">Imposta quello indicato sotto</option>
+                    <option value="auto" selected="@(form.GatewayMode == "auto")">Automatico (toglie quello impostato a mano)</option>
+                </select>
+            </label>
+            <label class="field">
+                <span>Gateway da impostare</span>
+                <input class="input mono" name="Gateway" list="peer-list" data-peer-input data-bulk-gateway value="@form.Gateway" placeholder="ID RustDesk o nome dalla rubrica" autocomplete="off" spellcheck="false" />
+            </label>
+        </div>
+        <div class="grid grid-2">
+            <label class="field">
+                <span>Credenziale (da Hudu)</span>
+                @if (Model.Passwords is null)
+                {
+                    <select class="input" name="PasswordId" disabled>
+                        <option value="">Invariata (asset di clienti diversi)</option>
+                    </select>
+                }
+                else
+                {
+                    <select class="input" name="PasswordId">
+                        <option value="">Invariata</option>
+                        <option value="auto" selected="@(form.PasswordId == "auto")">Automatica (quella collegata in Hudu)</option>
+                        @foreach (var p in Model.Passwords)
+                        {
+                            <option value="@p.Id" selected="@(form.PasswordId == p.Id.ToString(System.Globalization.CultureInfo.InvariantCulture))">@(string.IsNullOrWhiteSpace(p.Username) ? p.Name : $"{p.Name} — {p.Username}")</option>
+                        }
+                    </select>
+                }
+            </label>
+            <label class="field">
+                <span>Protocollo</span>
+                <select class="input" name="Protocol">
+                    <option value="">Invariato</option>
+                    <option value="auto" selected="@(form.Protocol == "auto")">Automatico</option>
+                    @foreach (var p in Enum.GetValues<ConnectionProtocol>())
+                    {
+                        <option value="@p" selected="@(form.Protocol == p.ToString())">@Format.ProtocolName(p)</option>
+                    }
+                </select>
+            </label>
+        </div>
+        <label class="field">
+            <span>Visibilità</span>
+            <select class="input" name="Visibility">
+                <option value="">Invariata</option>
+                <option value="hide" selected="@(form.Visibility == "hide")">Nascondi</option>
+                <option value="show" selected="@(form.Visibility == "show")">Mostra</option>
+            </select>
+        </label>
+    </fieldset>
+
+    <footer class="modal-foot">
+        <span></span>
+        <div class="actions">
+            <button type="button" class="btn btn-secondary" data-close-modal>Annulla</button>
+            <button type="submit" class="btn btn-primary">Applica a @Model.Assets.Count asset</button>
+        </div>
+    </footer>
+</form>

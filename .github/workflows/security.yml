@@ -1,0 +1,70 @@
+name: Sicurezza
+
+# Analisi statica (SAST) e controllo delle dipendenze: a ogni modifica e ogni lunedì, anche senza
+# modifiche, perché nuove vulnerabilità vengono pubblicate di continuo. Gli analizzatori di
+# sicurezza .NET sono già attivi in ogni compilazione (AnalysisModeSecurity=All).
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  semgrep:
+    name: Semgrep (SAST e segreti)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Installazione
+        run: python3 -m pip install --user semgrep==1.182.1
+
+      - name: Analisi
+        env:
+          SEMGREP_SEND_METRICS: "off"
+        run: |
+          semgrep scan --metrics off --error --severity ERROR --severity WARNING \
+            --config p/csharp --config p/security-audit --config p/secrets --config p/javascript \
+            --config p/owasp-top-ten --config p/dockerfile --config p/github-actions \
+            --exclude "*/xterm.js" --exclude "*/addon-fit.js" --exclude "*/Migrations/*" \
+            --sarif --output semgrep.sarif .
+
+      - name: Rapporto
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: semgrep
+          path: semgrep.sarif
+          retention-days: 30
+
+  dependencies:
+    name: Librerie vulnerabili
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: server/global.json
+
+      - name: Server e Launcher
+        run: |
+          status=0
+          for solution in server/Launcher.slnx connector/Launcher.Connector.slnx; do
+            dotnet restore "$solution"
+            dotnet list "$solution" package --vulnerable --include-transitive 2>&1 | tee -a vulnerable.txt
+          done
+          if grep -q "has the following vulnerable packages" vulnerable.txt; then status=1; fi
+          exit $status

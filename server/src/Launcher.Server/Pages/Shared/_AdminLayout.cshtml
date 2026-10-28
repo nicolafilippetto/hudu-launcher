@@ -1,0 +1,25 @@
+@{
+    Layout = "_Layout";
+    var current = ViewData["AdminSection"] as string;
+    string Active(string section) => section == current ? "active" : "";
+}
+<div class="shell">
+    <aside class="sidebar admin-nav">
+        <div class="sidebar-section">
+            <div class="sidebar-title">Amministrazione</div>
+            <a class="nav-item @Active("status")" href="/Admin"><svg><use href="#i-refresh" /></svg>Stato e sincronizzazione</a>
+            <a class="nav-item @Active("settings")" href="/Admin/Settings"><svg><use href="#i-settings" /></svg>Impostazioni</a>
+            <a class="nav-item @Active("layouts")" href="/Admin/Layouts"><svg><use href="#i-layers" /></svg>Layout Hudu</a>
+            <a class="nav-item @Active("admins")" href="/Admin/Admins"><svg><use href="#i-shield" /></svg>Amministratori</a>
+            <a class="nav-item @Active("branding")" href="/Admin/Branding"><svg><use href="#i-image" /></svg>Aspetto</a>
+            <a class="nav-item @Active("audit")" href="/Admin/Audit"><svg><use href="#i-history" /></svg>Registro accessi</a>
+        </div>
+        <div class="sidebar-section">
+            <a class="nav-item" href="/"><svg><use href="#i-plug" /></svg>Torna alle connessioni</a>
+        </div>
+    </aside>
+    <main class="content">
+        <partial name="_Flash" />
+        @RenderBody()
+    </main>
+</div>

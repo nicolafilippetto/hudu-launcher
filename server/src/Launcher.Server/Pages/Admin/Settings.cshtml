@@ -1,0 +1,144 @@
+@page
+@model Launcher.Server.Pages.Admin.SettingsModel
+@{
+    ViewData["Title"] = "Impostazioni";
+    ViewData["AdminSection"] = "settings";
+    string SecretHint(string key) => Model.HasSecret(key) ? "•••••••• (impostato, lascia vuoto per non cambiarlo)" : "non impostato";
+}
+<div class="page-head">
+    <div>
+        <h1>Impostazioni</h1>
+        <p class="muted">I segreti sono cifrati nel database e non vengono mai mostrati di nuovo.</p>
+    </div>
+</div>
+
+<section class="card" id="entra">
+    <h2 class="card-title"><svg><use href="#i-shield" /></svg>Microsoft 365 (Entra ID)</h2>
+    <p class="muted small">
+        Registrazione app in Entra con URI di reindirizzamento web <code>@Model.RedirectUri</code>.
+        Chi può entrare si decide in Entra: "Assegnazione utente obbligatoria" sull'app aziendale e gruppi assegnati.
+        Gli admin del portale sono quelli nell'elenco "Amministratori"; tutti gli altri utenti sono tecnici.
+    </p>
+    <form method="post" asp-page-handler="Entra" class="grid grid-3">
+        <label class="field"><span>ID tenant</span><input class="input mono" name="tenantId" value="@Model.Entra.TenantId" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" /></label>
+        <label class="field"><span>ID applicazione (client)</span><input class="input mono" name="clientId" value="@Model.Entra.ClientId" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" /></label>
+        <label class="field"><span>Segreto client</span><input class="input mono" type="password" name="clientSecret" placeholder="@SecretHint(SettingKeys.EntraClientSecret)" autocomplete="new-password" /></label>
+        <div class="actions span-all">
+            <button class="btn btn-primary" type="submit">Salva</button>
+            <button class="btn btn-secondary" type="submit" asp-page-handler="TestEntra">Prova</button>
+        </div>
+    </form>
+    @if (Model.Entra.IsConfigured)
+    {
+        <p class="muted small">Scope per il connettore Windows: <code>@Model.Entra.ConnectorScope</code></p>
+    }
+</section>
+
+<section class="card" id="hudu">
+    <h2 class="card-title"><svg><use href="#i-layers" /></svg>Hudu</h2>
+    <p class="muted small">Chiave API con accesso alle password (servono al momento della connessione). Se Hudu lo consente, limitala all'IP pubblico di questo server.</p>
+    <form method="post" asp-page-handler="Hudu" class="grid grid-2">
+        <label class="field"><span>Indirizzo</span><input class="input" name="baseUrl" value="@Model.Hudu.BaseUrl" placeholder="https://azienda.huducloud.com" autocomplete="off" /></label>
+        <label class="field"><span>Chiave API</span><input class="input mono" type="password" name="apiKey" placeholder="@SecretHint(SettingKeys.HuduApiKey)" autocomplete="new-password" /></label>
+        <label class="field"><span>Sincronizza ogni (minuti)</span><input class="input" type="number" min="5" max="1440" name="syncMinutes" value="@Model.Hudu.SyncMinutes" /></label>
+        <label class="field"><span>Elementi per pagina API</span><input class="input" type="number" min="25" max="1000" name="pageSize" value="@Model.Hudu.PageSize" /></label>
+        <div class="actions span-all">
+            <button class="btn btn-primary" type="submit">Salva</button>
+            <button class="btn btn-secondary" type="submit" asp-page-handler="TestHudu">Prova</button>
+        </div>
+    </form>
+</section>
+
+<section class="card" id="rdp">
+    <h2 class="card-title"><svg><use href="#i-monitor" /></svg>Desktop remoto: predefiniti per tutti</h2>
+    <p class="muted small">
+        Valgono per ogni connessione RDP; da ogni asset (matita) si possono cambiare per quel solo server, ad esempio la
+        sessione /admin o WebAuthn. Il desktop riempie sempre la scheda del Launcher.
+    </p>
+    <form method="post" asp-page-handler="Rdp" class="grid grid-3">
+        @foreach (var option in RdpOptionCatalog.All)
+        {
+            var current = RdpOptionCatalog.Effective(option.Key, Model.RdpDefaults);
+            <label class="field" title="@option.Hint">
+                <span>@option.Label</span>
+                <select class="input" name="rdp[@option.Key]">
+                    @foreach (var choice in option.Choices)
+                    {
+                        <option value="@choice.Value" selected="@(current == choice.Value)">@choice.Label@(choice.Value == option.Default ? " (consigliato)" : "")</option>
+                    }
+                </select>
+            </label>
+        }
+        <div class="actions span-all">
+            <button class="btn btn-primary" type="submit">Salva</button>
+            <button class="btn btn-secondary" type="submit" asp-page-handler="RdpReset" data-confirm="Tornare ai valori consigliati?">Valori consigliati</button>
+        </div>
+    </form>
+</section>
+
+<section class="card" id="terminal">
+    <h2 class="card-title"><svg><use href="#i-terminal" /></svg>Terminale SSH e Telnet</h2>
+    <p class="muted small">
+        Colori applicati al testo del terminale, come in Royal TS/Rebex: una regola per riga, <code>colore espressione</code>.
+        Colori: @string.Join(", ", HighlightRules.Colors) oppure <code>#rrggbb</code>. Le espressioni sono regolari e non distinguono
+        maiuscole e minuscole; vale la prima regola che colpisce un carattere; il testo già colorato dal server non viene toccato.
+        Le righe che iniziano con <code>#</code> sono commenti. Svuotare il campo per tornare alle regole predefinite.
+    </p>
+    <form method="post" asp-page-handler="Terminal" class="stack">
+        <label class="check"><input type="checkbox" name="highlight" value="true" checked="@Model.Terminal.Highlight" /><span>Evidenzia il testo con queste regole</span></label>
+        <textarea class="input mono" name="rules" rows="10" spellcheck="false" wrap="off">@Model.TerminalRulesText</textarea>
+        <div class="actions"><button class="btn btn-primary" type="submit">Salva</button></div>
+    </form>
+</section>
+
+<section class="card" id="rustdesk">
+    <h2 class="card-title"><svg><use href="#i-plug" /></svg>RustDesk</h2>
+    <p class="muted small">
+        Token creato nella console di RustDesk Server Pro (Settings → Tokens) con permesso "Address Book" in lettura.
+        La password di connessione viene consegnata al connettore solo al momento della connessione.
+    </p>
+    <form method="post" asp-page-handler="RustDesk" class="grid grid-2">
+        <label class="field"><span>Indirizzo API</span><input class="input" name="apiUrl" value="@Model.RustDesk.ApiUrl" placeholder="https://rustdesk.azienda.it" autocomplete="off" /></label>
+        <label class="field"><span>Token API</span><input class="input mono" type="password" name="apiToken" placeholder="@SecretHint(SettingKeys.RustDeskApiToken)" autocomplete="new-password" /></label>
+        <label class="field"><span>Rubrica condivisa (vuoto = tutte)</span><input class="input" name="addressBook" value="@Model.RustDesk.AddressBook" autocomplete="off" /></label>
+        <label class="field"><span>Password di connessione ai dispositivi</span><input class="input mono" type="password" name="connectionPassword" placeholder="@SecretHint(SettingKeys.RustDeskConnectionPassword)" autocomplete="new-password" /></label>
+        <label class="check span-all"><input type="checkbox" name="clearPassword" value="true" /><span>Cancella la password di connessione salvata</span></label>
+        <div class="actions span-all">
+            <button class="btn btn-primary" type="submit">Salva</button>
+            <button class="btn btn-secondary" type="submit" asp-page-handler="TestRustDesk">Prova</button>
+        </div>
+    </form>
+</section>
+
+<section class="card" id="portal">
+    <h2 class="card-title"><svg><use href="#i-settings" /></svg>Portale</h2>
+    <form method="post" asp-page-handler="Portal" class="grid grid-2">
+        <label class="field"><span>Nome del portale</span><input class="input" name="name" value="@Model.Portal.Name" maxlength="60" /></label>
+        <label class="field"><span>Fuso orario</span><input class="input" name="timeZone" value="@Model.Portal.TimeZone" /></label>
+        <label class="field"><span>Durata sessione (ore)</span><input class="input" type="number" min="1" max="24" name="sessionHours" value="@Model.Portal.SessionHours" /></label>
+        <label class="field"><span>Validità biglietto connettore (secondi)</span><input class="input" type="number" min="10" max="120" name="ticketSeconds" value="@Model.Portal.TicketSeconds" /></label>
+        <label class="field" title="0 = funzione disattivata">
+            <span>Cache offline: asset selezionabili (0 = disattivata)</span>
+            <input class="input" type="number" min="0" max="25" name="offlineMaxAssets" value="@Model.Portal.OfflineMaxAssets" />
+        </label>
+        <label class="field">
+            <span>Cache offline: durata (minuti)</span>
+            <input class="input" type="number" min="15" max="480" name="offlineMinutes" value="@Model.Portal.OfflineMinutes" />
+        </label>
+        <label class="field"><span>Conservazione registro (giorni)</span><input class="input" type="number" min="30" max="3650" name="auditRetentionDays" value="@Model.Portal.AuditRetentionDays" /></label>
+        <label class="field">
+            <span>Reti ammesse per l'accesso admin locale (CIDR)</span>
+            <input class="input mono" name="localLoginNetworks" value="@Model.Portal.LocalLoginNetworks" />
+            <small class="muted">Il tuo indirizzo visto dal portale: <span class="mono">@Model.ClientIp</span></small>
+        </label>
+        <label class="check span-all">
+            <input type="checkbox" name="allowLocalAdminConnections" value="true" checked="@Model.Portal.AllowLocalAdminConnections" />
+            <span>
+                Permetti agli admin entrati con utente locale di usare il Launcher anche senza Microsoft 365
+                <small class="muted block">Il biglietto resta monouso e valido pochi secondi, ma vale solo dallo stesso indirizzo IP del browser
+                e il Launcher non verifica l'identità con 365. Ogni uso è registrato come "senza 365". Consigliato solo per emergenze o prove.</small>
+            </span>
+        </label>
+        <div class="actions span-all"><button class="btn btn-primary" type="submit">Salva</button></div>
+    </form>
+</section>

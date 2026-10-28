@@ -1,0 +1,57 @@
+@page
+@model IndexModel
+@{
+    ViewData["Title"] = Model.Company?.Company.Name ?? (Model.Search is not null ? "Ricerca" : null);
+}
+<div class="shell">
+    <aside class="sidebar" data-sidebar>
+        <div class="sidebar-section">
+            <a class="nav-item @(Model.Home is not null ? "active" : "")" href="/"><svg><use href="#i-star" /></svg>Preferiti e recenti</a>
+        </div>
+        <div class="sidebar-section sidebar-grow">
+            <div class="sidebar-title">
+                Clienti <span class="count">@Model.Companies.Count</span>
+            </div>
+            <input type="search" class="input input-sm" placeholder="Filtra clienti…" data-company-filter aria-label="Filtra clienti" />
+            <nav class="company-list" data-company-list>
+                @foreach (var company in Model.Companies)
+                {
+                    <a class="company-item @(company.Id == Model.CompanyId ? "active" : "")" href="/?c=@company.Id"
+                       data-name="@company.Name.ToLowerInvariant() @(company.Nickname?.ToLowerInvariant())">
+                        <span class="company-name">@company.Name</span>
+                        <span class="company-count">@company.AssetCount</span>
+                    </a>
+                }
+                @if (Model.Companies.Count == 0)
+                {
+                    <p class="muted small pad">Nessun cliente in cache. Un admin deve configurare Hudu e lanciare la sincronizzazione.</p>
+                }
+            </nav>
+        </div>
+    </aside>
+
+    <main class="content" data-content>
+        <partial name="_Flash" />
+        @if (Model.Search is not null)
+        {
+            <partial name="_Search" model="Model.Search" />
+        }
+        else if (Model.Company is not null)
+        {
+            <partial name="_Company" model="Model.Company" view-data="ViewData" />
+        }
+        else if (Model.CompanyId is not null)
+        {
+            <div class="empty"><h2>Cliente non trovato</h2><p class="muted">Forse è stato rimosso da Hudu.</p></div>
+        }
+        else if (Model.Home is not null)
+        {
+            <partial name="_Home" model="Model.Home" />
+        }
+    </main>
+</div>
+
+<dialog class="modal" data-editor aria-labelledby="editor-title">
+    <div class="modal-body" data-editor-body></div>
+</dialog>
+<datalist id="peer-list"></datalist>

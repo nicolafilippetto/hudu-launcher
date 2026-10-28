@@ -1,0 +1,39 @@
+@model SearchViewModel
+@{
+    var scoped = Model.ScopeCompany is not null;
+}
+<div class="page-head">
+    <div>
+        <h1>Risultati per “@Model.Query”@(scoped ? $" in {Model.ScopeCompany!.Name}" : "")</h1>
+        <p class="muted">
+            @if (Model.Results.Count >= InventoryService.SearchLimit)
+            {
+                <text>Primi @Model.Results.Count risultati: aggiungi parole per restringere.</text>
+            }
+            else
+            {
+                <text>@Model.Results.Count risultati</text>
+            }
+        </p>
+    </div>
+    @if (scoped)
+    {
+        <button type="button" class="btn btn-secondary" data-search-everywhere><svg><use href="#i-search" /></svg>Cerca ovunque</button>
+    }
+</div>
+@if (Model.Results.Count == 0)
+{
+    <div class="empty">
+        <svg class="empty-icon"><use href="#i-search" /></svg>
+        <p>Nessun asset trovato@(scoped ? " in questo cliente" : ""). Si cerca per nome, hostname, IP, sistema operativo e cliente.</p>
+    </div>
+}
+else
+{
+    <div class="asset-list">
+        @foreach (var asset in Model.Results)
+        {
+            <partial name="_AssetRow" model="asset" view-data='new ViewDataDictionary(ViewData) { ["ShowCompany"] = !scoped }' />
+        }
+    </div>
+}

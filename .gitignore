@@ -1,0 +1,14 @@
+bin/
+obj/
+*.user
+.vs/
+.vscode/
+server/src/Launcher.Server/local-data/
+*.db
+*.db-shm
+*.db-wal
+secrets/
+# Chiavi di sviluppo: mai nel repository
+dev-master.key
+key-*.xml
+master_key

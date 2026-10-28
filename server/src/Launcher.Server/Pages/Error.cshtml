@@ -1,0 +1,17 @@
+@page
+@model ErrorModel
+@{
+    Layout = "_AuthLayout";
+    var code = int.TryParse(Request.Query["code"], out var c) ? c : 500;
+    ViewData["Title"] = "Errore";
+    var message = code switch
+    {
+        404 => "Pagina non trovata.",
+        403 => "Non hai i permessi per questa pagina.",
+        429 => "Troppe richieste: attendi qualche minuto e riprova.",
+        _ => "Si è verificato un errore. Se si ripete, avvisa un amministratore.",
+    };
+}
+<h2 class="auth-title">@code</h2>
+<p class="muted">@message</p>
+<a class="btn btn-primary btn-block" href="/">Torna al portale</a>

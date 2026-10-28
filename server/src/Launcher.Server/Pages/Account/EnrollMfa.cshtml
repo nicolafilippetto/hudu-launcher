@@ -1,0 +1,40 @@
+@page
+@model Launcher.Server.Pages.Account.EnrollMfaModel
+@{
+    ViewData["Title"] = "Configura la verifica in due passaggi";
+}
+@if (Model.RecoveryCodes is not null)
+{
+    <h2 class="auth-title">Verifica attivata</h2>
+    <div class="alert alert-warn">
+        Salva questi codici di recupero in un posto sicuro (ad esempio una password in Hudu). Ognuno vale una sola volta e
+        serve se perdi il telefono. Non verranno più mostrati.
+    </div>
+    <ul class="recovery-codes mono">
+        @foreach (var code in Model.RecoveryCodes)
+        {
+            <li>@code</li>
+        }
+    </ul>
+    <a class="btn btn-primary btn-block" href="/Admin">Vai all'amministrazione</a>
+}
+else
+{
+    <h2 class="auth-title">Configura la verifica in due passaggi</h2>
+    <p class="muted">Obbligatoria per l'accesso locale. Inquadra il codice con Microsoft Authenticator o un'app simile.</p>
+    @if (Model.Error is not null)
+    {
+        <div class="alert alert-danger">@Model.Error</div>
+    }
+    <div class="qr">
+        <img src="@Model.QrDataUri" alt="Codice QR per l'app di autenticazione" width="220" height="220" />
+    </div>
+    <p class="small muted">Oppure inserisci a mano la chiave: <span class="mono">@Model.SharedKey</span></p>
+    <form method="post" class="stack">
+        <label class="field">
+            <span>Codice mostrato dall'app</span>
+            <input class="input input-code" asp-for="Code" autocomplete="one-time-code" inputmode="numeric" autofocus placeholder="123456" />
+        </label>
+        <button type="submit" class="btn btn-primary btn-block">Attiva e accedi</button>
+    </form>
+}
