@@ -368,11 +368,11 @@ public static class ApiEndpoints
         string? warning = null;
         // Le interfacce web si aprono nel browser: utente e password si prendono da Hudu, non dal Launcher.
         var isWeb = connection.Protocol is ConnectionProtocol.Http or ConnectionProtocol.Https;
-        if (!isWeb && connection.PasswordId is { } passwordId)
+        if (!isWeb && connection.PasswordId is { } credentialId)
         {
             try
             {
-                var secret = await hudu.GetCredentialAsync(passwordId, ct);
+                var secret = await hudu.GetCredentialAsync(credentialId, ct);
                 if (secret.CompanyId == 0 || secret.CompanyId == asset.Asset.CompanyId)
                 {
                     credential = new RedeemCredential(secret.Username, secret.Password);
@@ -380,7 +380,7 @@ public static class ApiEndpoints
             }
             catch (HuduException ex)
             {
-                logger.LogWarning(ex, "Credenziale {PasswordId} non letta da Hudu", passwordId);
+                logger.LogWarning(ex, "Credenziale {CredentialId} non letta da Hudu", credentialId);
                 warning = "Credenziale non disponibile (Hudu non risponde): inserirla a mano.";
             }
         }
