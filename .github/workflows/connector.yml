@@ -123,4 +123,10 @@ jobs:
         run: |
           cd release
           sha256sum -- * > SHA256SUMS.txt
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Hudu Launcher $VERSION" --generate-notes -- *
+          # La Release può essere già stata creata dal sito di GitHub (anche dal cellulare): in quel
+          # caso si allegano solo i file.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber -- *
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Hudu Launcher $VERSION" --generate-notes -- *
+          fi
