@@ -82,6 +82,14 @@ I dettagli sono in [`docs/SICUREZZA.md`](docs/SICUREZZA.md).
 - **Launcher**: `HuduLauncher-win-Setup.exe` dalle [Release](../../releases/latest), con
   `SHA256SUMS.txt` per verificarlo.
 
+Installer e immagine hanno un'attestazione firmata di GitHub che prova da quale pipeline e da quale
+commit provengono:
+
+```bash
+gh attestation verify HuduLauncher-win-Setup.exe --repo nicolafilippetto/hudu-launcher
+gh attestation verify oci://ghcr.io/nicolafilippetto/hudu-launcher/launcher-server:latest --repo nicolafilippetto/hudu-launcher
+```
+
 La guida completa (Entra ID, chiavi API, reverse proxy, firewall, distribuzione con Intune) è in
 [`docs/INSTALLAZIONE.md`](docs/INSTALLAZIONE.md).
 
