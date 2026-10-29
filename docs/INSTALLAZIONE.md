@@ -22,8 +22,10 @@ Una sola registrazione serve sia al portale web sia all'app Windows.
    (Certificati e segreti → Nuovo segreto client), da passare poi al certificato.
 4. **Esponi un'API**
    - URI ID applicazione: accettare `api://<client-id>`
-   - **Aggiungi un ambito**: nome `Launcher.Connect`, consenso *Amministratori e utenti*,
-     descrizione "Connessioni tramite Hudu Launcher", stato abilitato.
+   - **Aggiungi un ambito**: nome `Launcher.Connect`, consenso *Solo amministratori* (il consenso
+     lo dà l'amministratore per tutti al passo 6), nome visualizzato "Connessioni tramite Hudu
+     Launcher", descrizione "Permette al Launcher per Windows di aprire, per conto dell'utente
+     collegato, le connessioni preparate nel portale", stato abilitato.
 5. **Autenticazione → Aggiungi una piattaforma → App per dispositivi mobili e desktop**
    - URI personalizzato: `ms-appx-web://microsoft.aad.brokerplugin/<client-id>`
      (serve all'app Windows per l'accesso automatico tramite Windows).
