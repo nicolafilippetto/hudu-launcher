@@ -8,6 +8,7 @@
 <p align="center">
   <a href="../../releases/latest">Scarica il Launcher</a> ·
   <a href="docs/INSTALLAZIONE.md">Installazione</a> ·
+  <a href="docs/ENTRA.md">Microsoft 365</a> ·
   <a href="docs/ARCHITETTURA.md">Architettura</a> ·
   <a href="docs/SICUREZZA.md">Sicurezza</a>
 </p>
@@ -94,8 +95,9 @@ gh attestation verify HuduLauncher-win-Setup.exe --repo nicolafilippetto/hudu-la
 gh attestation verify oci://ghcr.io/nicolafilippetto/hudu-launcher/launcher-server:latest --repo nicolafilippetto/hudu-launcher
 ```
 
-La guida completa (Entra ID, chiavi API, reverse proxy, firewall, distribuzione con Intune) è in
-[`docs/INSTALLAZIONE.md`](docs/INSTALLAZIONE.md).
+La guida completa (chiavi API, reverse proxy, firewall, distribuzione con Intune) è in
+[`docs/INSTALLAZIONE.md`](docs/INSTALLAZIONE.md); la configurazione di Microsoft 365 passo per passo
+è in [`docs/ENTRA.md`](docs/ENTRA.md).
 
 ## Contenuto del repository
 
@@ -103,7 +105,7 @@ La guida completa (Entra ID, chiavi API, reverse proxy, firewall, distribuzione 
 |---|---|
 | [`server/`](server) | Portale web e API (ASP.NET Core 10, SQLite), Dockerfile, `docker-compose.yml`, test |
 | [`connector/`](connector) | Launcher per Windows (WPF .NET 10), installer Velopack, test |
-| [`docs/`](docs) | Installazione, architettura, sicurezza |
+| [`docs/`](docs) | Installazione, Microsoft 365 (Entra ID), architettura, sicurezza |
 | [`scripts/`](scripts) | Script PowerShell di prova (tunnel RDP e web con RustDesk, IPAM di Hudu) |
 
 ## Sviluppo

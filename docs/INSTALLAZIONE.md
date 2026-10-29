@@ -9,35 +9,18 @@ Indirizzo di esempio usato nella guida: `https://launcher.example.com`.
 
 ## 1. Registrazione dell'app in Microsoft Entra ID
 
-Una sola registrazione serve sia al portale web sia all'app Windows.
+Una sola registrazione serve sia al portale web sia all'app Windows. La procedura completa, con
+i valori da inserire e i problemi frequenti, è in **[ENTRA.md](ENTRA.md)**. In breve:
 
-1. **Entra admin center → Identità → Applicazioni → Registrazioni app → Nuova registrazione**
-   - Nome: `Hudu Launcher`
-   - Tipi di account: *Solo account in questa directory organizzativa*
-   - URI di reindirizzamento: piattaforma **Web**, `https://launcher.example.com/signin-oidc`
-2. Annotare **ID applicazione (client)** e **ID directory (tenant)**.
-3. **Credenziale dell'app: certificato** (consigliato, nessun segreto da copiare). Il certificato
-   si genera dal portale dopo l'installazione (sezione 4) e qui si carica solo la parte pubblica:
-   **Certificati e segreti → Certificati → Carica certificato**. In alternativa, un **segreto client**
-   (Certificati e segreti → Nuovo segreto client), da passare poi al certificato.
-4. **Esponi un'API**
-   - URI ID applicazione: accettare `api://<client-id>`
-   - **Aggiungi un ambito**: nome `Launcher.Connect`, consenso *Solo amministratori* (il consenso
-     lo dà l'amministratore per tutti al passo 6), nome visualizzato "Connessioni tramite Hudu
-     Launcher", descrizione "Permette al Launcher per Windows di aprire, per conto dell'utente
-     collegato, le connessioni preparate nel portale", stato abilitato.
-5. **Autenticazione → Aggiungi una piattaforma → App per dispositivi mobili e desktop**
-   - URI personalizzato: `ms-appx-web://microsoft.aad.brokerplugin/<client-id>`
-     (serve all'app Windows per l'accesso automatico tramite Windows).
-6. **Autorizzazioni API → Aggiungi un'autorizzazione → API personali → Hudu Launcher →
-   Launcher.Connect**, poi **Concedi il consenso amministratore**.
-7. **Manifesto**: impostare `"accessTokenAcceptedVersion": 2` (consigliato).
-8. **Applicazioni aziendali → Hudu Launcher**
-   - **Proprietà → Assegnazione utente obbligatoria: Sì**
-   - **Utenti e gruppi**: aggiungere il gruppo dei tecnici. Chi non è nel gruppo non entra né nel
-     portale né nell'app.
-9. **Accesso condizionale** (consigliato): criterio sull'app *Hudu Launcher* con MFA
-   obbligatoria e dispositivo conforme o aggiunto a Entra.
+1. Registrazione *single tenant* con indirizzo di ritorno Web `https://launcher.example.com/signin-oidc`.
+2. Indirizzi per il Launcher (piattaforma *Mobile and desktop*): `ms-appx-web://microsoft.aad.brokerplugin/<client-id>`
+   e `https://login.microsoftonline.com/common/oauth2/nativeclient`; *public client flows* spenti.
+3. API esposta `api://<client-id>` con l'ambito `Launcher.Connect` (consenso *Admins only*).
+4. Permessi delegati `openid`, `profile`, `email` e `Launcher.Connect`, con consenso amministratore.
+5. Manifesto con `accessTokenAcceptedVersion: 2`.
+6. Credenziale con **certificato** generato dal portale (sezione 4 di questa guida).
+7. App aziendale con *assegnazione obbligatoria* al gruppo dei tecnici e, consigliato, Accesso
+   condizionale con MFA.
 
 **Chi entra lo decide anche il portale.** Al primo accesso con Microsoft 365 l'utente resta *in
 attesa* (nessun accesso) finché un amministratore non lo approva in **Amministrazione → Utenti**,
@@ -236,7 +219,8 @@ leggono più (vanno reinseriti dalla sezione admin).
    salvano i codici di recupero, ad esempio come password in Hudu.
 3. **Amministrazione → Impostazioni**
    - *Microsoft 365*: tenant ID e client ID → **Salva**; poi **Genera certificato**, scaricare il
-     `.cer`, caricarlo in Entra (Certificati e segreti → Certificati) e premere **Prova e attiva**.
+     `.cer`, caricarlo in Entra (*Certificates & secrets → Certificates*) e premere **Prova e
+     attiva** (dettagli in [ENTRA.md](ENTRA.md#6-credenziale-del-portale-certificato)).
      La chiave privata resta cifrata nel portale e non si scarica. Il certificato dura 2 anni: un
      mese prima della scadenza la pagina di stato lo segnala; il rinnovo è lo stesso percorso e
      la credenziale attuale resta valida finché il nuovo certificato non è attivo.
