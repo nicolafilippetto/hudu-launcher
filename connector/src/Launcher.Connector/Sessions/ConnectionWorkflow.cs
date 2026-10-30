@@ -28,7 +28,7 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
 
             tab.Progress.Step(ConnectStep.Redeem);
             var info = await portal.RedeemAsync(request.Ticket, token, ct);
-            await StartSessionAsync(info, tab, ct);
+            await StartSessionAsync(info, tab, ct, WebLoginSource(info, portal, request.LocalAuth, window));
         }
         catch (OperationCanceledException)
         {
@@ -109,8 +109,40 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
         }
     }
 
+    /// <summary>
+    /// Per le pagine web: chiede al portale la password della credenziale scelta, al momento di
+    /// compilare l'accesso, con un token 365 fresco (o senza, per gli admin locali).
+    /// </summary>
+    private Func<int, CancellationToken, Task<CredentialInfo>>? WebLoginSource(ConnectionInfo info, PortalClient portal, bool localAuth, IntPtr window)
+    {
+        if (info.WebLogin is not { Candidates.Count: > 0 } login)
+        {
+            return null;
+        }
+
+        return async (credentialId, ct) =>
+        {
+            string? token = null;
+            if (!localAuth)
+            {
+                try
+                {
+                    _config ??= await portal.GetConfigAsync(ct);
+                    token = await auth.GetTokenAsync(_config, window, ct);
+                }
+                catch (Microsoft.Identity.Client.MsalException ex)
+                {
+                    throw new PortalException("Accesso a Microsoft 365 non riuscito: " + ex.Message, ex);
+                }
+            }
+
+            return await portal.GetWebLoginAsync(login.Grant, credentialId, token, ct);
+        };
+    }
+
     /// <summary>Tunnel (se tramite jump host) e scheda della sessione.</summary>
-    private async Task StartSessionAsync(ConnectionInfo info, SessionTab tab, CancellationToken ct)
+    private async Task StartSessionAsync(ConnectionInfo info, SessionTab tab, CancellationToken ct,
+        Func<int, CancellationToken, Task<CredentialInfo>>? webLogin = null)
     {
         tab.SetConnection(info);
         Log.Info($"Connessione {info.Protocol} a {info.Name} ({info.Company}) {info.Route}");
@@ -137,7 +169,7 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
             ConnectionProtocol.Ssh => new TerminalSessionView(info, endpoint, TerminalKind.Ssh, _knownHosts),
             ConnectionProtocol.Telnet => new TerminalSessionView(info, endpoint, TerminalKind.Telnet, _knownHosts),
             _ when info.WebOrDefault.External => new WebSessionView(info, endpoint),
-            _ => new BrowserSessionView(info, endpoint, _knownHosts),
+            _ => new BrowserSessionView(info, endpoint, _knownHosts, webLogin),
         };
         tab.ShowSession(view);
         await view.StartAsync();

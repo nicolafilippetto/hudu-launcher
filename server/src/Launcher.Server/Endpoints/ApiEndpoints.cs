@@ -48,12 +48,19 @@ public sealed record RedeemResponse(
     RdpOptions? Rdp,
     TerminalOptions? Terminal,
     string? HuduUrl,
-    WebOptions? Web = null);
+    WebOptions? Web = null,
+    WebLoginInfo? WebLogin = null);
+
+/// <summary>Richiesta del Launcher per compilare l'accesso di una pagina web con la credenziale scelta.</summary>
+public sealed record WebLoginRequest(string? Grant, int CredentialId);
+
+public sealed record WebLoginResponse(string? Username, string? Password);
 
 public static class RateLimitPolicies
 {
     public const string Connect = "connect";
     public const string Redeem = "redeem";
+    public const string WebLogin = "web-login";
     public const string Login = "login";
 }
 
@@ -89,6 +96,11 @@ public static class ApiEndpoints
         connector.MapPost("/redeem-offline", RedeemOfflineAsync)
             .AllowAnonymous()
             .RequireRateLimiting(RateLimitPolicies.Redeem)
+            .DisableAntiforgery();
+        // Anonimo come il riscatto: dentro si verificano autorizzazione della scheda e token 365 (o admin locale).
+        connector.MapPost("/web-login", WebLoginAsync)
+            .AllowAnonymous()
+            .RequireRateLimiting(RateLimitPolicies.WebLogin)
             .DisableAntiforgery();
     }
 
@@ -240,7 +252,8 @@ public static class ApiEndpoints
 
     private static async Task<IResult> RedeemAsync(
         RedeemRequest request, HttpContext http, TicketService tickets, InventoryService inventory, HuduClient hudu,
-        SettingsService settings, PortalPrincipalFactory principals, AuditService audit, ILogger<TicketService> logger, CancellationToken ct)
+        SettingsService settings, PortalPrincipalFactory principals, AuditService audit, WebLoginService webLogins,
+        ILogger<TicketService> logger, CancellationToken ct)
     {
         var (ticket, error) = await AuthorizeRedeemAsync(request, http, tickets, settings, principals, audit, offline: false, ct);
         if (ticket is null)
@@ -257,11 +270,113 @@ public static class ApiEndpoints
         }
 
         var (response, credentialNote) = await BuildConnectionAsync(asset, connection, ticket.Direct, settings, hudu, logger, ct);
+        if (response.Web is { Login: not "off" })
+        {
+            // Pagina web: solo nome e utente delle credenziali candidate, più l'autorizzazione per chiedere
+            // la password di quella che il tecnico sceglierà. Nessuna password in questa risposta.
+            var candidates = WebLoginService.Candidates(asset, connection, await inventory.GetCompanyPasswordsAsync(asset.Asset.CompanyId, ct));
+            if (candidates.Count > 0)
+            {
+                var grant = new WebLoginGrant(email, ticket.AuthMethod, http.Connection.RemoteIpAddress?.ToString(), asset.Asset.Id,
+                    connection.Key, [.. candidates.Select(c => c.Id)]);
+                response = response with
+                {
+                    WebLogin = new WebLoginInfo(webLogins.Protect(grant), [.. candidates.Select(c => new WebLoginCandidate(c.Id, c.Name, c.Username))]),
+                };
+                credentialNote = $"{candidates.Count} credenziali proponibili per l'accesso web";
+            }
+        }
+
         await audit.WriteAsync(new AuditEntry("ticket.redeem", email, CompanyName: asset.CompanyName, AssetId: asset.Asset.Id,
             AssetName: asset.Asset.Name, Target: Describe(connection, ticket.Direct),
             Details: credentialNote + (ticket.Direct ? "; " + DirectNote : "") + (ticket.AuthMethod == LauncherClaims.MethodLocal ? "; " + LocalTicketNote : "")),
             http, ct);
         return Results.Ok(response);
+    }
+
+    /// <summary>
+    /// Password della credenziale scelta per una pagina web aperta nel Launcher. Stessi controlli del
+    /// riscatto (token 365 dello stesso utente, ancora approvato, o admin locale dallo stesso indirizzo),
+    /// più l'autorizzazione firmata della scheda; opzione e candidate si ricontrollano adesso.
+    /// </summary>
+    private static async Task<IResult> WebLoginAsync(
+        WebLoginRequest request, HttpContext http, WebLoginService webLogins, InventoryService inventory, HuduClient hudu,
+        SettingsService settings, PortalPrincipalFactory principals, AuditService audit, ILogger<WebLoginService> logger, CancellationToken ct)
+    {
+        var grant = webLogins.Unprotect(request.Grant);
+        if (grant is null)
+        {
+            await audit.WriteAsync(new AuditEntry("web.login.reject", "anonimo", Success: false, Details: "Autorizzazione non valida o scaduta"), http, ct);
+            return Results.Problem("Autorizzazione scaduta: riapri la connessione dal portale.", statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        async Task<IResult> RejectAsync(string reason, IResult result)
+        {
+            await audit.WriteAsync(new AuditEntry("web.login.reject", grant.Email, Success: false, AssetId: grant.AssetId, Details: reason), http, ct);
+            return result;
+        }
+
+        if (grant.AuthMethod == LauncherClaims.MethodLocal)
+        {
+            if (!settings.Portal.AllowLocalAdminConnections || !await principals.IsBreakGlassAsync(grant.Email, ct)
+                || !string.Equals(grant.ClientIp, http.Connection.RemoteIpAddress?.ToString(), StringComparison.Ordinal))
+            {
+                return await RejectAsync("Admin locale non più abilitato o da un altro indirizzo",
+                    Results.Problem("Accesso non consentito.", statusCode: StatusCodes.Status403Forbidden));
+            }
+        }
+        else
+        {
+            var auth = http.Request.Headers.Authorization.Count > 0 ? await http.AuthenticateAsync(AuthSchemes.Connector) : null;
+            if (auth is not { Succeeded: true } || !string.Equals(auth.Principal.GetEmail(), grant.Email, StringComparison.OrdinalIgnoreCase))
+            {
+                return await RejectAsync("Token 365 mancante, non valido o di un altro utente", Results.Unauthorized());
+            }
+        }
+
+        if (!grant.CredentialIds.Contains(request.CredentialId))
+        {
+            return await RejectAsync("Credenziale non proposta per questa pagina",
+                Results.Problem("Credenziale non disponibile per questa pagina.", statusCode: StatusCodes.Status403Forbidden));
+        }
+
+        var asset = await inventory.GetAssetAsync(grant.AssetId, grant.Email, ct);
+        var connection = asset?.Connections.FirstOrDefault(c => c.Key == grant.ConnectionKey);
+        if (asset is null || connection?.WebUrl is not { } webUrl)
+        {
+            return await RejectAsync("Asset o connessione non più disponibili",
+                Results.Problem("La connessione non è più disponibile.", statusCode: StatusCodes.Status409Conflict));
+        }
+
+        var options = WebOptionCatalog.Resolve(webUrl, settings.WebDefaults, WebOptionCatalog.Catalog.Parse(asset.Setting?.WebOptions));
+        var chosen = WebLoginService.Candidates(asset, connection, await inventory.GetCompanyPasswordsAsync(asset.Asset.CompanyId, ct))
+            .FirstOrDefault(p => p.Id == request.CredentialId);
+        if (options.Login == "off" || chosen is null)
+        {
+            return await RejectAsync(options.Login == "off" ? "Accesso web disattivato per l'asset" : "Credenziale non più collegata",
+                Results.Problem("Accesso con le credenziali di Hudu non disponibile per questa pagina.", statusCode: StatusCodes.Status409Conflict));
+        }
+
+        HuduCredential secret;
+        try
+        {
+            secret = await hudu.GetCredentialAsync(chosen.Id, ct);
+        }
+        catch (HuduException ex)
+        {
+            logger.LogWarning(ex, "Credenziale {CredentialId} non letta da Hudu", chosen.Id);
+            return Results.Problem("Hudu non risponde: riprova tra poco.", statusCode: StatusCodes.Status502BadGateway);
+        }
+
+        if (secret.CompanyId != 0 && secret.CompanyId != asset.Asset.CompanyId)
+        {
+            return await RejectAsync("Credenziale di un altro cliente",
+                Results.Problem("Credenziale non disponibile per questa pagina.", statusCode: StatusCodes.Status409Conflict));
+        }
+
+        await audit.WriteAsync(new AuditEntry("web.login", grant.Email, CompanyName: asset.CompanyName, AssetId: asset.Asset.Id,
+            AssetName: asset.Asset.Name, Target: webUrl, Details: $"credenziale: {chosen.Name}"), http, ct);
+        return Results.Ok(new WebLoginResponse(secret.Username, secret.Password));
     }
 
     /// <summary>Il Launcher scambia il biglietto offline con le connessioni dirette degli asset scelti.</summary>

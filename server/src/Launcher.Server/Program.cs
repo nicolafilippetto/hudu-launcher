@@ -93,6 +93,7 @@ builder.Services.AddSingleton<AuditService>();
 builder.Services.AddSingleton<PortalPrincipalFactory>();
 builder.Services.AddSingleton<SetupState>();
 builder.Services.AddSingleton<SyncService>();
+builder.Services.AddSingleton<Launcher.Server.Connections.WebLoginService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SyncService>());
 builder.Services.AddHostedService<HousekeepingService>();
 builder.Services.AddScoped<HuduClient>();
@@ -195,6 +196,7 @@ builder.Services.AddRateLimiter(o =>
 
     o.AddPolicy(RateLimitPolicies.Connect, http => Window(http, 30, TimeSpan.FromMinutes(5)));
     o.AddPolicy(RateLimitPolicies.Redeem, http => Window(http, 30, TimeSpan.FromMinutes(5)));
+    o.AddPolicy(RateLimitPolicies.WebLogin, http => Window(http, 30, TimeSpan.FromMinutes(5)));
     // Solo i tentativi (POST) contano: aprire le pagine di login non consuma il limite.
     o.AddPolicy(RateLimitPolicies.Login, http => HttpMethods.IsPost(http.Request.Method)
         ? RateLimitPartition.GetFixedWindowLimiter(

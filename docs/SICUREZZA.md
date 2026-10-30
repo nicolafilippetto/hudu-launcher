@@ -48,8 +48,16 @@ server (se la licenza lo consente), rotazione periodica, alert sugli accessi API
   (predefinita 60 minuti): mai su disco, cancellate alla scadenza, chiudendo il Launcher o spegnendo il
   PC; un nuovo pacchetto sostituisce il precedente. Ogni preparazione e ogni asset consegnato sono nel
   registro (`offline.prepare`, `offline.redeem`).
-- **Pagine web nel Launcher**: il portale non invia credenziali per le connessioni web e gli URL
-  con utente e password vengono rifiutati. Ogni scheda ha un profilo del browser proprio (cookie
+- **Pagine web nel Launcher**: aprendo la pagina il portale non invia password, solo nome e utente
+  delle credenziali proponibili (collegate all'asset, scelta per la connessione o con l'URL sullo
+  stesso host) e un'autorizzazione firmata per quella scheda (10 ore, legata a utente, asset,
+  connessione e credenziali). Con "Accesso" il Launcher chiede la password della sola credenziale
+  scelta: servono l'autorizzazione e un token 365 dello stesso utente ancora approvato (o, per gli
+  admin locali, lo stesso indirizzo); opzione dell'asset e credenziali si ricontrollano in quel
+  momento, la password si legge da Hudu nel container (la chiave API non esce mai) e ogni richiesta
+  è nel registro (`web.login`, rifiuti in `web.login.reject`). Il Launcher la scrive solo nei campi
+  di una pagina sull'host dell'asset e non la conserva; gli strumenti per sviluppatori sono spenti.
+  Gli URL con utente e password vengono rifiutati. Ogni scheda ha un profilo del browser proprio (cookie
   separati tra clienti con gli stessi IP), cancellato alla chiusura salvo l'opzione "Ricorda per
   questo asset"; salvataggio password e compilazione automatica sono spenti. Il proxy SOCKS5 della
   scheda ascolta solo su `127.0.0.1` e porta nel tunnel unicamente host e porta dell'asset. I
@@ -98,6 +106,9 @@ fissate per hash del commit e Dependabot propone gli aggiornamenti dopo 7 giorni
   chiave master separato dal backup del volume.
 - **Compromissione di un account tecnico 365**: permette connessioni come quel tecnico. Mitigazioni:
   Accesso condizionale (MFA resistente al phishing, dispositivo conforme), assegnazione utenti al gruppo.
+- **Accesso web compilato**: la password finisce nel campo della pagina dell'apparato, come se il
+  tecnico la digitasse; le pagine con il pulsante "mostra password" la renderebbero visibile.
+  L'opzione si può spegnere per tutti o per singolo asset.
 - **Proxy locale delle pagine web**: finché la scheda è aperta, un altro programma sullo stesso PC
   potrebbe usare il proxy su `127.0.0.1` per raggiungere l'apparato, come già vale per la porta
   locale del tunnel RustDesk. Antivirus/EDR e PC gestiti.

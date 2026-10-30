@@ -673,6 +673,78 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
         }
     }
 
+    private async Task<HttpResponseMessage> WebLoginAsync(string? grant, int credentialId, string? bearer)
+    {
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri("/api/connector/web-login", UriKind.Relative))
+        {
+            Content = JsonContent.Create(new { grant, credentialId }),
+        };
+        if (bearer is not null)
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        }
+
+        return await client.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Web_page_gets_candidates_without_passwords_and_one_password_on_request()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await SignedInClientAsync("tecnico@example.com");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.AssetSettings.Add(new AssetSetting { AssetId = 10, WebUrl = "https://srv-dc01.cliente.local/ui" });
+            await db.SaveChangesAsync(ct);
+        }
+
+        try
+        {
+            var redeem = await RedeemAsync(await CreateTicketAsync(client), factory.CreateConnectorToken("tecnico@example.com"));
+            Assert.Equal(HttpStatusCode.OK, redeem.StatusCode);
+            var body = await redeem.Content.ReadAsStringAsync(ct);
+            Assert.DoesNotContain("P@ssw0rd!", body, StringComparison.Ordinal);
+            var json = JsonDocument.Parse(body).RootElement;
+            Assert.Equal("https://srv-dc01.cliente.local/ui", json.GetProperty("web").GetProperty("url").GetString());
+            Assert.Equal("srv-dc01.cliente.local", json.GetProperty("target").GetProperty("host").GetString());
+            Assert.Equal(JsonValueKind.Null, json.GetProperty("credential").ValueKind);
+            var login = json.GetProperty("webLogin");
+            var candidate = Assert.Single(login.GetProperty("candidates").EnumerateArray());
+            Assert.Equal(501, candidate.GetProperty("id").GetInt32());
+            Assert.Equal("DOM\\admin", candidate.GetProperty("username").GetString());
+            var grant = login.GetProperty("grant").GetString();
+
+            // Solo lo stesso utente, solo le credenziali proposte, solo con un'autorizzazione valida.
+            Assert.Equal(HttpStatusCode.Unauthorized, (await WebLoginAsync(grant, 501, factory.CreateConnectorToken("ladro@example.com"))).StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, (await WebLoginAsync(grant, 501, null)).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await WebLoginAsync(grant, 999, factory.CreateConnectorToken("tecnico@example.com"))).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await WebLoginAsync(grant + "x", 501, factory.CreateConnectorToken("tecnico@example.com"))).StatusCode);
+
+            var fill = await WebLoginAsync(grant, 501, factory.CreateConnectorToken("tecnico@example.com"));
+            Assert.Equal(HttpStatusCode.OK, fill.StatusCode);
+            var secret = await fill.Content.ReadFromJsonAsync<JsonElement>(ct);
+            Assert.Equal("P@ssw0rd!", secret.GetProperty("password").GetString());
+
+            // L'admin può spegnere la funzione: vale subito, anche per le schede già aperte.
+            await SetSettingAsync(SettingKeys.WebDefaults, "{\"login\":\"off\"}");
+            Assert.Equal(HttpStatusCode.Conflict, (await WebLoginAsync(grant, 501, factory.CreateConnectorToken("tecnico@example.com"))).StatusCode);
+
+            using var scope = factory.Services.CreateScope();
+            var audit = scope.ServiceProvider.GetRequiredService<AppDbContext>().AuditEvents;
+            Assert.True(await audit.AnyAsync(e => e.Action == "web.login" && e.UserEmail == "tecnico@example.com" && e.Details == "credenziale: Admin dominio", ct));
+            Assert.True(await audit.AnyAsync(e => e.Action == "web.login.reject" && !e.Success, ct));
+        }
+        finally
+        {
+            await SetSettingAsync(SettingKeys.WebDefaults, "");
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.AssetSettings.Where(a => a.AssetId == 10).ExecuteDeleteAsync(ct);
+        }
+    }
+
     [Theory]
     [InlineData("POST")]
     [InlineData("PUT")]

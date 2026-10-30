@@ -96,12 +96,16 @@ la pagina in una scheda del Launcher o nel browser predefinito.
   dell'apparato: funzionano iDRAC (controllo dell'host) e vCenter (SSO sull'FQDN). La cifratura TLS
   resta tra pagina e apparato. Le altre porte dello stesso host sono bloccate; gli altri indirizzi
   (es. risorse su internet) vanno diretti. Certificati non validi: chiedi e ricorda l'impronta
-  (come le chiavi SSH), ignora o blocca.
+  (come le chiavi SSH), ignora o blocca. Pulsante **Accesso**: si sceglie una delle credenziali
+  di Hudu proposte (solo nome e utente) e il Launcher chiede al portale la password di quella
+  sola credenziale (`POST /api/connector/web-login`, con l'autorizzazione della scheda e il token
+  365), poi la scrive nei campi della pagina; in automatico se c'è una sola credenziale e
+  l'opzione lo prevede.
 - **Browser predefinito**: tunnel + `https://127.0.0.1:<porta>` con lo stesso percorso
   dell'URL (in diretta l'indirizzo vero).
 
-Utente e password non si copiano mai dal portale né dal Launcher: per le interfacce web si
-prendono da Hudu, e per il web il portale non invia nemmeno la credenziale al Launcher.
+Utente e password non si copiano mai dal portale né dal Launcher. Per il web la password arriva
+solo quando il tecnico sceglie la credenziale da compilare, e finisce direttamente nella pagina.
 
 ## 4. Sicurezza
 

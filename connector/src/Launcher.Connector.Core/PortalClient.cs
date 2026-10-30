@@ -62,7 +62,8 @@ public sealed record WebOptions(
     bool Popups = true,
     bool Downloads = true,
     bool KeepCookies = false,
-    int Zoom = 100)
+    int Zoom = 100,
+    string Login = "button")
 {
     public static WebOptions For(string scheme, TargetInfo target)
     {
@@ -72,6 +73,18 @@ public sealed record WebOptions(
 
     public double ZoomFactor => Math.Clamp(Zoom, 25, 500) / 100.0;
 }
+
+/// <summary>Credenziale proponibile per l'accesso a una pagina web: nome e utente, senza password.</summary>
+public sealed record WebLoginCandidate(int Id, string Name, string? Username)
+{
+    public string Label => string.IsNullOrWhiteSpace(Username) ? Name : $"{Name} — {Username}";
+}
+
+/// <summary>
+/// Credenziali proponibili per la pagina e autorizzazione della scheda con cui chiedere al portale
+/// la password di quella scelta, solo al momento di compilare l'accesso.
+/// </summary>
+public sealed record WebLoginInfo(string Grant, IReadOnlyList<WebLoginCandidate> Candidates);
 
 public enum ConnectionProtocol
 {
@@ -99,7 +112,8 @@ public sealed record ConnectionInfo(
     RdpOptions? Rdp = null,
     TerminalOptions? Terminal = null,
     string? HuduUrl = null,
-    WebOptions? Web = null)
+    WebOptions? Web = null,
+    WebLoginInfo? WebLogin = null)
 {
     public bool IsDirect => Gateway is null;
 
@@ -215,6 +229,26 @@ public sealed class PortalClient(HttpClient http, Uri portal)
 
         using var response = await SendAsync(request, ct);
         return await response.Content.ReadFromJsonAsync<OfflineBundle>(Json, ct)
+            ?? throw new PortalException("Risposta del portale non valida.");
+    }
+
+    /// <summary>
+    /// Password della credenziale scelta per compilare l'accesso di una pagina web. Il portale la legge
+    /// da Hudu in quel momento e registra la richiesta; senza token solo per gli admin locali.
+    /// </summary>
+    public async Task<CredentialInfo> GetWebLoginAsync(string grant, int credentialId, string? accessToken, CancellationToken ct)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, new Uri(Portal, "api/connector/web-login"))
+        {
+            Content = JsonContent.Create(new { grant, credentialId }),
+        };
+        if (accessToken is not null)
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        }
+
+        using var response = await SendAsync(request, ct);
+        return await response.Content.ReadFromJsonAsync<CredentialInfo>(Json, ct)
             ?? throw new PortalException("Risposta del portale non valida.");
     }
 

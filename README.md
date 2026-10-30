@@ -47,6 +47,8 @@ Ogni connessione, e ogni credenziale consegnata, finisce nel registro accessi de
 - **Interfacce web** di firewall, NAS, iDRAC/iLO, vCenter aperte in una scheda del Launcher con il
   loro indirizzo vero (IP o FQDN, anche interno) attraverso il tunnel, oppure nel browser
   predefinito; opzioni per tutti e per singolo asset (certificati, finestre, download, accesso).
+  Il pulsante **Accesso** compila utente e password con la credenziale di Hudu scelta, senza che
+  la password si possa copiare.
 - **Jump host automatico**: il gateway RustDesk si ricava da Hudu, dal cliente o dal dispositivo
   stesso; in alternativa connessione **diretta**. RustDesk è facoltativo: senza, il portale offre
   solo la connessione diretta (dalla rete del cliente o in VPN).
@@ -62,8 +64,8 @@ Ogni connessione, e ogni credenziale consegnata, finisce nel registro accessi de
 
 - La chiave API di Hudu resta sul server, cifrata; il codice blocca qualsiasi richiesta verso Hudu
   che non sia una lettura.
-- Le password non vengono salvate: si leggono al momento della connessione e non si possono copiare
-  né dal portale né dal Launcher.
+- Le password non vengono salvate: si leggono al momento della connessione (per le pagine web solo
+  quella scelta, al clic su Accesso) e non si possono copiare né dal portale né dal Launcher.
 - Ogni nuovo utente Microsoft 365 va approvato da un amministratore; gli utenti sono riconosciuti
   dall'object ID di Entra, non dall'email, e bloccarli toglie l'accesso entro un minuto.
 - Link monouso da 256 bit, legati all'utente e validi 30 secondi; il Launcher deve presentare anche

@@ -28,6 +28,12 @@ public sealed class BrowserSessionView : ISessionView
     private readonly WebView2 _web = new();
     private readonly List<Window> _popups = [];
     private readonly Dictionary<string, Task<bool>> _certificateAnswers = new(StringComparer.Ordinal);
+    private readonly Func<int, CancellationToken, Task<CredentialInfo>>? _fetchLogin;
+    private readonly IReadOnlyList<WebLoginCandidate> _candidates;
+    private readonly List<CoreWebView2Frame> _frames = [];
+    private readonly CancellationTokenSource _cts = new();
+    private bool _filling;
+    private bool _autoLoginDone;
     private Socks5Proxy? _proxy;
     private CoreWebView2Environment? _environment;
     private string? _profile;
@@ -36,12 +42,15 @@ public sealed class BrowserSessionView : ISessionView
     private string _statusText = "Apertura della pagina…";
     private bool _closing;
 
-    public BrowserSessionView(ConnectionInfo info, SessionEndpoint endpoint, KnownHosts knownHosts)
+    public BrowserSessionView(ConnectionInfo info, SessionEndpoint endpoint, KnownHosts knownHosts,
+        Func<int, CancellationToken, Task<CredentialInfo>>? fetchLogin = null)
     {
         _info = info;
         _endpoint = endpoint;
         _knownHosts = knownHosts;
         _options = info.WebOrDefault;
+        _fetchLogin = fetchLogin;
+        _candidates = fetchLogin is not null && _options.Login != "off" ? info.WebLogin?.Candidates ?? [] : [];
         _home = new Uri(_options.Url);
         _root.Children.Add(_web);
         Commands = BuildCommands();
@@ -59,7 +68,30 @@ public sealed class BrowserSessionView : ISessionView
 
     private CoreWebView2? Core => _web.CoreWebView2;
 
-    private IReadOnlyList<CommandGroup> BuildCommands() =>
+    private IReadOnlyList<CommandGroup> BuildCommands()
+    {
+        var groups = new List<CommandGroup>();
+        if (_candidates.Count > 0)
+        {
+            // Una credenziale: un clic. Più credenziali: si sceglie dall'elenco (nome e utente, mai la password).
+            var login = _candidates.Count == 1
+                ? new SessionCommand("\uE8D7", "Accesso", $"Compila l'accesso con {_candidates[0].Label} (da Hudu)", () => _ = FillLoginAsync(_candidates[0]))
+                {
+                    CanExecute = () => Core is not null && !_filling,
+                }
+                : new SessionCommand("\uE8D7", "Accesso", "Scegli la credenziale di Hudu con cui compilare l'accesso")
+                {
+                    CanExecute = () => Core is not null && !_filling,
+                    Menu = [.. _candidates.Select(c => new SessionCommand("\uE77B", c.Label, "Compila utente e password nella pagina", () => _ = FillLoginAsync(c)))],
+                };
+            groups.Add(new CommandGroup("Hudu", [login]));
+        }
+
+        groups.AddRange(BaseCommands());
+        return groups;
+    }
+
+    private IReadOnlyList<CommandGroup> BaseCommands() =>
     [
         new("Navigazione",
         [
@@ -96,6 +128,12 @@ public sealed class BrowserSessionView : ISessionView
         Core.DocumentTitleChanged += (_, _) => UpdateTitle();
         Core.HistoryChanged += (_, _) => StateChanged?.Invoke();
         Core.ProcessFailed += (_, e) => SetStatus($"Il browser integrato si è interrotto ({e.ProcessFailedKind}): premi Ricarica", SessionState.Failed);
+        // Riquadri della pagina (alcuni apparati mettono il modulo di accesso in un iframe).
+        Core.FrameCreated += (_, e) =>
+        {
+            _frames.Add(e.Frame);
+            e.Frame.Destroyed += (_, _) => _frames.Remove(e.Frame);
+        };
         _web.ZoomFactor = _options.ZoomFactor;
         Log.Info($"Pagina web di {_info.Name} nel Launcher: {_home} ({_info.Route})");
         Core.Navigate(_home.ToString());
@@ -165,6 +203,7 @@ public sealed class BrowserSessionView : ISessionView
         if (e.IsSuccess)
         {
             SetStatus(Title(), SessionState.Connected);
+            _ = AutoLoginAsync();
             return;
         }
 
@@ -201,6 +240,120 @@ public sealed class BrowserSessionView : ISessionView
         var current = Uri.TryCreate(Core?.Source, UriKind.Absolute, out var source) && source.Scheme is "http" or "https" ? source : _home;
         var target = _endpoint.Direct ? current : new UriBuilder(current) { Host = _endpoint.Host, Port = _endpoint.Port }.Uri;
         Process.Start(new ProcessStartInfo(target.ToString()) { UseShellExecute = true })?.Dispose();
+    }
+
+    // ------------------------------------------------------------------ accesso con le credenziali di Hudu
+
+    /// <summary>
+    /// Compila utente e password nella pagina. Prima si controlla che ci sia un modulo di accesso
+    /// sull'host dell'asset; solo allora si chiede al portale la password della credenziale scelta,
+    /// che va dritta nei campi e non resta da nessuna parte.
+    /// </summary>
+    private async Task FillLoginAsync(WebLoginCandidate candidate)
+    {
+        if (_filling || Core is not { } core || _fetchLogin is null)
+        {
+            return;
+        }
+
+        _filling = true;
+        StateChanged?.Invoke();
+        try
+        {
+            if (!Uri.TryCreate(core.Source, UriKind.Absolute, out var page) || !WebRoutes.SameHost(page.Host, _info.Target.Host))
+            {
+                SetStatus("La pagina non è sull'indirizzo dell'asset: accesso non compilato");
+                return;
+            }
+
+            var targets = await LoginTargetsAsync();
+            if (targets.Count == 0)
+            {
+                SetStatus("Nessun modulo di accesso nella pagina");
+                return;
+            }
+
+            SetStatus($"Accesso con {candidate.Name}…");
+            var credential = await _fetchLogin(candidate.Id, _cts.Token);
+            var script = WebLoginScript.Fill(_info.Target.Host, credential.Username, credential.Password);
+            var result = WebLoginFill.NoForm;
+            foreach (var target in targets)
+            {
+                var filled = WebLoginScript.Parse(await target(script));
+                if (filled > result)
+                {
+                    result = filled;
+                }
+            }
+
+            SetStatus(result switch
+            {
+                WebLoginFill.Filled => $"Accesso compilato con {candidate.Name}: conferma nella pagina",
+                WebLoginFill.UserOnly => "Utente compilato: alla schermata della password premi di nuovo Accesso",
+                _ => "Modulo di accesso non riconosciuto: compila a mano",
+            });
+        }
+        catch (PortalException ex)
+        {
+            SetStatus("Accesso non compilato: " + ex.Message);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException)
+        {
+            Log.Warn("Compilazione dell'accesso non riuscita: " + ex.Message);
+            SetStatus("Accesso non compilato: la pagina è cambiata, riprova");
+        }
+        finally
+        {
+            _filling = false;
+            StateChanged?.Invoke();
+        }
+    }
+
+    /// <summary>Pagina e riquadri sull'host dell'asset che hanno un modulo di accesso.</summary>
+    private async Task<List<Func<string, Task<string>>>> LoginTargetsAsync()
+    {
+        var detect = WebLoginScript.Detect(_info.Target.Host);
+        var candidates = new List<Func<string, Task<string>>> { script => Core!.ExecuteScriptAsync(script) };
+        candidates.AddRange(_frames.ToList().Select(frame => (Func<string, Task<string>>)(script => frame.ExecuteScriptAsync(script))));
+        var found = new List<Func<string, Task<string>>>();
+        foreach (var target in candidates)
+        {
+            try
+            {
+                if (WebLoginScript.Parse(await target(detect)) is WebLoginFill.Filled or WebLoginFill.UserOnly)
+                {
+                    found.Add(target);
+                }
+            }
+            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException)
+            {
+                // riquadro chiuso nel frattempo
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>Opzione "automatico": con una sola credenziale si compila la prima volta che compare il modulo.</summary>
+    private async Task AutoLoginAsync()
+    {
+        if (_options.Login != "auto" || _candidates.Count != 1 || _autoLoginDone || _filling)
+        {
+            return;
+        }
+
+        // Si lascia comparire il modulo (pagine che lo disegnano dopo il caricamento).
+        await Task.Delay(800);
+        if (_closing || _autoLoginDone || (await LoginTargetsAsync()).Count == 0)
+        {
+            return;
+        }
+
+        _autoLoginDone = true;
+        await FillLoginAsync(_candidates[0]);
     }
 
     // ------------------------------------------------------------------ certificati
@@ -380,6 +533,7 @@ public sealed class BrowserSessionView : ISessionView
     public async ValueTask DisposeAsync()
     {
         _closing = true;
+        await _cts.CancelAsync();
         foreach (var popup in _popups.ToList())
         {
             popup.Close();
@@ -390,6 +544,8 @@ public sealed class BrowserSessionView : ISessionView
         {
             await _proxy.DisposeAsync();
         }
+
+        _cts.Dispose();
 
         if (_temporaryProfile && _profile is { } profile)
         {

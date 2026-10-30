@@ -154,7 +154,8 @@ public sealed record WebOptions(
     bool Popups,
     bool Downloads,
     bool KeepCookies,
-    int Zoom);
+    int Zoom,
+    string Login = "button");
 
 /// <summary>Opzioni delle pagine web (interfacce di firewall, iDRAC, vCenter…), come quelle RDP.</summary>
 public static class WebOptionCatalog
@@ -174,6 +175,9 @@ public static class WebOptionCatalog
         new("cookies", "Accesso al sito", "session",
             [("session", "Dimentica alla chiusura della scheda"), ("keep", "Ricorda per questo asset")],
             "Con \"Ricorda\" cookie e accesso restano sul PC del tecnico fino alla prossima apertura"),
+        new("login", "Accesso con le credenziali di Hudu", "button",
+            [("button", "Con il pulsante Accesso"), ("auto", "Automatico se c'è una sola credenziale"), ("off", "Mai")],
+            "Il Launcher compila utente e password nella pagina dell'apparato: la password arriva solo per la credenziale scelta e non si può copiare"),
         new("zoom", "Zoom iniziale", "100",
             [("80", "80%"), ("90", "90%"), ("100", "100%"), ("110", "110%"), ("125", "125%"), ("150", "150%")]),
     ]);
@@ -184,7 +188,7 @@ public static class WebOptionCatalog
     {
         string V(string key) => Catalog.Effective(key, defaults, overrides);
         return new WebOptions(url, V("open") == "browser", V("certificate"), V("popups") == "true", V("downloads") == "true",
-            V("cookies") == "keep", int.Parse(V("zoom"), CultureInfo.InvariantCulture));
+            V("cookies") == "keep", int.Parse(V("zoom"), CultureInfo.InvariantCulture), V("login"));
     }
 }
 

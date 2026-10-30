@@ -57,6 +57,8 @@ public sealed class AuditService(IDbContextFactory<AppDbContext> dbFactory, ILog
         ["ticket.reject"] = "Biglietto rifiutato",
         ["offline.prepare"] = "Cache offline preparata",
         ["offline.redeem"] = "Cache offline consegnata",
+        ["web.login"] = "Accesso web compilato dal Launcher",
+        ["web.login.reject"] = "Accesso web rifiutato",
         ["password.copy"] = "Password copiata",
         ["asset.update"] = "Mappatura asset modificata",
         ["company.update"] = "Gateway cliente modificato",
