@@ -418,3 +418,76 @@ public sealed class RustDeskClientPathTests
         Assert.Equal(@"C:\Program Files\RustDesk\rustdesk.exe", info.ClientPath);
     }
 }
+
+public sealed class SessionToolsTests
+{
+    [Fact]
+    public void Key_combinations_press_in_order_and_release_in_reverse()
+    {
+        var strokes = RemoteKeys.CtrlAltDel.Strokes;
+        Assert.Equal([0x1D, 0x38, 0x53, 0x53, 0x38, 0x1D], strokes.Select(s => s.ScanCode));
+        Assert.Equal([false, false, false, true, true, true], strokes.Select(s => s.KeyUp));
+    }
+
+    [Fact]
+    public void Key_combinations_fit_a_single_send() =>
+        Assert.All(RemoteKeys.Others.Append(RemoteKeys.CtrlAltDel), k => Assert.InRange(k.Strokes.Count, 2, KeyStrokes.MaxPerSend));
+
+    [Fact]
+    public void Keys_with_modifiers_wrap_the_key()
+    {
+        Assert.Equal(
+            [new KeyStroke(0x1D, false), new KeyStroke(0x38, false), new KeyStroke(0x1A, false),
+             new KeyStroke(0x1A, true), new KeyStroke(0x38, true), new KeyStroke(0x1D, true)],
+            KeyStrokes.Key(0x1A, ctrl: true, alt: true));
+        Assert.Equal([new KeyStroke(0x1E, false), new KeyStroke(0x1E, true)], KeyStrokes.Key(0x1E));
+    }
+
+    [Fact]
+    public void Batches_never_split_a_character()
+    {
+        var characters = Enumerable.Range(0, 7).Select(i => KeyStrokes.Key(0x10 + i, shift: i % 2 == 0)).ToList();
+        var batches = KeyStrokes.Batch(characters).ToList();
+        Assert.All(batches, b => Assert.InRange(b.Count, 1, KeyStrokes.MaxPerSend));
+        Assert.Equal(characters.SelectMany(c => c), batches.SelectMany(b => b));
+        Assert.All(batches, b => Assert.Equal(b.Count(s => !s.KeyUp), b.Count(s => s.KeyUp)));
+    }
+
+    [Fact]
+    public void Typing_turns_line_breaks_into_enter_and_drops_controls()
+    {
+        var keys = ClipboardTyping.Plan("a\r\nb\nc\rd\te\u0007è");
+        var expected = new[]
+        {
+            new TypedKey('a', 0), new TypedKey('\0', TypedKey.Return), new TypedKey('b', 0), new TypedKey('\0', TypedKey.Return),
+            new TypedKey('c', 0), new TypedKey('\0', TypedKey.Return), new TypedKey('d', 0), new TypedKey('\0', TypedKey.Tab),
+            new TypedKey('e', 0), new TypedKey('è', 0),
+        };
+        Assert.Equal(expected, keys);
+    }
+
+    [Theory]
+    [InlineData(100u, 1, 125u)]
+    [InlineData(150u, -1, 125u)]
+    [InlineData(140u, 1, 150u)]
+    [InlineData(140u, -1, 125u)]
+    [InlineData(300u, 1, null)]
+    [InlineData(100u, -1, null)]
+    public void Zoom_steps_between_levels(uint current, int direction, uint? expected) =>
+        Assert.Equal(expected, DisplayScale.Step(current, direction));
+
+    [Theory]
+    [InlineData(100u, 100u)]
+    [InlineData(150u, 140u)]
+    [InlineData(200u, 180u)]
+    public void Device_scale_follows_desktop_scale(uint desktop, uint device) =>
+        Assert.Equal(device, DisplayScale.DeviceScale(desktop));
+
+    [Fact]
+    public void File_names_are_safe()
+    {
+        var now = new DateTime(2026, 10, 30, 8, 5, 9, DateTimeKind.Local);
+        Assert.Equal("SRV_01 _ dc_ 2026-10-30 080509.png", FileNames.For("SRV/01 : dc?", "png", now));
+        Assert.Equal("sessione 2026-10-30 080509.txt", FileNames.For(" .. ", "txt", now));
+    }
+}

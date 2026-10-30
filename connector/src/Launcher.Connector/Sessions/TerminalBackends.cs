@@ -101,17 +101,15 @@ public sealed class SshBackend(ConnectionInfo info, SessionEndpoint endpoint, Kn
             return true;
         }
 
-        var accepted = Application.Current.Dispatcher.Invoke(() =>
-        {
-            var message = status == HostKeyStatus.Unknown
-                ? $"Prima connessione SSH a {info.Name}.\n\nImpronta della chiave del server:\nSHA256:{fingerprint}\n\nAccettarla e ricordarla?"
-                : $"ATTENZIONE: la chiave SSH di {info.Name} è CAMBIATA.\n\nNuova impronta:\nSHA256:{fingerprint}\n\n" +
-                  "Può essere una reinstallazione del server, ma anche un tentativo di intercettazione. " +
-                  "Continuare solo se il cambio è noto.\n\nAccettare la nuova chiave?";
-            return MessageBox.Show(Application.Current.MainWindow!, message, "Chiave del server SSH",
-                MessageBoxButton.YesNo, status == HostKeyStatus.Unknown ? MessageBoxImage.Question : MessageBoxImage.Warning,
-                status == HostKeyStatus.Unknown ? MessageBoxResult.Yes : MessageBoxResult.No) == MessageBoxResult.Yes;
-        });
+        var accepted = Application.Current.Dispatcher.Invoke(() => status == HostKeyStatus.Unknown
+            ? Dialogs.Confirm(null, $"Prima connessione SSH a {info.Name}",
+                "Il server presenta questa chiave. Se la accetti viene ricordata e alle prossime connessioni " +
+                "il Launcher avvisa se dovesse cambiare.",
+                "Accetta e ricorda", "Annulla", DialogKind.Question, "SHA256:" + fingerprint)
+            : Dialogs.Confirm(null, $"La chiave SSH di {info.Name} è cambiata",
+                "Può essere una reinstallazione del server, ma anche un tentativo di intercettazione. " +
+                "Continua solo se il cambio è noto (chiedi a chi gestisce il server).",
+                "Accetta la nuova chiave", "Annulla", DialogKind.Security, "Nuova impronta: SHA256:" + fingerprint, confirmIsDefault: false));
         if (accepted)
         {
             knownHosts.Trust(alias, fingerprint);

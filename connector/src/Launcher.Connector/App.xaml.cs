@@ -59,8 +59,7 @@ public partial class App : Application
     private static void OnUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         Log.Error("Errore non gestito", e.Exception);
-        MessageBox.Show("Si è verificato un errore imprevisto:\n\n" + e.Exception.Message +
-                        $"\n\nDettagli nel registro: {Log.CurrentFile}", "Hudu Launcher", MessageBoxButton.OK, MessageBoxImage.Error);
+        Dialogs.Show(null, "Si è verificato un errore imprevisto", e.Exception.Message, DialogKind.Error, "Dettagli nel registro: " + Log.CurrentFile);
         e.Handled = true;
     }
 }

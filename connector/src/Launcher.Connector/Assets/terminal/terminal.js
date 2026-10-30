@@ -81,8 +81,61 @@
                 case "focus":
                     term.focus();
                     break;
+                case "copy-selection":
+                    var selected = term.getSelection();
+                    if (selected) { send({ type: "copy", text: selected }); }
+                    term.focus();
+                    break;
+                case "select-all":
+                    term.selectAll();
+                    term.focus();
+                    break;
+                case "clear":
+                    term.clear();
+                    term.focus();
+                    break;
+                case "zoom":
+                    zoom(message.delta);
+                    break;
+                case "export":
+                    send({ type: "export", text: bufferText() });
+                    break;
             }
         });
+    }
+
+    // Dimensione del testo: dai pulsanti della barra o con Ctrl+rotellina.
+    function zoom(delta) {
+        var size = Math.max(9, Math.min(28, term.options.fontSize + delta));
+        if (size !== term.options.fontSize) {
+            term.options.fontSize = size;
+            fit.fit();
+        }
+        term.focus();
+    }
+    document.addEventListener("wheel", function (event) {
+        if (event.ctrlKey) {
+            event.preventDefault();
+            zoom(event.deltaY < 0 ? 1 : -1);
+        }
+    }, { passive: false });
+
+    // Tutto il testo del terminale (cronologia compresa), con le righe spezzate ricomposte.
+    function bufferText() {
+        var buffer = term.buffer.active;
+        var lines = [];
+        for (var i = 0; i < buffer.length; i++) {
+            var line = buffer.getLine(i);
+            if (!line) { continue; }
+            var text = line.translateToString(true);
+            if (line.isWrapped && lines.length > 0) {
+                lines[lines.length - 1] += text;
+            } else {
+                lines.push(text);
+            }
+        }
+        while (lines.length > 0 && lines[lines.length - 1] === "") { lines.pop(); }
+        return lines.join("\n") + "\n";
     }
 
     window.addEventListener("resize", function () { fit.fit(); });

@@ -46,6 +46,41 @@ public interface IMsRdpExtendedSettings
     object GetProperty([MarshalAs(UnmanagedType.BStr)] string name);
 }
 
+/// <summary>
+/// Metodi non scriptabili del controllo (IMsRdpClientNonScriptable, solo vtable). I primi dieci sono
+/// quelli di IMsTscNonScriptable: non si usano, ma vanno dichiarati per l'ordine della vtable.
+/// </summary>
+[ComImport]
+[Guid("2F079C4C-87B2-4AFD-97AB-20CDB43038AE")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IMsRdpClientNonScriptable
+{
+    void SetClearTextPassword(IntPtr value);
+
+    void SetPortablePassword(IntPtr value);
+
+    IntPtr GetPortablePassword();
+
+    void SetPortableSalt(IntPtr value);
+
+    IntPtr GetPortableSalt();
+
+    void SetBinaryPassword(IntPtr value);
+
+    IntPtr GetBinaryPassword();
+
+    void SetBinarySalt(IntPtr value);
+
+    IntPtr GetBinarySalt();
+
+    void ResetPassword();
+
+    void NotifyRedirectDeviceChange(UIntPtr wParam, IntPtr lParam);
+
+    /// <summary>Array passati come puntatori: VARIANT_BOOL (short) per i rilasci e scancode.</summary>
+    void SendKeys(int numKeys, IntPtr keyUp, IntPtr keyData);
+}
+
 [ComVisible(true)]
 [ClassInterface(ClassInterfaceType.None)]
 public sealed class RdpEventSink(RdpClientHost host) : IMsTscAxEvents
@@ -107,6 +142,40 @@ public sealed class RdpClientHost : AxHost
         }
 
         return false;
+    }
+
+    /// <summary>Invia i tasti alla sessione in un'unica sequenza (max 20); false se il controllo non lo consente.</summary>
+    public bool SendKeys(IReadOnlyList<Launcher.Connector.Core.KeyStroke> strokes)
+    {
+        try
+        {
+            if (strokes.Count is 0 or > Launcher.Connector.Core.KeyStrokes.MaxPerSend || GetOcx() is not IMsRdpClientNonScriptable client)
+            {
+                return false;
+            }
+
+            var up = strokes.Select(s => (short)(s.KeyUp ? -1 : 0)).ToArray();
+            var codes = strokes.Select(s => s.ScanCode).ToArray();
+            Focus();
+            unsafe
+            {
+                fixed (short* pUp = up)
+                fixed (int* pCodes = codes)
+                {
+                    client.SendKeys(codes.Length, (IntPtr)pUp, (IntPtr)pCodes);
+                }
+            }
+
+            return true;
+        }
+        catch (COMException)
+        {
+            return false;
+        }
+        catch (InvalidCastException)
+        {
+            return false;
+        }
     }
 
     protected override void CreateSink()

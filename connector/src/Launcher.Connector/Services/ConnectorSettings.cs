@@ -38,6 +38,17 @@ public static class ConnectorSettings
         Log.Info("Indirizzo del portale impostato: " + url);
     }
 
+    /// <summary>Barra dei comandi delle sessioni ridotta alle sole icone (preferenza dell'utente).</summary>
+    public static bool CompactToolbar
+    {
+        get => Read("CompactToolbar") == "1";
+        set
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(UserKey);
+            key.SetValue("CompactToolbar", value ? "1" : "0", RegistryValueKind.String);
+        }
+    }
+
     /// <summary>Percorso del client RustDesk, se non è in una posizione standard.</summary>
     public static string? RustDeskPath => Read("RustDeskPath");
 

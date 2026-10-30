@@ -75,10 +75,62 @@ public partial class MainWindow : Window
     {
         var tab = new SessionTab();
         tab.CloseRequested += () => _ = CloseTabAsync(tab);
+        tab.ContextMenu = TabMenu(tab);
         Tabs.Items.Add(tab);
         Tabs.SelectedItem = tab;
         UpdateEmptyState();
         return tab;
+    }
+
+    private ContextMenu TabMenu(SessionTab tab)
+    {
+        var menu = new ContextMenu();
+        var close = new MenuItem { Header = "Chiudi", InputGestureText = "Ctrl+W" };
+        close.Click += (_, _) => _ = CloseTabAsync(tab);
+        var others = new MenuItem { Header = "Chiudi le altre" };
+        others.Click += async (_, _) =>
+        {
+            foreach (var other in Tabs.Items.OfType<SessionTab>().Where(t => t != tab).ToList())
+            {
+                await CloseTabAsync(other);
+            }
+        };
+        menu.Opened += (_, _) => others.IsEnabled = Tabs.Items.Count > 1;
+        menu.Items.Add(close);
+        menu.Items.Add(others);
+        return menu;
+    }
+
+    private void OnTabSelected(object sender, SelectionChangedEventArgs e)
+    {
+        if (e.OriginalSource == Tabs && Tabs.SelectedItem is SessionTab tab)
+        {
+            tab.BringIntoView();
+        }
+    }
+
+    /// <summary>La rotellina sulla striscia delle schede le fa scorrere in orizzontale.</summary>
+    private void OnTabStripWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (sender is ScrollViewer strip)
+        {
+            strip.ScrollToHorizontalOffset(strip.HorizontalOffset - e.Delta / 2.0);
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>Elenco di tutte le connessioni aperte, utile quando le schede non stanno nella striscia.</summary>
+    private void OnTabList(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu { PlacementTarget = (UIElement)sender, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+        foreach (var tab in Tabs.Items.OfType<SessionTab>())
+        {
+            var item = new MenuItem { Header = tab.DisplayName, ToolTip = tab.ToolTip, IsChecked = tab == Tabs.SelectedItem };
+            item.Click += (_, _) => Tabs.SelectedItem = tab;
+            menu.Items.Add(item);
+        }
+
+        menu.IsOpen = true;
     }
 
     // ------------------------------------------------------------------ cache offline
@@ -89,16 +141,14 @@ public partial class MainWindow : Window
         try
         {
             var (count, expiresAt) = await _workflow.PrepareOfflineAsync(request, Handle, ConfirmPortal, CancellationToken.None);
-            MessageBox.Show(this,
-                $"{count} connessioni pronte offline fino alle {expiresAt.ToLocalTime():HH:mm}.\n\n" +
+            Dialogs.Show(this, $"{count} connessioni pronte offline fino alle {expiresAt.ToLocalTime():HH:mm}",
                 "Le trovi in \"Pronte offline\" (in basso a destra o nella schermata iniziale) e si aprono in diretta anche senza internet.\n\n" +
-                "Non chiudere il Launcher: chiudendolo o spegnendo il PC la cache viene cancellata.",
-                Title, MessageBoxButton.OK, MessageBoxImage.Information);
+                "Non chiudere il Launcher: chiudendolo o spegnendo il PC la cache viene cancellata.");
         }
         catch (Exception ex) when (ex is PortalException or System.Net.Http.HttpRequestException or InvalidOperationException)
         {
             Log.Error("Cache offline non preparata", ex);
-            MessageBox.Show(this, "Cache offline non preparata: " + ex.Message, Title, MessageBoxButton.OK, MessageBoxImage.Warning);
+            Dialogs.Show(this, "Cache offline non preparata", ex.Message, DialogKind.Warning);
         }
         finally
         {
@@ -165,7 +215,7 @@ public partial class MainWindow : Window
         if (_workflow.Offline.Remaining <= TimeSpan.Zero)
         {
             _workflow.Offline.ExpireIfNeeded();
-            MessageBox.Show(this, "La cache offline è scaduta: preparala di nuovo dal portale.", Title, MessageBoxButton.OK, MessageBoxImage.Information);
+            Dialogs.Show(this, "Cache offline scaduta", "Le connessioni preparate non valgono più: preparale di nuovo dal portale.");
             return;
         }
 
@@ -177,17 +227,17 @@ public partial class MainWindow : Window
     private bool ConfirmPortal(Uri portal)
     {
         var address = portal.GetLeftPart(UriPartial.Authority);
-        var text = $"Il Launcher non ha ancora un portale configurato.\n\nUsare questo indirizzo come portale?\n\n{address}";
-        if (portal.Scheme != Uri.UriSchemeHttps)
+        var secure = portal.Scheme == Uri.UriSchemeHttps;
+        var text = "Il Launcher non ha ancora un portale configurato. Conferma solo se è l'indirizzo che hai aperto nel browser; " +
+                   "si può cambiare in Impostazioni.";
+        if (!secure)
         {
-            text += "\n\nAttenzione: l'indirizzo non è https. Va bene solo per prova sulla rete interna; " +
+            text += "\n\nAttenzione: l'indirizzo non è https. Va bene solo per prova sulla rete interna: " +
                     "le credenziali viaggiano in chiaro e l'accesso con Microsoft 365 non sarà disponibile.";
         }
 
-        text += "\n\nRispondi Sì solo se è l'indirizzo che hai aperto nel browser. Si può cambiare in Impostazioni.";
-        var answer = MessageBox.Show(this, text, Title, MessageBoxButton.YesNo,
-            portal.Scheme == Uri.UriSchemeHttps ? MessageBoxImage.Question : MessageBoxImage.Warning, MessageBoxResult.No);
-        if (answer != MessageBoxResult.Yes)
+        if (!Dialogs.Confirm(this, "Usare questo portale?", text, "Usa questo portale", "Annulla",
+                secure ? DialogKind.Question : DialogKind.Warning, address, confirmIsDefault: false))
         {
             return false;
         }
@@ -241,7 +291,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            MessageBox.Show(this, "L'indirizzo del portale non è configurato.", Title, MessageBoxButton.OK, MessageBoxImage.Information);
+            Dialogs.Show(this, "Portale non configurato", "Imposta l'indirizzo del portale in Impostazioni (ingranaggio in basso a destra).");
         }
     }
 
@@ -267,8 +317,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        var answer = MessageBox.Show(this, $"Chiudere {open.Count} connessioni aperte?", Title, MessageBoxButton.YesNo, MessageBoxImage.Question);
-        if (answer != MessageBoxResult.Yes)
+        var question = open.Count == 1 ? "Chiudere la connessione aperta?" : $"Chiudere le {open.Count} connessioni aperte?";
+        if (!Dialogs.Confirm(this, question, "Le sessioni e i tunnel verranno chiusi.", "Chiudi tutto"))
         {
             e.Cancel = true;
             return;

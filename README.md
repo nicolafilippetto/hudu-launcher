@@ -39,6 +39,9 @@ Ogni connessione, e ogni credenziale consegnata, finisce nel registro accessi de
 - **Ricerca immediata** per cliente, nome, IP o hostname, con preferiti e connessioni recenti.
 - **Desktop remoto integrato** con opzioni impostabili per tutti e per singolo asset (appunti,
   unità, stampanti, sessione `/admin`, WebAuthn, audio, tasti di Windows).
+- **Barra dei comandi nelle schede**: riconnetti e disconnetti, Ctrl+Alt+Canc e altre combinazioni,
+  digitazione del testo degli appunti, screenshot, zoom, adattamento alla finestra e sola
+  visualizzazione; nel terminale copia e incolla, zoom e salvataggio dell'output.
 - **SSH e Telnet** in un terminale con evidenziazione configurabile (errori, interfacce, IP, MAC,
   prompt degli apparati di rete) e verifica delle chiavi host.
 - **Interfacce web** di firewall, NAS, iDRAC/iLO aperte in una scheda attraverso lo stesso tunnel.

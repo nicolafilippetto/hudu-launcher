@@ -39,15 +39,32 @@ public sealed class WebSessionView : ISessionView
 
         var buttons = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 18, 0, 0) };
         buttons.Children.Add(Button("Apri di nuovo", (_, _) => OpenBrowser()));
-        if (info.HuduUrl is { } hudu && Uri.TryCreate(hudu, UriKind.Absolute, out var huduUri) && huduUri.Scheme == Uri.UriSchemeHttps)
-        {
-            buttons.Children.Add(Button("Apri l'asset in Hudu", (_, _) => Process.Start(new ProcessStartInfo(huduUri.ToString()) { UseShellExecute = true })?.Dispose()));
-        }
-
         _root.Children.Add(buttons);
+
+        Commands =
+        [
+            new("Browser",
+            [
+                new SessionCommand("\uE774", "Apri di nuovo", "Riapre l'interfaccia web nel browser predefinito", OpenBrowser),
+                new SessionCommand("\uE8C8", "Copia indirizzo", $"Copia {_url} negli appunti, per aprirlo in un altro browser", () => ClipboardHelper.Copy(_url.ToString())),
+            ]),
+        ];
     }
 
     public UIElement View => _root;
+
+    public SessionState State => SessionState.Connected;
+
+    public string StatusText => "Aperta nel browser";
+
+    public IReadOnlyList<CommandGroup> Commands { get; }
+
+    // Nessun cambio di stato: la scheda tiene solo aperto il tunnel.
+    public event Action? StateChanged
+    {
+        add { }
+        remove { }
+    }
 
     public Task StartAsync()
     {
