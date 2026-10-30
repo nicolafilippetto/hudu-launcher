@@ -40,7 +40,7 @@ jobs:
           semgrep scan --metrics off --error --severity ERROR --severity WARNING \
             --config p/csharp --config p/security-audit --config p/secrets --config p/javascript \
             --config p/owasp-top-ten --config p/dockerfile --config p/github-actions \
-            --exclude "*/xterm.js" --exclude "*/addon-fit.js" --exclude "*/Migrations/*" \
+            --exclude "xterm.js" --exclude "addon-fit.js" --exclude "Migrations" \
             --sarif --output semgrep.sarif .
 
       - name: Rapporto
