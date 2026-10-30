@@ -386,16 +386,29 @@
             connectMenu.appendChild(item);
         });
         document.body.appendChild(connectMenu);
-
-        var rect = button.getBoundingClientRect();
-        var left = Math.min(rect.left, window.innerWidth - connectMenu.offsetWidth - 12);
-        connectMenu.style.left = Math.max(12, left) + "px";
-        connectMenu.style.top = (rect.bottom + 6 + window.scrollY) + "px";
+        placeConnectMenu(button);
         var buttons = $$(".connect-option", connectMenu);
         var index = options.findIndex(function (o) { return o.mode === last && o.enabled; });
         if (index < 0) { index = options.findIndex(function (o) { return o.enabled; }); }
         if (buttons[index]) { buttons[index].focus(); }
     }
+
+    // Il menu resta sempre dentro la finestra: sotto il pulsante se c'è spazio, altrimenti sopra
+    // (le ultime righe dell'elenco sono vicine al fondo della pagina).
+    function placeConnectMenu(button) {
+        var rect = button.getBoundingClientRect();
+        var width = connectMenu.offsetWidth;
+        var height = connectMenu.offsetHeight;
+        var left = Math.min(rect.right - width, window.innerWidth - width - 12);
+        var below = rect.bottom + 6;
+        var above = rect.top - 6 - height;
+        var top = below + height <= window.innerHeight - 8 || above < 8 ? below : above;
+        connectMenu.style.left = Math.max(12, left) + "px";
+        connectMenu.style.top = Math.max(8, Math.min(top, window.innerHeight - height - 8)) + "px";
+    }
+
+    window.addEventListener("resize", closeConnectMenu);
+    window.addEventListener("scroll", closeConnectMenu, true);
 
     document.addEventListener("click", function (event) {
         var button = event.target.closest("[data-connect]");
