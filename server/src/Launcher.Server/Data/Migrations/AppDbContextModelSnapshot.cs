@@ -79,6 +79,12 @@ namespace Launcher.Server.Data.Migrations
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("WebOptions")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WebUrl")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("AssetId");
 
                     b.ToTable("AssetSettings");
@@ -354,6 +360,9 @@ namespace Launcher.Server.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Url")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");

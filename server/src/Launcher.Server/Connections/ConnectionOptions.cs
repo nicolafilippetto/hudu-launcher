@@ -4,12 +4,71 @@ using System.Text.RegularExpressions;
 
 namespace Launcher.Server.Connections;
 
-/// <summary>Un'opzione di Desktop remoto: valori ammessi ed etichette per il portale.</summary>
-public sealed record RdpOptionDefinition(string Key, string Label, string Default, IReadOnlyList<(string Value, string Label)> Choices, string? Hint = null)
+/// <summary>Un'opzione di connessione (Desktop remoto o pagine web): valori ammessi ed etichette per il portale.</summary>
+public sealed record OptionDefinition(string Key, string Label, string Default, IReadOnlyList<(string Value, string Label)> Choices, string? Hint = null)
 {
     public bool IsSwitch => Choices.Count == 2 && Choices[0].Value == "true";
 
     public string LabelOf(string value) => Choices.FirstOrDefault(c => c.Value == value).Label ?? value;
+}
+
+/// <summary>
+/// Elenco di opzioni con predefiniti per tutti (sezione admin) e valori per singolo asset.
+/// Si salvano solo le scelte, come JSON chiave → valore.
+/// </summary>
+public sealed class OptionCatalog(IReadOnlyList<OptionDefinition> all)
+{
+    private readonly Dictionary<string, OptionDefinition> _byKey = all.ToDictionary(d => d.Key, StringComparer.Ordinal);
+
+    public IReadOnlyList<OptionDefinition> All => all;
+
+    /// <summary>Tiene solo chiavi e valori ammessi.</summary>
+    public Dictionary<string, string> Clean(IEnumerable<KeyValuePair<string, string?>> values)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (key, value) in values)
+        {
+            if (value is not null && _byKey.TryGetValue(key, out var definition) && definition.Choices.Any(c => c.Value == value))
+            {
+                result[key] = value;
+            }
+        }
+
+        return result;
+    }
+
+    public Dictionary<string, string> Parse(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        try
+        {
+            var raw = JsonSerializer.Deserialize<Dictionary<string, string?>>(json) ?? [];
+            return Clean(raw);
+        }
+        catch (JsonException)
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+    }
+
+    public static string? Serialize(IReadOnlyDictionary<string, string> values) =>
+        values.Count == 0 ? null : JsonSerializer.Serialize(values.OrderBy(v => v.Key, StringComparer.Ordinal).ToDictionary());
+
+    /// <summary>Scelte diverse dal valore consigliato (quelle da salvare come predefinite).</summary>
+    public Dictionary<string, string> WithoutDefaults(IReadOnlyDictionary<string, string> values) =>
+        values.Where(v => _byKey[v.Key].Default != v.Value).ToDictionary(StringComparer.Ordinal);
+
+    /// <summary>Valore effettivo: override dell'asset, poi predefinito admin, poi catalogo.</summary>
+    public string Effective(string key, IReadOnlyDictionary<string, string> defaults, IReadOnlyDictionary<string, string>? overrides = null) =>
+        overrides?.GetValueOrDefault(key) ?? defaults.GetValueOrDefault(key) ?? _byKey[key].Default;
+
+    /// <summary>Riassunto delle opzioni scelte, per il registro.</summary>
+    public string Describe(IReadOnlyDictionary<string, string> values) =>
+        string.Join(", ", values.Select(v => $"{_byKey[v.Key].Label}: {_byKey[v.Key].LabelOf(v.Value)}"));
 }
 
 /// <summary>Opzioni di Desktop remoto inviate al Launcher (stessi nomi del JSON del Launcher).</summary>
@@ -38,7 +97,7 @@ public static class RdpOptionCatalog
 {
     private static readonly (string, string)[] YesNo = [("true", "Sì"), ("false", "No")];
 
-    public static readonly IReadOnlyList<RdpOptionDefinition> All =
+    public static OptionCatalog Catalog { get; } = new(
     [
         new("adminSession", "Sessione amministrativa (/admin)", "false", YesNo, "Come mstsc /admin: utile sui server RDS"),
         new("clipboard", "Appunti", "true", YesNo),
@@ -57,49 +116,20 @@ public static class RdpOptionCatalog
         new("display", "Dimensione del desktop", "resize",
             [("resize", "Adatta alla finestra (segue il ridimensionamento)"), ("scale", "Fissa all'apertura, poi scalata")]),
         new("nla", "Autenticazione a livello di rete (NLA)", "true", YesNo, "Disattivare solo per server molto vecchi"),
-    ];
+    ]);
 
-    private static readonly Dictionary<string, RdpOptionDefinition> ByKey = All.ToDictionary(d => d.Key, StringComparer.Ordinal);
+    public static IReadOnlyList<OptionDefinition> All => Catalog.All;
 
-    /// <summary>Tiene solo chiavi e valori ammessi.</summary>
-    public static Dictionary<string, string> Clean(IEnumerable<KeyValuePair<string, string?>> values)
-    {
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var (key, value) in values)
-        {
-            if (value is not null && ByKey.TryGetValue(key, out var definition) && definition.Choices.Any(c => c.Value == value))
-            {
-                result[key] = value;
-            }
-        }
+    public static Dictionary<string, string> Clean(IEnumerable<KeyValuePair<string, string?>> values) => Catalog.Clean(values);
 
-        return result;
-    }
+    public static Dictionary<string, string> Parse(string? json) => Catalog.Parse(json);
 
-    public static Dictionary<string, string> Parse(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return new Dictionary<string, string>(StringComparer.Ordinal);
-        }
+    public static string? Serialize(IReadOnlyDictionary<string, string> values) => OptionCatalog.Serialize(values);
 
-        try
-        {
-            var raw = JsonSerializer.Deserialize<Dictionary<string, string?>>(json) ?? [];
-            return Clean(raw);
-        }
-        catch (JsonException)
-        {
-            return new Dictionary<string, string>(StringComparer.Ordinal);
-        }
-    }
-
-    public static string? Serialize(IReadOnlyDictionary<string, string> values) =>
-        values.Count == 0 ? null : JsonSerializer.Serialize(values.OrderBy(v => v.Key, StringComparer.Ordinal).ToDictionary());
-
-    /// <summary>Valore effettivo per il portale: override dell'asset, poi predefinito admin, poi catalogo.</summary>
     public static string Effective(string key, IReadOnlyDictionary<string, string> defaults, IReadOnlyDictionary<string, string>? overrides = null) =>
-        overrides?.GetValueOrDefault(key) ?? defaults.GetValueOrDefault(key) ?? ByKey[key].Default;
+        Catalog.Effective(key, defaults, overrides);
+
+    public static string Describe(IReadOnlyDictionary<string, string> values) => Catalog.Describe(values);
 
     public static RdpOptions Resolve(IReadOnlyDictionary<string, string> defaults, IReadOnlyDictionary<string, string>? overrides)
     {
@@ -110,10 +140,101 @@ public static class RdpOptionCatalog
             B("webAuthn"), B("microphone"), V("audio"), V("keyboard"),
             int.Parse(V("colorDepth"), CultureInfo.InvariantCulture), V("display"), B("nla"));
     }
+}
 
-    /// <summary>Riassunto delle opzioni diverse dal predefinito, per il registro e per l'elenco.</summary>
-    public static string Describe(IReadOnlyDictionary<string, string> values) =>
-        string.Join(", ", values.Select(v => $"{ByKey[v.Key].Label}: {ByKey[v.Key].LabelOf(v.Value)}"));
+/// <summary>
+/// Pagina web da aprire e opzioni inviate al Launcher. <see cref="Url"/> è l'indirizzo vero
+/// dell'apparato: il Launcher lo apre nella sua scheda facendo passare il traffico nel tunnel, così
+/// nome host, certificato e reindirizzamenti restano quelli dell'apparato.
+/// </summary>
+public sealed record WebOptions(
+    string Url,
+    bool External,
+    string Certificate,
+    bool Popups,
+    bool Downloads,
+    bool KeepCookies,
+    int Zoom);
+
+/// <summary>Opzioni delle pagine web (interfacce di firewall, iDRAC, vCenter…), come quelle RDP.</summary>
+public static class WebOptionCatalog
+{
+    private static readonly (string, string)[] YesNo = [("true", "Sì"), ("false", "No")];
+
+    public static OptionCatalog Catalog { get; } = new(
+    [
+        new("open", "Apri la pagina", "launcher",
+            [("launcher", "In una scheda del Launcher"), ("browser", "Nel browser predefinito")],
+            "Nel Launcher la pagina usa l'indirizzo vero dell'apparato (iDRAC, vCenter funzionano anche tramite jump host)"),
+        new("certificate", "Certificati non validi", "ask",
+            [("ask", "Chiedi e ricorda (come le chiavi SSH)"), ("ignore", "Ignora gli errori"), ("block", "Blocca la pagina")],
+            "Gli apparati hanno spesso certificati autofirmati: con \"Chiedi\" il Launcher avvisa se il certificato cambia"),
+        new("popups", "Nuove finestre (console HTML5)", "true", YesNo, "La console di iDRAC e iLO si apre in una nuova finestra"),
+        new("downloads", "Download di file", "true", YesNo, "Log, backup di configurazione, report"),
+        new("cookies", "Accesso al sito", "session",
+            [("session", "Dimentica alla chiusura della scheda"), ("keep", "Ricorda per questo asset")],
+            "Con \"Ricorda\" cookie e accesso restano sul PC del tecnico fino alla prossima apertura"),
+        new("zoom", "Zoom iniziale", "100",
+            [("80", "80%"), ("90", "90%"), ("100", "100%"), ("110", "110%"), ("125", "125%"), ("150", "150%")]),
+    ]);
+
+    public static IReadOnlyList<OptionDefinition> All => Catalog.All;
+
+    public static WebOptions Resolve(string url, IReadOnlyDictionary<string, string> defaults, IReadOnlyDictionary<string, string>? overrides)
+    {
+        string V(string key) => Catalog.Effective(key, defaults, overrides);
+        return new WebOptions(url, V("open") == "browser", V("certificate"), V("popups") == "true", V("downloads") == "true",
+            V("cookies") == "keep", int.Parse(V("zoom"), CultureInfo.InvariantCulture));
+    }
+}
+
+/// <summary>Indirizzi delle pagine web scritti nel portale.</summary>
+public static class WebUrls
+{
+    public const int MaxLength = 500;
+
+    /// <summary>
+    /// Accetta solo http/https assoluti verso un host valido, senza utente e password nell'indirizzo
+    /// (le credenziali stanno in Hudu). Restituisce l'URL normalizzato o un errore.
+    /// </summary>
+    public static (Uri? Url, string? Error) Parse(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return (null, null);
+        }
+
+        var text = value.Trim();
+        if (text.Length > MaxLength)
+        {
+            return (null, "indirizzo troppo lungo");
+        }
+
+        if (!Uri.TryCreate(text, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+        {
+            return (null, "serve un indirizzo completo http:// o https://");
+        }
+
+        if (!string.IsNullOrEmpty(uri.UserInfo))
+        {
+            return (null, "niente utente o password nell'indirizzo: le credenziali stanno in Hudu");
+        }
+
+        if (!Inventory.HostParser.IsValidHost(uri.Host.Trim('[', ']')))
+        {
+            return (null, "nome host non valido");
+        }
+
+        return (uri, null);
+    }
+
+    /// <summary>Indirizzo predefinito di una connessione web senza URL: schema, host e porta di destinazione.</summary>
+    public static string Default(bool https, string host, int port)
+    {
+        var urlHost = host.Contains(':', StringComparison.Ordinal) ? $"[{host}]" : host;
+        var standard = https ? port == 443 : port == 80;
+        return $"{(https ? "https" : "http")}://{urlHost}{(standard ? "" : ":" + port.ToString(CultureInfo.InvariantCulture))}/";
+    }
 }
 
 /// <summary>Regola di evidenziazione del terminale: testo che corrisponde all'espressione, nel colore indicato.</summary>

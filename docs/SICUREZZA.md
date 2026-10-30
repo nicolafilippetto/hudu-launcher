@@ -48,6 +48,13 @@ server (se la licenza lo consente), rotazione periodica, alert sugli accessi API
   (predefinita 60 minuti): mai su disco, cancellate alla scadenza, chiudendo il Launcher o spegnendo il
   PC; un nuovo pacchetto sostituisce il precedente. Ogni preparazione e ogni asset consegnato sono nel
   registro (`offline.prepare`, `offline.redeem`).
+- **Pagine web nel Launcher**: il portale non invia credenziali per le connessioni web e gli URL
+  con utente e password vengono rifiutati. Ogni scheda ha un profilo del browser proprio (cookie
+  separati tra clienti con gli stessi IP), cancellato alla chiusura salvo l'opzione "Ricorda per
+  questo asset"; salvataggio password e compilazione automatica sono spenti. Il proxy SOCKS5 della
+  scheda ascolta solo su `127.0.0.1` e porta nel tunnel unicamente host e porta dell'asset. I
+  certificati non validi si accettano solo per l'host dell'asset, secondo l'opzione scelta
+  (predefinito: chiedi e ricorda l'impronta, con avviso se cambia).
 
 ## 4. Difese dell'applicazione web
 
@@ -91,6 +98,9 @@ fissate per hash del commit e Dependabot propone gli aggiornamenti dopo 7 giorni
   chiave master separato dal backup del volume.
 - **Compromissione di un account tecnico 365**: permette connessioni come quel tecnico. Mitigazioni:
   Accesso condizionale (MFA resistente al phishing, dispositivo conforme), assegnazione utenti al gruppo.
+- **Proxy locale delle pagine web**: finché la scheda è aperta, un altro programma sullo stesso PC
+  potrebbe usare il proxy su `127.0.0.1` per raggiungere l'apparato, come già vale per la porta
+  locale del tunnel RustDesk. Antivirus/EDR e PC gestiti.
 - **PC del tecnico**: durante la sessione, e per la durata della cache offline, le credenziali sono in
   memoria del Launcher. Antivirus/EDR e Intune sui PC; durata e numero di asset offline limitati dall'admin.
 - Un codice MFA resta valido nella sua finestra di ~30 secondi.

@@ -19,8 +19,9 @@ public sealed class WebSessionView : ISessionView
     public WebSessionView(ConnectionInfo info, SessionEndpoint endpoint)
     {
         _info = info;
-        var scheme = info.Protocol == ConnectionProtocol.Http ? "http" : "https";
-        _url = new Uri($"{scheme}://{endpoint.UrlHost}:{endpoint.Port}/");
+        // Diretta: l'indirizzo vero. Tramite tunnel: stesso percorso, ma sulla porta locale del tunnel.
+        var real = new Uri(info.WebOrDefault.Url);
+        _url = endpoint.Direct ? real : new UriBuilder(real) { Host = endpoint.Host, Port = endpoint.Port }.Uri;
 
         _root = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, MaxWidth = 560 };
         _root.Children.Add(new TextBlock { Style = (Style)Application.Current.FindResource("Icon"), Text = "", FontSize = 40, HorizontalAlignment = HorizontalAlignment.Center, Opacity = 0.6 });
@@ -31,6 +32,8 @@ public sealed class WebSessionView : ISessionView
                 ? $"Aperta nel browser all'indirizzo {_url} (connessione diretta).\n\nUtente e password: da Hudu."
                 : $"Aperta nel browser all'indirizzo {_url}\n(tunnel verso {info.Target.Host}:{info.Target.Port} {info.Route}).\n\n" +
                   "Il browser avviserà che il certificato non corrisponde: è normale, perché ci si collega a 127.0.0.1.\n" +
+                  "Gli apparati che controllano il nome (iDRAC) o vogliono l'FQDN (vCenter) funzionano solo nella scheda del Launcher " +
+                  "(Opzioni pagine web dell'asset nel portale).\n" +
                   "Il tunnel resta attivo finché questa scheda è aperta. Utente e password: da Hudu.",
             TextWrapping = TextWrapping.Wrap,
             TextAlignment = TextAlignment.Center,

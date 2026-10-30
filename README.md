@@ -44,7 +44,9 @@ Ogni connessione, e ogni credenziale consegnata, finisce nel registro accessi de
   visualizzazione; nel terminale copia e incolla, zoom e salvataggio dell'output.
 - **SSH e Telnet** in un terminale con evidenziazione configurabile (errori, interfacce, IP, MAC,
   prompt degli apparati di rete) e verifica delle chiavi host.
-- **Interfacce web** di firewall, NAS, iDRAC/iLO aperte in una scheda attraverso lo stesso tunnel.
+- **Interfacce web** di firewall, NAS, iDRAC/iLO, vCenter aperte in una scheda del Launcher con il
+  loro indirizzo vero (IP o FQDN, anche interno) attraverso il tunnel, oppure nel browser
+  predefinito; opzioni per tutti e per singolo asset (certificati, finestre, download, accesso).
 - **Jump host automatico**: il gateway RustDesk si ricava da Hudu, dal cliente o dal dispositivo
   stesso; in alternativa connessione **diretta**. RustDesk è facoltativo: senza, il portale offre
   solo la connessione diretta (dalla rete del cliente o in VPN).

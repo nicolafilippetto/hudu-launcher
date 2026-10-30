@@ -13,8 +13,14 @@ public sealed record ResolvedConnection(
     int? PasswordId,
     string? PasswordName,
     string? Username,
-    IReadOnlyList<string> Issues)
+    IReadOnlyList<string> Issues,
+    string? Url = null)
 {
+    public bool IsWeb => Protocol is ConnectionProtocol.Http or ConnectionProtocol.Https;
+
+    /// <summary>Pagina da aprire: l'URL indicato o, in mancanza, schema, host e porta di destinazione.</summary>
+    public string? WebUrl => !IsWeb || Host is null ? null : Url ?? Connections.WebUrls.Default(Protocol == ConnectionProtocol.Https, Host, Port);
+
     /// <summary>Collegabile tramite il jump host RustDesk.</summary>
     public bool CanConnect => Host is not null && GatewayPeerId is not null;
 
@@ -132,7 +138,14 @@ public static class ConnectionResolver
         var connections = new List<ResolvedConnection>();
 
         // --- Connessione principale ---
-        var protocol = setting?.Protocol ?? GuessProtocol(asset.OperatingSystem, layout, ownPeer);
+        // Un URL per la pagina web decide protocollo, host e porta (può essere un FQDN, risolto dal jump host).
+        var webUrl = Connections.WebUrls.Parse(setting?.WebUrl).Url;
+        var protocol = setting?.Protocol ?? (webUrl is null ? GuessProtocol(asset.OperatingSystem, layout, ownPeer) : WebProtocol(webUrl));
+        if (protocol is not (ConnectionProtocol.Http or ConnectionProtocol.Https))
+        {
+            webUrl = null;
+        }
+
         string? gateway;
         string? gatewaySource;
         var (host, hostIssue) = ResolveHost(setting?.Host, asset);
@@ -167,38 +180,53 @@ public static class ConnectionResolver
         }
 
         var port = setting?.Port ?? DefaultPort(protocol);
+        if (webUrl is not null)
+        {
+            (protocol, host, port, hostIssue) = (WebProtocol(webUrl), webUrl.Host.Trim('[', ']'), webUrl.Port, null);
+        }
+
         var (passwordId, passwordIssue) = ResolvePassword(setting?.PasswordId, asset, ctx);
-        connections.Add(Build(PrimaryKey, Label(protocol), protocol, host, port, gateway, gatewaySource, passwordId, passwordIssue, ctx, hostIssue));
+        connections.Add(Build(PrimaryKey, Label(protocol), protocol, host, port, gateway, gatewaySource, passwordId, passwordIssue, ctx, hostIssue,
+            webUrl?.AbsoluteUri));
 
         // --- Console fuori banda (iDRAC/iLO/IPMI) dal campo di Hudu ---
         if (HostParser.Parse(asset.ConsoleAddress) is { } console)
         {
             var consoleProtocol = console.Scheme == "http" ? ConnectionProtocol.Http : ConnectionProtocol.Https;
             var consoleGateway = companyGateway ?? gateway;
+            // Se in Hudu c'è un indirizzo completo (con percorso), la pagina si apre proprio lì.
+            var consoleUrl = console.Scheme is null ? null : Connections.WebUrls.Parse(asset.ConsoleAddress!.Trim().Split([' ', ',', ';', '\n', '\t'])[0]).Url;
             connections.Add(Build(ConsoleKey, "Console", consoleProtocol, console.Host, console.Port ?? DefaultPort(consoleProtocol),
-                consoleGateway, companyGateway is not null ? companyGatewaySource : gatewaySource, null, null, ctx));
+                consoleGateway, companyGateway is not null ? companyGatewaySource : gatewaySource, null, null, ctx, url: consoleUrl?.AbsoluteUri));
         }
 
         // --- Connessioni aggiuntive definite dai tecnici ---
         foreach (var extra in ctx.Extras[asset.Id].OrderBy(e => e.Label, StringComparer.OrdinalIgnoreCase))
         {
-            var extraHost = extra.Host ?? host;
+            var extraUrl = Connections.WebUrls.Parse(extra.Url).Url;
+            var extraHost = extraUrl?.Host.Trim('[', ']') ?? extra.Host ?? host;
             var (extraGateway, extraSource) = !ctx.RustDeskEnabled ? (null, null) : extra.GatewayPeerId is not null
                 ? (extra.GatewayPeerId, "manuale")
                 : extra.Host is null ? (gateway, gatewaySource) : (companyGateway ?? gateway, companyGateway is not null ? companyGatewaySource : gatewaySource);
             var (extraPasswordId, extraPasswordIssue) = extra.PasswordId is not null
                 ? ResolvePassword(extra.PasswordId, asset, ctx)
                 : (null, (string?)null);
-            connections.Add(Build(ExtraPrefix + extra.Id, extra.Label, extra.Protocol, extraHost, extra.Port ?? DefaultPort(extra.Protocol),
-                extraGateway, extraSource, extraPasswordId, extraPasswordIssue, ctx));
+            var (extraProtocol, extraPort) = extraUrl is null
+                ? (extra.Protocol, extra.Port ?? DefaultPort(extra.Protocol))
+                : (WebProtocol(extraUrl), extraUrl.Port);
+            connections.Add(Build(ExtraPrefix + extra.Id, extra.Label, extraProtocol, extraHost, extraPort,
+                extraGateway, extraSource, extraPasswordId, extraPasswordIssue, ctx, url: extraUrl?.AbsoluteUri));
         }
 
         return new ResolvedAsset(asset, companyName, setting, connections, ctx.Favorites.Contains(asset.Id));
     }
 
+    private static ConnectionProtocol WebProtocol(Uri url) => url.Scheme == Uri.UriSchemeHttp ? ConnectionProtocol.Http : ConnectionProtocol.Https;
+
     private static ResolvedConnection Build(
         string key, string label, ConnectionProtocol protocol, string? host, int port,
-        string? gateway, string? gatewaySource, int? passwordId, string? passwordIssue, ResolutionContext ctx, string? hostIssue = null)
+        string? gateway, string? gatewaySource, int? passwordId, string? passwordIssue, ResolutionContext ctx, string? hostIssue = null,
+        string? url = null)
     {
         var issues = new List<string>();
         if (host is null)
@@ -238,7 +266,7 @@ public static class ConnectionResolver
             issues.Add("Nessuna credenziale associata");
         }
 
-        return new ResolvedConnection(key, label, protocol, host, port, gateway, gatewaySource, password?.Id, password?.Name, password?.Username, issues);
+        return new ResolvedConnection(key, label, protocol, host, port, gateway, gatewaySource, password?.Id, password?.Name, password?.Username, issues, url);
     }
 
     /// <summary>

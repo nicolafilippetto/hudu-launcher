@@ -20,6 +20,8 @@ public sealed class SettingsModel(SettingsService settings, AuditService audit, 
     public RustDeskSettings RustDesk => settings.RustDesk;
     public EntraSettings Entra => settings.Entra;
     public Dictionary<string, string> RdpDefaults => settings.RdpDefaults;
+
+    public Dictionary<string, string> WebDefaults => settings.WebDefaults;
     public TerminalOptions Terminal => settings.Terminal;
     public string TerminalRulesText => settings.TerminalRulesText;
 
@@ -128,6 +130,20 @@ public sealed class SettingsModel(SettingsService settings, AuditService audit, 
     {
         await SaveAsync(new Dictionary<string, string?> { [SettingKeys.RdpDefaults] = null }, "Desktop remoto");
         return RedirectToPage(null, null, "rdp");
+    }
+
+    public async Task<IActionResult> OnPostWebAsync([FromForm] Dictionary<string, string?> web)
+    {
+        var catalog = WebOptionCatalog.Catalog;
+        var values = catalog.WithoutDefaults(catalog.Clean(web));
+        await SaveAsync(new Dictionary<string, string?> { [SettingKeys.WebDefaults] = OptionCatalog.Serialize(values) }, "Pagine web");
+        return RedirectToPage(null, null, "web");
+    }
+
+    public async Task<IActionResult> OnPostWebResetAsync()
+    {
+        await SaveAsync(new Dictionary<string, string?> { [SettingKeys.WebDefaults] = null }, "Pagine web");
+        return RedirectToPage(null, null, "web");
     }
 
     public async Task<IActionResult> OnPostTerminalAsync(bool highlight, string? rules)

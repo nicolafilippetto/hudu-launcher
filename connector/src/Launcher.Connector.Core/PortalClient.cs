@@ -51,6 +51,28 @@ public sealed record HighlightRule(string Pattern, string Color);
 /// <summary>Opzioni del terminale: regole di colore scritte dagli admin nel portale.</summary>
 public sealed record TerminalOptions(bool Highlight = false, IReadOnlyList<HighlightRule>? Rules = null);
 
+/// <summary>
+/// Pagina web dal portale: indirizzo vero dell'apparato e opzioni scelte dagli admin.
+/// Certificate: "ask" (chiedi e ricorda), "ignore" o "block".
+/// </summary>
+public sealed record WebOptions(
+    string Url,
+    bool External = false,
+    string Certificate = "ask",
+    bool Popups = true,
+    bool Downloads = true,
+    bool KeepCookies = false,
+    int Zoom = 100)
+{
+    public static WebOptions For(string scheme, TargetInfo target)
+    {
+        var host = target.Host.Contains(':', StringComparison.Ordinal) ? $"[{target.Host}]" : target.Host;
+        return new WebOptions($"{scheme}://{host}:{target.Port}/");
+    }
+
+    public double ZoomFactor => Math.Clamp(Zoom, 25, 500) / 100.0;
+}
+
 public enum ConnectionProtocol
 {
     Rdp,
@@ -76,9 +98,13 @@ public sealed record ConnectionInfo(
     string? Warning,
     RdpOptions? Rdp = null,
     TerminalOptions? Terminal = null,
-    string? HuduUrl = null)
+    string? HuduUrl = null,
+    WebOptions? Web = null)
 {
     public bool IsDirect => Gateway is null;
+
+    /// <summary>Opzioni della pagina web; dai portali precedenti arriva null e si usano i predefiniti.</summary>
+    public WebOptions WebOrDefault => Web ?? WebOptions.For(Protocol == ConnectionProtocol.Https ? "https" : "http", Target);
 
     /// <summary>Descrizione del percorso, per i testi della scheda.</summary>
     public string Route => Gateway is null ? "connessione diretta" : $"tramite RustDesk {Gateway.Id}";

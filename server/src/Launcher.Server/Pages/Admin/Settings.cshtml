@@ -126,6 +126,34 @@
     </form>
 </section>
 
+<section class="card" id="web">
+    <h2 class="card-title"><svg><use href="#i-globe" /></svg>Pagine web: predefiniti per tutti</h2>
+    <p class="muted small">
+        Valgono per le interfacce web (firewall, switch, iDRAC, vCenter…); da ogni asset (matita) si possono cambiare per
+        quel solo oggetto. Nella scheda del Launcher la pagina usa l'indirizzo vero dell'apparato anche tramite jump host,
+        quindi funzionano anche gli apparati che controllano il nome (iDRAC) o vogliono l'FQDN (vCenter).
+    </p>
+    <form method="post" asp-page-handler="Web" class="grid grid-3">
+        @foreach (var option in WebOptionCatalog.All)
+        {
+            var current = WebOptionCatalog.Catalog.Effective(option.Key, Model.WebDefaults);
+            <label class="field" title="@option.Hint">
+                <span>@option.Label</span>
+                <select class="input" name="web[@option.Key]">
+                    @foreach (var choice in option.Choices)
+                    {
+                        <option value="@choice.Value" selected="@(current == choice.Value)">@choice.Label@(choice.Value == option.Default ? " (consigliato)" : "")</option>
+                    }
+                </select>
+            </label>
+        }
+        <div class="actions span-all">
+            <button class="btn btn-primary" type="submit">Salva</button>
+            <button class="btn btn-secondary" type="submit" asp-page-handler="WebReset" data-confirm="Tornare ai valori consigliati?">Valori consigliati</button>
+        </div>
+    </form>
+</section>
+
 <section class="card" id="terminal">
     <h2 class="card-title"><svg><use href="#i-terminal" /></svg>Terminale SSH e Telnet</h2>
     <p class="muted small">

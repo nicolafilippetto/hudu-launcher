@@ -128,6 +128,39 @@ public sealed class ConnectionResolverTests
     }
 
     [Fact]
+    public void Web_url_sets_protocol_host_and_port()
+    {
+        var ctx = Context(
+            company: new CompanySetting { CompanyId = 1, GatewayPeerId = "111" },
+            setting: new AssetSetting { AssetId = 100, WebUrl = "https://vcenter.cliente.local:9443/ui" },
+            extras: [new ExtraConnection { Id = 3, AssetId = 100, Label = "VAMI", Protocol = ConnectionProtocol.Https, Url = "https://vcenter.cliente.local:5480/" }]);
+
+        var resolved = ConnectionResolver.Resolve(Asset(os: "VMware Photon OS"), ctx);
+        var primary = resolved.Primary!;
+        Assert.Equal(ConnectionProtocol.Https, primary.Protocol);
+        Assert.Equal("vcenter.cliente.local", primary.Host);
+        Assert.Equal(9443, primary.Port);
+        Assert.Equal("https://vcenter.cliente.local:9443/ui", primary.WebUrl);
+        Assert.Empty(primary.Issues);
+
+        var vami = resolved.Connections.Single(c => c.Key == "extra:3");
+        Assert.Equal(("vcenter.cliente.local", 5480), (vami.Host!, vami.Port));
+        Assert.Equal("https://vcenter.cliente.local:5480/", vami.WebUrl);
+    }
+
+    [Fact]
+    public void Web_url_is_ignored_for_rdp_and_default_url_uses_target()
+    {
+        var ctx = Context(setting: new AssetSetting { AssetId = 100, Protocol = ConnectionProtocol.Rdp, WebUrl = "https://x.local/" });
+        var primary = ConnectionResolver.Resolve(Asset(), ctx).Primary!;
+        Assert.Equal(ConnectionProtocol.Rdp, primary.Protocol);
+        Assert.Null(primary.WebUrl);
+
+        var web = ConnectionResolver.Resolve(Asset(), Context(setting: new AssetSetting { AssetId = 100, Protocol = ConnectionProtocol.Https, Port = 8443 })).Primary!;
+        Assert.Equal("https://10.0.0.10:8443/", web.WebUrl);
+    }
+
+    [Fact]
     public void Manual_settings_override_everything()
     {
         var ctx = Context(
@@ -332,6 +365,57 @@ public sealed class ConnectionOptionTests
             ["audio"] = "loud",
             ["shell"] = "cmd.exe",
         }).Keys);
+
+    [Fact]
+    public void Default_web_options_open_in_the_launcher_and_ask_for_certificates()
+    {
+        var options = WebOptionCatalog.Resolve("https://10.0.0.5/", new Dictionary<string, string>(), null);
+        Assert.Equal("https://10.0.0.5/", options.Url);
+        Assert.False(options.External);
+        Assert.Equal("ask", options.Certificate);
+        Assert.True(options.Popups && options.Downloads);
+        Assert.False(options.KeepCookies);
+        Assert.Equal(100, options.Zoom);
+    }
+
+    [Fact]
+    public void Asset_web_options_override_admin_defaults()
+    {
+        var defaults = new Dictionary<string, string> { ["open"] = "browser", ["certificate"] = "ignore" };
+        var options = WebOptionCatalog.Resolve("https://x/", defaults, new Dictionary<string, string> { ["open"] = "launcher" });
+        Assert.False(options.External);
+        Assert.Equal("ignore", options.Certificate);
+    }
+
+    [Theory]
+    [InlineData("https://vcenter.cliente.local/ui", "https://vcenter.cliente.local/ui")]
+    [InlineData("http://192.168.10.254:8080/", "http://192.168.10.254:8080/")]
+    [InlineData(" https://[fe80::1]/ ", "https://[fe80::1]/")]
+    public void Accepts_web_urls(string input, string expected)
+    {
+        var (url, error) = WebUrls.Parse(input);
+        Assert.Null(error);
+        Assert.Equal(expected, url!.AbsoluteUri);
+    }
+
+    [Theory]
+    [InlineData("vcenter.cliente.local")]
+    [InlineData("ftp://10.0.0.1/")]
+    [InlineData("javascript:alert(1)")]
+    [InlineData("https://admin:segreto@10.0.0.1/")]
+    public void Rejects_bad_web_urls(string input)
+    {
+        var (url, error) = WebUrls.Parse(input);
+        Assert.Null(url);
+        Assert.NotNull(error);
+    }
+
+    [Theory]
+    [InlineData(true, "10.0.0.1", 443, "https://10.0.0.1/")]
+    [InlineData(true, "10.0.0.1", 8443, "https://10.0.0.1:8443/")]
+    [InlineData(false, "fe80::1", 80, "http://[fe80::1]/")]
+    public void Builds_default_web_urls(bool https, string host, int port, string expected) =>
+        Assert.Equal(expected, WebUrls.Default(https, host, port));
 
     [Fact]
     public void Default_highlight_rules_are_valid()

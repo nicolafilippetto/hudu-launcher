@@ -136,7 +136,8 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
             ConnectionProtocol.Rdp => new RdpSessionView(info, endpoint, tunnels),
             ConnectionProtocol.Ssh => new TerminalSessionView(info, endpoint, TerminalKind.Ssh, _knownHosts),
             ConnectionProtocol.Telnet => new TerminalSessionView(info, endpoint, TerminalKind.Telnet, _knownHosts),
-            _ => new WebSessionView(info, endpoint),
+            _ when info.WebOrDefault.External => new WebSessionView(info, endpoint),
+            _ => new BrowserSessionView(info, endpoint, _knownHosts),
         };
         tab.ShowSession(view);
         await view.StartAsync();

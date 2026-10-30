@@ -83,7 +83,23 @@ un tunnel RustDesk. Nessuna credenziale da digitare, nessun segreto salvato sul 
 7. Alla chiusura della scheda: chiusura del tunnel, rimozione della regola, credenziale
    cancellata dalla memoria.
 
-SSH: tunnel + terminale. Web: tunnel + browser predefinito su `https://127.0.0.1:<porta>`.
+SSH: tunnel + terminale.
+
+Web: per ogni asset si sceglie (Opzioni pagine web, con predefiniti dell'amministratore) se aprire
+la pagina in una scheda del Launcher o nel browser predefinito.
+
+- **Scheda del Launcher** (predefinito): browser integrato (WebView2) con un profilo proprio per
+  scheda e un proxy SOCKS5 locale del Launcher. La pagina usa l'indirizzo vero dell'apparato
+  (l'URL indicato nel portale, es. `https://vcenter.cliente.local/ui`, oppure schema, host e porta
+  di destinazione); il proxy porta quell'host e quella porta nel tunnel RustDesk, e il nome viene
+  risolto dal jump host. Intestazione `Host`, certificato e reindirizzamenti restano quelli
+  dell'apparato: funzionano iDRAC (controllo dell'host) e vCenter (SSO sull'FQDN). La cifratura TLS
+  resta tra pagina e apparato. Le altre porte dello stesso host sono bloccate; gli altri indirizzi
+  (es. risorse su internet) vanno diretti. Certificati non validi: chiedi e ricorda l'impronta
+  (come le chiavi SSH), ignora o blocca.
+- **Browser predefinito**: tunnel + `https://127.0.0.1:<porta>` con lo stesso percorso
+  dell'URL (in diretta l'indirizzo vero).
+
 Utente e password non si copiano mai dal portale né dal Launcher: per le interfacce web si
 prendono da Hudu, e per il web il portale non invia nemmeno la credenziale al Launcher.
 

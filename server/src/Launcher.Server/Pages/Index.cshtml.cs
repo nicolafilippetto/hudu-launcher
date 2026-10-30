@@ -34,6 +34,8 @@ public sealed class AssetForm
     public List<ExtraForm> Extras { get; set; } = [];
     /// <summary>Opzioni RDP: chiave → valore; vuoto = predefinito.</summary>
     public Dictionary<string, string?> Rdp { get; set; } = [];
+    public string? WebUrl { get; set; }
+    public Dictionary<string, string?> Web { get; set; } = [];
 }
 
 /// <summary>Modifica in blocco: campo vuoto = invariato.</summary>
@@ -64,7 +66,9 @@ public sealed record EditorViewModel(
     ConnectionProtocol GuessedProtocol,
     IReadOnlyList<string> Errors,
     IReadOnlyDictionary<string, string> RdpDefaults,
-    IReadOnlyDictionary<string, string> RdpOverrides);
+    IReadOnlyDictionary<string, string> RdpOverrides,
+    IReadOnlyDictionary<string, string> WebDefaults,
+    IReadOnlyDictionary<string, string> WebOverrides);
 
 public sealed record HomeViewModel(IReadOnlyList<ResolvedAsset> Favorites, IReadOnlyList<ResolvedAsset> Recent, SyncState? Sync, int CompanyCount);
 
@@ -166,12 +170,24 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         var gateway = ParseGateway(form.Gateway, errors);
         var note = string.IsNullOrWhiteSpace(form.Note) ? null : form.Note.Trim();
         var rdp = RdpOptionCatalog.Clean(form.Rdp);
+        var web = WebOptionCatalog.Catalog.Clean(form.Web);
         if (note?.Length > 500)
         {
             errors.Add("La nota supera i 500 caratteri.");
         }
 
-        var extras = new List<(ExtraForm Form, ConnectionProtocol Protocol, string? Host, int? Port, int? PasswordId, string? Gateway)>();
+        var (webUrl, webUrlError) = WebUrls.Parse(form.WebUrl);
+        if (webUrlError is not null)
+        {
+            errors.Add($"URL della pagina web: {webUrlError}.");
+        }
+        else if (webUrl is not null && protocol is not (null or ConnectionProtocol.Http or ConnectionProtocol.Https))
+        {
+            errors.Add("L'URL della pagina web vale solo con il protocollo Web: lascia il protocollo su Automatico o scegli HTTP/HTTPS.");
+            webUrl = null;
+        }
+
+        var extras = new List<(ExtraForm Form, ConnectionProtocol Protocol, string? Host, int? Port, string? Url, int? PasswordId, string? Gateway)>();
         foreach (var extra in form.Extras.Where(e => !e.Remove))
         {
             var label = extra.Label?.Trim();
@@ -193,7 +209,28 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
                 continue;
             }
 
-            extras.Add((extra, extraProtocol.Value, ParseHost(extra.Host, label, errors), ParsePort(extra.Port, label, errors),
+            // Nel campo host si può scrivere anche un indirizzo completo: vale per le pagine web.
+            if (extra.Host?.Contains("://", StringComparison.Ordinal) == true)
+            {
+                var (extraUrl, extraUrlError) = WebUrls.Parse(extra.Host);
+                if (extraUrlError is not null)
+                {
+                    errors.Add($"{label}: {extraUrlError}.");
+                    continue;
+                }
+
+                if (extraProtocol is not (ConnectionProtocol.Http or ConnectionProtocol.Https))
+                {
+                    errors.Add($"{label}: un indirizzo completo (URL) vale solo per le connessioni web.");
+                    continue;
+                }
+
+                extras.Add((extra, extraUrl!.Scheme == Uri.UriSchemeHttp ? ConnectionProtocol.Http : ConnectionProtocol.Https, null, null,
+                    extraUrl.AbsoluteUri, ParsePassword(extra.PasswordId, companyPasswords, errors), ParseGateway(extra.Gateway, errors)));
+                continue;
+            }
+
+            extras.Add((extra, extraProtocol.Value, ParseHost(extra.Host, label, errors), ParsePort(extra.Port, label, errors), null,
                 ParsePassword(extra.PasswordId, companyPasswords, errors), ParseGateway(extra.Gateway, errors)));
         }
 
@@ -211,7 +248,8 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
 
         var now = DateTimeOffset.UtcNow;
         var setting = await db.AssetSettings.FindAsync([asset.Id], ct);
-        var isEmpty = protocol is null && host is null && port is null && passwordId is null && gateway is null && !form.Hidden && note is null && rdp.Count == 0;
+        var isEmpty = protocol is null && host is null && port is null && passwordId is null && gateway is null && !form.Hidden && note is null
+            && rdp.Count == 0 && webUrl is null && web.Count == 0;
         if (isEmpty)
         {
             if (setting is not null)
@@ -235,13 +273,15 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
             setting.Hidden = form.Hidden;
             setting.Note = note;
             setting.RdpOptions = RdpOptionCatalog.Serialize(rdp);
+            setting.WebUrl = webUrl?.AbsoluteUri;
+            setting.WebOptions = OptionCatalog.Serialize(web);
             setting.UpdatedAt = now;
             setting.UpdatedBy = Email;
         }
 
         var existing = await db.ExtraConnections.Where(e => e.AssetId == asset.Id).ToListAsync(ct);
         var kept = new HashSet<int>();
-        foreach (var (extraForm, extraProtocol, extraHost, extraPort, extraPassword, extraGateway) in extras)
+        foreach (var (extraForm, extraProtocol, extraHost, extraPort, extraUrl, extraPassword, extraGateway) in extras)
         {
             var row = extraForm.Id is { } id ? existing.FirstOrDefault(e => e.Id == id) : null;
             if (row is null)
@@ -258,6 +298,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
             row.Protocol = extraProtocol;
             row.Host = extraHost;
             row.Port = extraPort;
+            row.Url = extraUrl;
             row.PasswordId = extraPassword;
             row.GatewayPeerId = extraGateway;
             row.UpdatedAt = now;
@@ -270,7 +311,9 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         var company = await db.Companies.AsNoTracking().Where(c => c.Id == asset.CompanyId).Select(c => c.Name).FirstOrDefaultAsync(ct);
         await audit.WriteAsync(new AuditEntry("asset.update", Email, CompanyName: company, AssetId: asset.Id, AssetName: asset.Name,
             Details: Summarize(protocol, host, port, passwordId, gateway, form.Hidden, extras.Count)
-                     + (rdp.Count > 0 ? "; RDP: " + RdpOptionCatalog.Describe(rdp) : "")), HttpContext, ct);
+                     + (rdp.Count > 0 ? "; RDP: " + RdpOptionCatalog.Describe(rdp) : "")
+                     + (webUrl is null ? "" : "; URL: " + webUrl.AbsoluteUri)
+                     + (web.Count > 0 ? "; Web: " + WebOptionCatalog.Catalog.Describe(web) : "")), HttpContext, ct);
 
         var resolved = await inventory.GetAssetAsync(asset.Id, Email, ct);
         ViewData["ShowCompany"] = Request.Query["context"] == "list";
@@ -405,7 +448,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
 
             setting.UpdatedAt = now;
             setting.UpdatedBy = Email;
-            if (setting is { Protocol: null, Host: null, Port: null, PasswordId: null, GatewayPeerId: null, Hidden: false, Note: null, RdpOptions: null })
+            if (setting is { Protocol: null, Host: null, Port: null, PasswordId: null, GatewayPeerId: null, Hidden: false, Note: null, RdpOptions: null, WebUrl: null, WebOptions: null })
             {
                 db.AssetSettings.Remove(setting);
             }
@@ -523,7 +566,8 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         var layout = await db.LayoutConfigs.AsNoTracking().FirstOrDefaultAsync(l => l.LayoutId == resolved.Asset.LayoutId, ct);
         var guessed = ConnectionResolver.GuessProtocol(resolved.Asset.OperatingSystem, layout, null);
         return new EditorViewModel(resolved, passwords, extras, guessed, errors,
-            settings.RdpDefaults, RdpOptionCatalog.Parse(resolved.Setting?.RdpOptions));
+            settings.RdpDefaults, RdpOptionCatalog.Parse(resolved.Setting?.RdpOptions),
+            settings.WebDefaults, WebOptionCatalog.Catalog.Parse(resolved.Setting?.WebOptions));
     }
 
     private static ConnectionProtocol? ParseProtocol(string? value, string field, List<string> errors)

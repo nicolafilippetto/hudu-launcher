@@ -47,7 +47,8 @@ public sealed record RedeemResponse(
     string? Warning,
     RdpOptions? Rdp,
     TerminalOptions? Terminal,
-    string? HuduUrl);
+    string? HuduUrl,
+    WebOptions? Web = null);
 
 public static class RateLimitPolicies
 {
@@ -402,7 +403,10 @@ public static class ApiEndpoints
                 ? RdpOptionCatalog.Resolve(settings.RdpDefaults, RdpOptionCatalog.Parse(asset.Setting?.RdpOptions))
                 : null,
             connection.Protocol is ConnectionProtocol.Ssh or ConnectionProtocol.Telnet ? settings.Terminal : null,
-            asset.Asset.HuduUrl);
+            asset.Asset.HuduUrl,
+            connection.WebUrl is { } webUrl
+                ? WebOptionCatalog.Resolve(webUrl, settings.WebDefaults, WebOptionCatalog.Catalog.Parse(asset.Setting?.WebOptions))
+                : null);
         return (response, credential is null ? "senza credenziale" : $"credenziale: {connection.PasswordName}");
     }
 

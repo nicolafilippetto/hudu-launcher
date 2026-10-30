@@ -21,6 +21,38 @@ public static class ConnectorSettings
 
     public static string WebViewDataDirectory => Path.Combine(DataDirectory, "WebView2");
 
+    /// <summary>Profili del browser integrato delle pagine web: uno per scheda, o per asset se si ricorda l'accesso.</summary>
+    public static string WebProfilesDirectory => Path.Combine(DataDirectory, "WebProfiles");
+
+    /// <summary>Cancella i profili web temporanei rimasti da una chiusura improvvisa.</summary>
+    public static void CleanupWebProfiles()
+    {
+        if (!Directory.Exists(WebProfilesDirectory))
+        {
+            return;
+        }
+
+        foreach (var directory in Directory.EnumerateDirectories(WebProfilesDirectory, "tmp-*"))
+        {
+            TryDeleteDirectory(directory);
+        }
+    }
+
+    public static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            Directory.Delete(path, recursive: true);
+        }
+        catch (IOException)
+        {
+            // ancora in uso: si riprova più tardi o al prossimo avvio
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
     public static string Version { get; } =
         typeof(ConnectorSettings).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "?";
 

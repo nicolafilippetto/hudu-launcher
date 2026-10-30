@@ -491,3 +491,81 @@ public sealed class SessionToolsTests
         Assert.Equal("sessione 2026-10-30 080509.txt", FileNames.For(" .. ", "txt", now));
     }
 }
+
+public sealed class WebProxyTests
+{
+    [Fact]
+    public void Routes_the_asset_through_the_tunnel_and_the_rest_directly()
+    {
+        var route = WebRoutes.For(new TargetInfo("vcenter.cliente.local", 443), SessionEndpoint.ForTunnel(50123));
+        Assert.Equal(new ProxyRoute("127.0.0.1", 50123), route("VCENTER.cliente.local.", 443));
+        Assert.Null(route("vcenter.cliente.local", 5480));
+        Assert.Equal(new ProxyRoute("fonts.example.com", 443), route("fonts.example.com", 443));
+    }
+
+    [Fact]
+    public void Direct_connections_reach_other_ports_of_the_same_host()
+    {
+        var route = WebRoutes.For(new TargetInfo("192.168.10.120", 443), SessionEndpoint.ForTarget(new TargetInfo("192.168.10.120", 443)));
+        Assert.Equal(new ProxyRoute("192.168.10.120", 443), route("192.168.10.120", 443));
+        Assert.Equal(new ProxyRoute("192.168.10.120", 80), route("192.168.10.120", 80));
+    }
+
+    [Theory]
+    [InlineData("fe80::1", "[FE80:0:0:0:0:0:0:1]", true)]
+    [InlineData("10.0.0.1", "10.0.0.2", false)]
+    [InlineData("idrac.local", "IDRAC.LOCAL", true)]
+    public void Compares_hosts(string a, string b, bool same) => Assert.Equal(same, WebRoutes.SameHost(a, b));
+
+    [Fact]
+    public async Task Forwards_bytes_to_the_routed_endpoint_and_blocks_the_rest()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var echo = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        echo.Start();
+        var echoPort = ((System.Net.IPEndPoint)echo.LocalEndpoint).Port;
+        var echoTask = Task.Run(async () =>
+        {
+            using var server = await echo.AcceptTcpClientAsync(ct);
+            var s = server.GetStream();
+            var buffer = new byte[5];
+            await s.ReadExactlyAsync(buffer, ct);
+            await s.WriteAsync(buffer, ct);
+        }, ct);
+
+        await using var proxy = new Socks5Proxy((host, port) => host == "idrac.local" && port == 443 ? new ProxyRoute("127.0.0.1", echoPort) : null);
+        proxy.Start();
+
+        using (var client = new System.Net.Sockets.TcpClient())
+        {
+            await client.ConnectAsync(System.Net.IPAddress.Loopback, proxy.Port, ct);
+            var s = client.GetStream();
+            Assert.Equal(0, await Connect(s, "idrac.local", 443, ct));
+            await s.WriteAsync("hello"u8.ToArray(), ct);
+            var reply = new byte[5];
+            await s.ReadExactlyAsync(reply, ct);
+            Assert.Equal("hello"u8.ToArray(), reply);
+        }
+
+        await echoTask;
+        echo.Stop();
+
+        using var blocked = new System.Net.Sockets.TcpClient();
+        await blocked.ConnectAsync(System.Net.IPAddress.Loopback, proxy.Port, ct);
+        Assert.Equal(2, await Connect(blocked.GetStream(), "other.local", 22, ct));
+    }
+
+    /// <summary>Saluto e CONNECT SOCKS5 con nome host; restituisce il codice di risposta.</summary>
+    private static async Task<byte> Connect(Stream s, string host, int port, CancellationToken ct)
+    {
+        await s.WriteAsync(new byte[] { 5, 1, 0 }, ct);
+        var hello = new byte[2];
+        await s.ReadExactlyAsync(hello, ct);
+        Assert.Equal(new byte[] { 5, 0 }, hello);
+        var name = System.Text.Encoding.ASCII.GetBytes(host);
+        await s.WriteAsync((byte[])[5, 1, 0, 3, (byte)name.Length, .. name, (byte)(port >> 8), (byte)port], ct);
+        var reply = new byte[10];
+        await s.ReadExactlyAsync(reply, ct);
+        return reply[1];
+    }
+}

@@ -47,6 +47,7 @@ public partial class App : Application
 
         // Pulizia dei registri vecchi, senza rallentare l'avvio.
         _ = Task.Run(Log.Cleanup);
+        _ = Task.Run(ConnectorSettings.CleanupWebProfiles);
     }
 
     protected override void OnExit(ExitEventArgs e)

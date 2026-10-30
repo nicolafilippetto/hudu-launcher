@@ -109,6 +109,11 @@
                 <input class="input mono" name="Port" value="@setting?.Port" inputmode="numeric" placeholder="@(primary?.Port.ToString() ?? "")" autocomplete="off" />
             </label>
         </div>
+        <label class="field">
+            <span>URL della pagina web (facoltativo)</span>
+            <input class="input mono" name="WebUrl" value="@setting?.WebUrl" maxlength="500" autocomplete="off" spellcheck="false"
+                   placeholder="es. https://vcenter.cliente.local/ui — se vuoto, per le connessioni web si usano indirizzo e porta" />
+        </label>
         <div class="grid grid-2">
             <label class="field">
                 <span>Credenziale (da Hudu)</span>
@@ -175,9 +180,39 @@
         </div>
     </details>
 
+    @{
+        var webOverrides = Model.WebOverrides;
+    }
+    <details class="card-fieldset rdp-options" open="@(webOverrides.Count > 0)">
+        <summary>
+            <strong>Opzioni pagine web</strong>
+            <span class="muted small">
+                @(webOverrides.Count == 0 ? "predefinite per tutti" : $"{webOverrides.Count} personalizzate per questo asset")
+            </span>
+        </summary>
+        <p class="muted small">Valgono per le interfacce web di questo asset (principale, console e connessioni aggiuntive). "Predefinito" segue le impostazioni dell'amministratore.</p>
+        <div class="grid grid-3">
+            @foreach (var option in WebOptionCatalog.All)
+            {
+                var current = webOverrides.GetValueOrDefault(option.Key);
+                var inherited = WebOptionCatalog.Catalog.Effective(option.Key, Model.WebDefaults);
+                <label class="field" title="@option.Hint">
+                    <span>@option.Label</span>
+                    <select class="input @(current is null ? "" : "is-overridden")" name="Web[@option.Key]">
+                        <option value="">Predefinito (@option.LabelOf(inherited))</option>
+                        @foreach (var choice in option.Choices)
+                        {
+                            <option value="@choice.Value" selected="@(current == choice.Value)">@choice.Label</option>
+                        }
+                    </select>
+                </label>
+            }
+        </div>
+    </details>
+
     <fieldset class="card-fieldset">
         <legend>Connessioni aggiuntive</legend>
-        <p class="muted small">Ad esempio l'interfaccia web di gestione, una seconda porta SSH o un altro indirizzo dello stesso oggetto.</p>
+        <p class="muted small">Ad esempio l'interfaccia web di gestione, una seconda porta SSH o un altro indirizzo dello stesso oggetto. Per le pagine web nel campo host si può scrivere l'indirizzo completo (es. https://idrac-srv01.cliente.local/).</p>
         <div class="extras @(Info.RustDeskEnabled ? "" : "no-gateway")" data-extras>
             @for (var i = 0; i < Model.Extras.Count; i++)
             {
@@ -192,7 +227,7 @@
                             <option value="@p" selected="@(extra.Protocol == p)">@Format.ProtocolName(p)</option>
                         }
                     </select>
-                    <input class="input mono" name="Extras[@i].Host" value="@extra.Host" placeholder="Host (come principale)" aria-label="Host" list="ipam-list" autocomplete="off" />
+                    <input class="input mono" name="Extras[@i].Host" value="@(extra.Url ?? extra.Host)" placeholder="Host o URL (come principale)" aria-label="Host o URL" list="ipam-list" autocomplete="off" title="@(extra.Url ?? extra.Host)" />
                     <input class="input mono" name="Extras[@i].Port" value="@extra.Port" placeholder="Porta" inputmode="numeric" aria-label="Porta" />
                     <select class="input" name="Extras[@i].PasswordId" aria-label="Credenziale">
                         <option value="">Nessuna credenziale</option>
@@ -216,7 +251,7 @@
                         <option value="@p" selected="@(p == ConnectionProtocol.Https)">@Format.ProtocolName(p)</option>
                     }
                 </select>
-                <input class="input mono" name="Extras[__i__].Host" placeholder="Host (come principale)" aria-label="Host" list="ipam-list" autocomplete="off" />
+                <input class="input mono" name="Extras[__i__].Host" placeholder="Host o URL (come principale)" aria-label="Host o URL" list="ipam-list" autocomplete="off" />
                 <input class="input mono" name="Extras[__i__].Port" placeholder="Porta" inputmode="numeric" aria-label="Porta" />
                 <select class="input" name="Extras[__i__].PasswordId" aria-label="Credenziale">
                     <option value="">Nessuna credenziale</option>

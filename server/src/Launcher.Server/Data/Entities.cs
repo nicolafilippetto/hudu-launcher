@@ -184,6 +184,10 @@ public sealed class AssetSetting
     public string? Note { get; set; }
     /// <summary>Opzioni RDP che sovrascrivono i predefiniti (JSON chiave → valore).</summary>
     public string? RdpOptions { get; set; }
+    /// <summary>Indirizzo completo della pagina web principale (es. https://vcenter.cliente.local/ui).</summary>
+    public string? WebUrl { get; set; }
+    /// <summary>Opzioni delle pagine web che sovrascrivono i predefiniti (JSON chiave → valore).</summary>
+    public string? WebOptions { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public string? UpdatedBy { get; set; }
 }
@@ -197,6 +201,8 @@ public sealed class ExtraConnection
     public ConnectionProtocol Protocol { get; set; }
     public string? Host { get; set; }
     public int? Port { get; set; }
+    /// <summary>Indirizzo completo per le connessioni web; host e porta si ricavano da qui.</summary>
+    public string? Url { get; set; }
     public int? PasswordId { get; set; }
     public string? GatewayPeerId { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

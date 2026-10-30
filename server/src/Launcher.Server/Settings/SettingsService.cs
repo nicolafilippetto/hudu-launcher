@@ -24,6 +24,7 @@ public static class SettingKeys
     public const string HuduPageSize = "hudu.pageSize";
 
     public const string RdpDefaults = "rdp.defaults";
+    public const string WebDefaults = "web.defaults";
     public const string TerminalHighlight = "terminal.highlight";
     public const string TerminalHighlightRules = "terminal.highlightRules";
 
@@ -231,6 +232,8 @@ public sealed class SettingsService(IDbContextFactory<AppDbContext> dbFactory, I
 
     /// <summary>Predefiniti RDP scelti dagli admin (solo le opzioni impostate).</summary>
     public Dictionary<string, string> RdpDefaults => Connections.RdpOptionCatalog.Parse(Get(SettingKeys.RdpDefaults));
+
+    public Dictionary<string, string> WebDefaults => Connections.WebOptionCatalog.Catalog.Parse(Get(SettingKeys.WebDefaults));
 
     /// <summary>Testo delle regole di colore del terminale (quelle predefinite se mai modificate).</summary>
     public string TerminalRulesText => Get(SettingKeys.TerminalHighlightRules) ?? Connections.HighlightRules.Default;
