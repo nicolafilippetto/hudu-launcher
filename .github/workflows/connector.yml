@@ -34,6 +34,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Servono i tag per numerare le build di prova dopo l'ultima versione pubblicata.
+          fetch-depth: 0
 
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
@@ -47,12 +49,21 @@ jobs:
         env:
           REF_NAME: ${{ github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
-          # Tag v1.2.3 → 1.2.3; altrimenti 1.0.<numero di esecuzione>.
-          $version = "1.0.${{ github.run_number }}"
+          # Tag v1.2.3 → 1.2.3. Le build di prova sono la versione successiva all'ultimo tag con
+          # suffisso (es. 1.2.2-ci.31): si installano sopra la 1.2.1 senza avviso di downgrade e la
+          # 1.2.2 definitiva le aggiorna.
           if ($env:REF_TYPE -eq "tag") {
             if ($env:REF_NAME -notmatch '^v(\d+\.\d+\.\d+)$') { throw "Tag non valido: usare vX.Y.Z" }
             $version = $Matches[1]
+          } else {
+            $latest = git tag --list 'v*' |
+              Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } |
+              ForEach-Object { [version]$_.Substring(1) } |
+              Sort-Object -Descending | Select-Object -First 1
+            if (-not $latest) { $latest = [version]'1.0.0' }
+            $version = '{0}.{1}.{2}-ci.{3}' -f $latest.Major, $latest.Minor, ($latest.Build + 1), $env:RUN_NUMBER
           }
           "version=$version" >> $env:GITHUB_OUTPUT
           Write-Host "Versione $version"

@@ -3,7 +3,7 @@
     "use strict";
 
     var host = window.chrome && window.chrome.webview;
-    var dark = { background: "#0e1116", foreground: "#e5e9ef", cursor: "#ffa200", selectionBackground: "#5a3d12" };
+    var dark = { background: "#0c0c0c", foreground: "#f2f2f2", cursor: "#ffa200", selectionBackground: "#5a3d12" };
     var light = { background: "#ffffff", foreground: "#1a1f26", cursor: "#df6c01", selectionBackground: "#fbd9b5" };
 
     var term = new Terminal({
