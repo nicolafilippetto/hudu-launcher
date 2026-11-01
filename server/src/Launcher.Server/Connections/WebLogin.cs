@@ -55,40 +55,16 @@ public sealed class WebLoginService(IDataProtectionProvider dataProtection, Time
     }
 
     /// <summary>
-    /// Credenziali proposte per una pagina web, in quest'ordine: quella scelta per la connessione,
-    /// quelle collegate all'asset in Hudu, quelle del cliente con l'URL sullo stesso host della pagina.
+    /// Credenziali proposte per una pagina web: solo quelle collegate all'asset in Hudu (assegnate o
+    /// related), prima quella scelta per la connessione, poi le assegnate e le related. Le altre
+    /// password del cliente non si propongono: i collegamenti si sistemano in Hudu.
     /// </summary>
     public static IReadOnlyList<CachedPassword> Candidates(ResolvedAsset asset, ResolvedConnection connection, IReadOnlyList<CachedPassword> companyPasswords)
     {
-        var result = new List<CachedPassword>();
-        void Add(CachedPassword? password)
-        {
-            if (password is not null && password.CompanyId == asset.Asset.CompanyId && result.All(p => p.Id != password.Id))
-            {
-                result.Add(password);
-            }
-        }
-
-        Add(companyPasswords.FirstOrDefault(p => p.Id == connection.PasswordId));
-        foreach (var password in companyPasswords.Where(p => p.AssetId == asset.Asset.Id).OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
-        {
-            Add(password);
-        }
-
-        if (connection.Host is { } host)
-        {
-            foreach (var password in companyPasswords.Where(p => HostParser.ExtractHost(p.Url) is { } urlHost && SameHost(urlHost, host))
-                         .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
-            {
-                Add(password);
-            }
-        }
-
-        return result.Take(MaxCandidates).ToList();
+        var linked = ConnectionResolver.LinkedPasswords(asset.Asset, ConnectionResolver.IndexPasswordsByAsset(companyPasswords));
+        return linked
+            .OrderBy(p => p.Id == connection.PasswordId ? 0 : 1)
+            .Take(MaxCandidates)
+            .ToList();
     }
-
-    private static bool SameHost(string a, string b) =>
-        System.Net.IPAddress.TryParse(a, out var ipA) && System.Net.IPAddress.TryParse(b, out var ipB)
-            ? ipA.Equals(ipB)
-            : string.Equals(a.TrimEnd('.'), b.TrimEnd('.'), StringComparison.OrdinalIgnoreCase);
 }

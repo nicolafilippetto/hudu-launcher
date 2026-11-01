@@ -5,15 +5,18 @@
     var setting = Model.Asset.Setting;
     var primary = Model.Asset.Primary;
     var protocols = Enum.GetValues<ConnectionProtocol>();
-    var linked = Model.Passwords.Where(p => p.AssetId == asset.Id).ToList();
+    var linked = Model.Passwords.Where(p => p.IsLinkedTo(asset)).ToList();
+    var assigned = linked.Where(p => p.AssetId == asset.Id).ToList();
     var autoCredential = linked.Count switch
     {
         0 => "nessuna collegata in Hudu",
         1 => $"{linked[0].Name}",
+        _ when assigned.Count == 1 => $"{assigned[0].Name}",
         _ => $"{linked.Count} collegate: sceglierne una",
     };
     var ipam = asset.IpamList();
     var (autoHost, _) = ConnectionResolver.ResolveHost(null, asset);
+    var fqdn = asset.FqdnFor(setting?.Host ?? autoHost);
     var legacyHost = setting?.Host is { } h && !ipam.Contains(h, StringComparer.OrdinalIgnoreCase) ? h : null;
     var autoGateway = setting?.GatewayPeerId is null && primary?.GatewayPeerId is not null
         ? $"Automatico: {primary.GatewayPeerId} ({primary.GatewaySource})"
@@ -22,6 +25,11 @@
 @functions {
     private static string PasswordLabel(CachedPassword p) =>
         string.IsNullOrWhiteSpace(p.Username) ? p.Name : $"{p.Name} — {p.Username}";
+
+    /// <summary>Etichetta con il tipo di collegamento in Hudu: ★ assegnata, ↔ related, ⚠ non collegata.</summary>
+    private static string PasswordLabel(CachedPassword p, CachedAsset asset) =>
+        PasswordLabel(p) + (p.AssetId == asset.Id ? " ★" : p.IsLinkedTo(asset) ? " ↔" : " ⚠ non collegata in Hudu");
+
 }
 
 <form method="post" asp-page="/Index" asp-page-handler="SaveAsset" class="editor" data-editor-form>
@@ -112,7 +120,7 @@
         <label class="field">
             <span>URL della pagina web (facoltativo)</span>
             <input class="input mono" name="WebUrl" value="@setting?.WebUrl" maxlength="500" autocomplete="off" spellcheck="false"
-                   placeholder="es. https://vcenter.cliente.local/ui — se vuoto, per le connessioni web si usano indirizzo e porta" />
+                   placeholder="@(fqdn is null ? "es. https://vcenter.cliente.local/ui — se vuoto, per le connessioni web si usano indirizzo e porta" : $"se vuoto: {fqdn} (FQDN dell'IPAM di Hudu)")" />
         </label>
         <div class="grid grid-2">
             <label class="field">
@@ -121,7 +129,7 @@
                     <option value="">Automatica (@autoCredential)</option>
                     @foreach (var p in Model.Passwords)
                     {
-                        <option value="@p.Id" selected="@(setting?.PasswordId == p.Id)">@PasswordLabel(p)@(p.AssetId == asset.Id ? " ★" : "")</option>
+                        <option value="@p.Id" selected="@(setting?.PasswordId == p.Id)">@PasswordLabel(p, asset)</option>
                     }
                 </select>
             </label>
@@ -233,7 +241,7 @@
                         <option value="">Nessuna credenziale</option>
                         @foreach (var p in Model.Passwords)
                         {
-                            <option value="@p.Id" selected="@(extra.PasswordId == p.Id)">@PasswordLabel(p)</option>
+                            <option value="@p.Id" selected="@(extra.PasswordId == p.Id)">@PasswordLabel(p, asset)</option>
                         }
                     </select>
                     <input class="input mono" type="@(Info.RustDeskEnabled ? "text" : "hidden")" name="Extras[@i].Gateway" value="@extra.GatewayPeerId" list="peer-list" data-peer-input placeholder="Gateway (auto)" aria-label="Gateway" />
@@ -255,9 +263,9 @@
                 <input class="input mono" name="Extras[__i__].Port" placeholder="Porta" inputmode="numeric" aria-label="Porta" />
                 <select class="input" name="Extras[__i__].PasswordId" aria-label="Credenziale">
                     <option value="">Nessuna credenziale</option>
-                    @foreach (var p in Model.Passwords)
+                    @foreach (var p in linked)
                     {
-                        <option value="@p.Id">@PasswordLabel(p)</option>
+                        <option value="@p.Id">@PasswordLabel(p, asset)</option>
                     }
                 </select>
                 <input class="input mono" type="@(Info.RustDeskEnabled ? "text" : "hidden")" name="Extras[__i__].Gateway" list="peer-list" data-peer-input placeholder="Gateway (auto)" aria-label="Gateway" />

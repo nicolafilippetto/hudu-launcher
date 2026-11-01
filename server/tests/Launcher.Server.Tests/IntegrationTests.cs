@@ -175,7 +175,7 @@ public class LauncherFactory : WebApplicationFactory<Program>
                 });
             }
 
-            // Elenchi vuoti per la sincronizzazione (companies, asset_layouts, assets, asset_passwords).
+            // Elenchi vuoti per la sincronizzazione (companies, asset_layouts, assets, asset_passwords, relations).
             var name = request.RequestUri!.AbsolutePath.Replace("/api/v1/", "", StringComparison.Ordinal);
             if (name == "ip_addresses")
             {
@@ -198,7 +198,32 @@ public class LauncherFactory : WebApplicationFactory<Program>
                 });
             }
 
-            if (name is "companies" or "asset_layouts" or "assets" or "asset_passwords")
+            if (name == "asset_passwords")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""
+                        {"asset_passwords":[{"id":601,"company_id":2,"name":"Condivisa","username":"admin","passwordable_type":null,"passwordable_id":null}]}
+                        """, System.Text.Encoding.UTF8, "application/json"),
+                });
+            }
+
+            if (name == "relations")
+            {
+                // Come Hudu: ogni collegamento c'è nei due versi (is_inverse); più una relazione di altro tipo.
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""
+                        {"relations":[
+                          {"id":1,"fromable_type":"AssetPassword","fromable_id":601,"toable_type":"Asset","toable_id":20,"is_inverse":false},
+                          {"id":2,"fromable_type":"Asset","fromable_id":20,"toable_type":"AssetPassword","toable_id":601,"is_inverse":true},
+                          {"id":3,"fromable_type":"Asset","fromable_id":21,"toable_type":"AssetPassword","toable_id":601,"is_inverse":false},
+                          {"id":4,"fromable_type":"Website","fromable_id":7,"toable_type":"AssetPassword","toable_id":601,"is_inverse":false}]}
+                        """, System.Text.Encoding.UTF8, "application/json"),
+                });
+            }
+
+            if (name is "companies" or "asset_layouts" or "assets")
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {

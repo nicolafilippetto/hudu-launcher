@@ -62,7 +62,7 @@ public sealed class ConnectionResolverTests
             Extras = (extras ?? []).ToLookup(e => e.AssetId),
             CompanySettings = company is null ? new Dictionary<int, CompanySetting>() : new Dictionary<int, CompanySetting> { [company.CompanyId] = company },
             Passwords = passwordList.ToDictionary(p => p.Id),
-            PasswordsByAsset = passwordList.Where(p => p.AssetId is not null).ToLookup(p => p.AssetId!.Value),
+            PasswordsByAsset = ConnectionResolver.IndexPasswordsByAsset(passwordList),
             Peers = peerList.ToDictionary(p => p.Id),
             PeersByName = ConnectionResolver.IndexPeersByName(peerList),
             HuduCompanyGateways = huduGateways ?? [],
@@ -165,7 +165,7 @@ public sealed class ConnectionResolverTests
     {
         var ctx = Context(
             peers: [new CachedPeer { Id = "987654321", Hostname = "SRV01" }],
-            passwords: [new CachedPassword { Id = 7, CompanyId = 1, Name = "root" }],
+            passwords: [new CachedPassword { Id = 7, CompanyId = 1, Name = "root", RelatedAssets = "100" }],
             setting: new AssetSetting { AssetId = 100, Host = "10.9.9.9", Port = 2222, Protocol = ConnectionProtocol.Ssh, GatewayPeerId = "555", PasswordId = 7 });
 
         var primary = ConnectionResolver.Resolve(Asset(), ctx).Primary!;
@@ -202,8 +202,118 @@ public sealed class ConnectionResolverTests
         var primary = ConnectionResolver.Resolve(Asset(), ctx).Primary!;
 
         Assert.Null(primary.PasswordId);
-        Assert.Contains(primary.Issues, i => i.Contains("non più presente", StringComparison.Ordinal));
+        Assert.Contains(primary.Issues, i => i.Contains("non collegata", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void Related_password_is_used_when_it_is_the_only_link()
+    {
+        var ctx = Context(
+            passwords:
+            [
+                new CachedPassword { Id = 1, CompanyId = 1, Name = "condivisa", RelatedAssets = "55,100" },
+                new CachedPassword { Id = 2, CompanyId = 1, Name = "di un altro asset", AssetId = 55 },
+            ],
+            huduGateways: new Dictionary<int, string> { [1] = "444" });
+
+        var primary = ConnectionResolver.Resolve(Asset(), ctx).Primary!;
+
+        Assert.Equal(1, primary.PasswordId);
+        Assert.Empty(primary.Issues);
+    }
+
+    [Fact]
+    public void Assigned_password_wins_over_related_ones()
+    {
+        var ctx = Context(
+            passwords:
+            [
+                new CachedPassword { Id = 1, CompanyId = 1, Name = "related", RelatedAssets = "100" },
+                new CachedPassword { Id = 2, CompanyId = 1, Name = "assegnata", AssetId = 100 },
+            ],
+            huduGateways: new Dictionary<int, string> { [1] = "444" });
+
+        Assert.Equal(2, ConnectionResolver.Resolve(Asset(), ctx).Primary!.PasswordId);
+    }
+
+    [Fact]
+    public void Chosen_password_must_be_linked_in_hudu()
+    {
+        var ctx = Context(
+            passwords: [new CachedPassword { Id = 3, CompanyId = 1, Name = "del cliente, non collegata" }],
+            setting: new AssetSetting { AssetId = 100, PasswordId = 3 },
+            huduGateways: new Dictionary<int, string> { [1] = "444" });
+
+        var primary = ConnectionResolver.Resolve(Asset(), ctx).Primary!;
+
+        Assert.Null(primary.PasswordId);
+        Assert.Contains(primary.Issues, i => i.Contains("va collegata in Hudu", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Relation_to_a_password_of_another_company_is_ignored()
+    {
+        var ctx = Context(
+            passwords: [new CachedPassword { Id = 4, CompanyId = 2, Name = "altrui", RelatedAssets = "100" }],
+            huduGateways: new Dictionary<int, string> { [1] = "444" });
+
+        var primary = ConnectionResolver.Resolve(Asset(), ctx).Primary!;
+
+        Assert.Null(primary.PasswordId);
+        Assert.Contains("Nessuna credenziale associata", primary.Issues);
+    }
+
+    [Theory]
+    [InlineData("vcenter.cliente.local", "https://vcenter.cliente.local/", "vcenter.cliente.local")]
+    [InlineData("https://vcenter.cliente.local/ui", "https://vcenter.cliente.local/ui", "vcenter.cliente.local")]
+    [InlineData("http://nas.cliente.local:5000", "http://nas.cliente.local:5000/", "nas.cliente.local")]
+    public void Web_page_uses_the_fqdn_of_the_ipam(string fqdn, string url, string host)
+    {
+        var asset = Asset(os: null, layout: 9);
+        asset.IpamFqdns = "10.0.0.10 " + SyncService.CleanFqdn(fqdn);
+
+        var primary = ConnectionResolver.Resolve(asset, Context(huduGateways: new Dictionary<int, string> { [1] = "444" })).Primary!;
+
+        Assert.Equal((url, host), (primary.WebUrl, primary.Host));
+    }
+
+    [Fact]
+    public void Fqdn_is_not_used_for_rdp_or_when_an_url_is_written()
+    {
+        var asset = Asset();
+        asset.IpamFqdns = "10.0.0.10 srv01.cliente.local";
+        Assert.Equal("10.0.0.10", ConnectionResolver.Resolve(asset, Context()).Primary!.Host);
+
+        var web = Asset(os: null, layout: 9);
+        web.IpamFqdns = "10.0.0.10 fw.cliente.local";
+        var ctx = Context(setting: new AssetSetting { AssetId = 100, WebUrl = "https://10.0.0.10:4444/" });
+        Assert.Equal("https://10.0.0.10:4444/", ConnectionResolver.Resolve(web, ctx).Primary!.WebUrl);
+    }
+
+    [Fact]
+    public void Web_login_proposes_only_passwords_linked_in_hudu()
+    {
+        List<CachedPassword> passwords =
+        [
+            new() { Id = 1, CompanyId = 1, Name = "stesso URL, non collegata", Url = "https://10.0.0.10/" },
+            new() { Id = 2, CompanyId = 1, Name = "related", RelatedAssets = "100" },
+            new() { Id = 3, CompanyId = 1, Name = "assegnata", AssetId = 100 },
+            new() { Id = 4, CompanyId = 2, Name = "altro cliente", RelatedAssets = "100" },
+        ];
+        var resolved = ConnectionResolver.Resolve(Asset(os: null, layout: 9), Context(passwords: passwords, setting: new AssetSetting { AssetId = 100, PasswordId = 2 }));
+
+        var candidates = Launcher.Server.Connections.WebLoginService.Candidates(resolved, resolved.Primary!, passwords);
+
+        Assert.Equal([2, 3], candidates.Select(c => c.Id));
+    }
+
+    [Theory]
+    [InlineData("https://admin:segreta@fw.cliente.local/")]
+    [InlineData("javascript:alert(1)")]
+    [InlineData("ftp://nas.cliente.local")]
+    [InlineData("<script>")]
+    [InlineData("")]
+    public void Unsafe_fqdn_values_are_dropped(string value) => Assert.Null(SyncService.CleanFqdn(value));
 
     [Fact]
     public void Missing_ip_and_gateway_block_the_connection()
@@ -557,7 +667,7 @@ public sealed class RustDeskOptionalTests
             Extras = Array.Empty<ExtraConnection>().ToLookup(e => e.AssetId),
             CompanySettings = new Dictionary<int, CompanySetting> { [1] = new() { CompanyId = 1, GatewayPeerId = "123456789" } },
             Passwords = new Dictionary<int, CachedPassword>(),
-            PasswordsByAsset = Array.Empty<CachedPassword>().ToLookup(p => p.AssetId!.Value),
+            PasswordsByAsset = ConnectionResolver.IndexPasswordsByAsset([]),
             Peers = new Dictionary<string, CachedPeer> { ["999"] = new() { Id = "999", Hostname = "SRV01" } },
             PeersByName = ConnectionResolver.IndexPeersByName([new CachedPeer { Id = "999", Hostname = "SRV01" }]),
             HuduCompanyGateways = new Dictionary<int, string>(),

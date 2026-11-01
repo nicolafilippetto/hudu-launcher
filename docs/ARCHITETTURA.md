@@ -161,7 +161,8 @@ un gruppo Entra (es. `SG-Launcher-Tecnici`) assegnato all'app enterprise.
 | Nome, tipo asset | Hudu `assets` |
 | IP di destinazione | Hudu, campo `IP Address` (Virtual Machines) |
 | Protocollo / porta | Dedotto dal tipo (Windows → RDP 3389, Linux → SSH 22, firewall → HTTPS 443) o da campo dedicato |
-| Credenziale | Hudu asset password collegata all'asset |
+| Credenziale | Hudu asset password assegnata all'asset o collegata come *related* (`relations`) |
+| Pagina web | FQDN dell'IPAM per l'IP dell'asset, oppure URL scritto nel portale |
 | Jump host RustDesk del cliente | **Da definire** (vedi 5.2) |
 | Password RustDesk | Configurazione del server |
 

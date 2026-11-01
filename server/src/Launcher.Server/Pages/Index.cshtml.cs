@@ -154,7 +154,13 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
             return NotFound();
         }
 
-        var companyPasswords = await db.Passwords.Where(p => p.CompanyId == asset.CompanyId).Select(p => p.Id).ToListAsync(ct);
+        // Solo le password collegate all'asset in Hudu (assegnate o related); una scelta già salvata
+        // resta valida al salvataggio degli altri campi, ma la connessione la segnala da correggere.
+        var companyPasswords = (await inventory.GetLinkedPasswordsAsync(asset, ct)).Select(p => p.Id)
+            .Concat(await db.AssetSettings.AsNoTracking().Where(s => s.AssetId == asset.Id && s.PasswordId != null).Select(s => s.PasswordId!.Value).ToListAsync(ct))
+            .Concat(await db.ExtraConnections.AsNoTracking().Where(e => e.AssetId == asset.Id && e.PasswordId != null).Select(e => e.PasswordId!.Value).ToListAsync(ct))
+            .Distinct()
+            .ToList();
         var errors = new List<string>();
         var protocol = ParseProtocol(form.Protocol, "Protocollo", errors);
         var host = ParseHost(form.Host, "Indirizzo", errors);
@@ -378,8 +384,9 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
             }
             else
             {
-                var companyPasswords = await db.Passwords.Where(p => p.CompanyId == companies[0]).Select(p => p.Id).ToListAsync(ct);
-                passwordId = ParsePassword(passwordMode, companyPasswords, errors);
+                // In blocco solo una password collegata in Hudu a tutti gli asset scelti.
+                var companyPasswords = await LinkedToAllAsync(assets, ct);
+                passwordId = ParsePassword(passwordMode, companyPasswords.Select(p => p.Id).ToList(), errors);
                 changes.Add("credenziale #" + passwordId);
             }
         }
@@ -477,8 +484,20 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         }
 
         var companies = assets.Select(a => a.Asset.CompanyId).Distinct().ToList();
-        var passwords = companies.Count == 1 ? await inventory.GetCompanyPasswordsAsync(companies[0], ct) : null;
+        var passwords = companies.Count == 1 ? await LinkedToAllAsync(assets.Select(a => a.Asset).ToList(), ct) : null;
         return new BulkEditorViewModel(assets, passwords, form, errors);
+    }
+
+    /// <summary>Password collegate in Hudu a ognuno degli asset (stesso cliente).</summary>
+    private async Task<IReadOnlyList<CachedPassword>> LinkedToAllAsync(List<CachedAsset> assets, CancellationToken ct)
+    {
+        if (assets.Count == 0 || assets.Select(a => a.CompanyId).Distinct().Count() != 1)
+        {
+            return [];
+        }
+
+        var passwords = await inventory.GetCompanyPasswordsAsync(assets[0].CompanyId, ct);
+        return passwords.Where(p => assets.All(p.IsLinkedTo)).ToList();
     }
 
     private static List<int> ParseIds(string? value) =>
@@ -563,10 +582,16 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
             return null;
         }
 
-        var passwords = await inventory.GetCompanyPasswordsAsync(resolved.Asset.CompanyId, ct);
+        // Nel menu: le password collegate in Hudu, più quelle già scelte ma non più collegate (segnalate),
+        // così non spariscono in silenzio al primo salvataggio.
         var extras = await db.ExtraConnections.AsNoTracking().Where(e => e.AssetId == assetId).OrderBy(e => e.Label).ToListAsync(ct);
         var layout = await db.LayoutConfigs.AsNoTracking().FirstOrDefaultAsync(l => l.LayoutId == resolved.Asset.LayoutId, ct);
         var guessed = ConnectionResolver.GuessProtocol(resolved.Asset.OperatingSystem, layout, null);
+        var linked = await inventory.GetLinkedPasswordsAsync(resolved.Asset, ct);
+        var chosen = new[] { resolved.Setting?.PasswordId }.Concat(extras.Select(e => e.PasswordId)).OfType<int>().ToHashSet();
+        var passwords = linked
+            .Concat((await inventory.GetCompanyPasswordsAsync(resolved.Asset.CompanyId, ct)).Where(p => chosen.Contains(p.Id) && linked.All(l => l.Id != p.Id)))
+            .ToList();
         return new EditorViewModel(resolved, passwords, extras, guessed, errors,
             settings.RdpDefaults, RdpOptionCatalog.Parse(resolved.Setting?.RdpOptions),
             settings.WebDefaults, WebOptionCatalog.Catalog.Parse(resolved.Setting?.WebOptions));

@@ -115,6 +115,7 @@ public sealed class SyncService(
             }
 
             var passwords = (await hudu.GetPasswordInfosAsync(ct)).Select(ToCached).ToList();
+            var relationsError = await ApplyPasswordRelationsAsync(hudu, passwords, ct);
 
             List<CachedPeer>? peers = null;
             string? peerError = null;
@@ -163,7 +164,7 @@ public sealed class SyncService(
             var peerCount = peers?.Count ?? await db.Peers.CountAsync(ct);
             var message = $"{companies.Count} clienti, {assets.Count(a => a.IsConnectable)} asset, {passwords.Count} credenziali, "
                           + $"{ipam.Values.Sum(v => v.Count)} IP dall'IPAM, {peerCount} dispositivi RustDesk";
-            var warning = string.Join(" · ", new[] { peerError is null ? null : "RustDesk: " + peerError, ipamError }.OfType<string>());
+            var warning = string.Join(" · ", new[] { peerError is null ? null : "RustDesk: " + peerError, ipamError, relationsError }.OfType<string>());
             await UpdateStateAsync(s =>
             {
                 s.LastSuccessAt = DateTimeOffset.UtcNow;
@@ -236,6 +237,7 @@ public sealed class SyncService(
                     .Where(p => p.CompanyId == companyId)
                     .Select(ToCached)
                     .ToList();
+                var relationsError = await ApplyPasswordRelationsAsync(hudu, passwords, ct);
 
                 await using var tx = await db.Database.BeginTransactionAsync(ct);
                 await db.Assets.Where(a => a.CompanyId == companyId).ExecuteDeleteAsync(ct);
@@ -246,7 +248,7 @@ public sealed class SyncService(
                 await tx.CommitAsync(ct);
 
                 var message = $"{company.Name}: {assets.Count(a => a.IsConnectable)} asset, {passwords.Count} credenziali, {ipam.Values.Sum(v => v.Count)} IP dall'IPAM"
-                              + (ipamError is null ? "" : " — " + ipamError);
+                              + string.Concat(new[] { ipamError, relationsError }.OfType<string>().Select(e => " — " + e));
                 await audit.WriteAsync(new AuditEntry("sync.company", requestedBy, CompanyName: company.Name, Details: message), cancellationToken: ct);
                 return new SyncResult(true, message);
             }
@@ -284,6 +286,38 @@ public sealed class SyncService(
             var previous = cached.ToDictionary(a => a.Id, a => a.IpamList().Select(ip => new HuduIpAddress(ip, null, null, a.Id, a.CompanyId)).ToList());
             return (previous, "IPAM non letto: " + ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Asset collegati alle password come "related" in Hudu. Se le relazioni non si leggono (es. chiave
+    /// API limitata a un cliente) restano quelle già in cache, come per l'IPAM.
+    /// </summary>
+    private async Task<string?> ApplyPasswordRelationsAsync(HuduClient hudu, List<CachedPassword> passwords, CancellationToken ct)
+    {
+        ILookup<int, int> related;
+        string? error = null;
+        try
+        {
+            related = (await hudu.GetPasswordRelationsAsync(ct)).ToLookup(r => r.PasswordId, r => r.AssetId);
+        }
+        catch (HuduException ex)
+        {
+            logger.LogWarning(ex, "Relazioni tra password e asset non lette da Hudu, restano quelle in cache");
+            var ids = passwords.Select(p => p.Id).ToList();
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            related = (await db.Passwords.AsNoTracking().Where(p => ids.Contains(p.Id) && p.RelatedAssets != null).ToListAsync(ct))
+                .SelectMany(p => p.RelatedAssetIds().Select(assetId => (p.Id, AssetId: assetId)))
+                .ToLookup(r => r.Id, r => r.AssetId);
+            error = "Password collegate (related) non lette: " + ex.Message;
+        }
+
+        foreach (var password in passwords)
+        {
+            var assets = related[password.Id].Distinct().Order().ToList();
+            password.RelatedAssets = assets.Count == 0 ? null : string.Join(',', assets.Select(a => a.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        return error;
     }
 
     /// <summary>Indirizzi di ogni asset, dal preferito: IPv4 prima di IPv6, poi quelli "assigned"/"active".</summary>
@@ -354,8 +388,13 @@ public sealed class SyncService(
         // tra più IP dell'IPAM.
         var ip = HostParser.ExtractHost(Field(config.IpFieldLabel));
         var ipamIps = (ipam ?? []).Select(a => HostParser.ExtractHost(a.Address)!).ToList();
-        var fqdn = (ipam ?? []).Select(a => a.Fqdn).FirstOrDefault(f => !string.IsNullOrWhiteSpace(f))?.Trim();
-        var hostname = Field(config.HostnameFieldLabel) ?? fqdn;
+        // FQDN dell'IPAM per ogni IP: diventa l'indirizzo delle pagine web dell'asset.
+        var fqdns = (ipam ?? [])
+            .Select(a => (Ip: HostParser.ExtractHost(a.Address), Fqdn: CleanFqdn(a.Fqdn)))
+            .Where(a => a.Ip is not null && a.Fqdn is not null)
+            .DistinctBy(a => a.Ip, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var hostname = Field(config.HostnameFieldLabel) ?? fqdns.Select(f => HostParser.ExtractHost(f.Fqdn)).FirstOrDefault(h => h is not null);
         var os = Field(config.OsFieldLabel);
         var console = Field(config.ConsoleFieldLabel);
         var rustDeskId = Field(config.RustDeskIdFieldLabel) is { } rd ? new string(rd.Where(char.IsLetterOrDigit).ToArray()) : null;
@@ -371,12 +410,33 @@ public sealed class SyncService(
             Hostname = hostname,
             PrimaryIp = ip,
             IpamAddresses = ipamIps.Count == 0 ? null : string.Join('\n', ipamIps),
+            IpamFqdns = fqdns.Count == 0 ? null : string.Join('\n', fqdns.Select(f => $"{f.Ip} {f.Fqdn}")),
             OperatingSystem = os,
             ConsoleAddress = console,
             RustDeskId = string.IsNullOrEmpty(rustDeskId) ? null : rustDeskId,
             IsConnectable = config.Enabled,
             SearchText = Normalize(string.Join(' ', new[] { asset.Name, hostname, ip, os, companyName }.Concat(ipamIps).Where(s => s is not null).Distinct())),
         };
+    }
+
+    /// <summary>
+    /// FQDN dell'IPAM accettato solo se è un nome host valido o un indirizzo http(s) completo senza
+    /// utente e password (es. "vcenter.cliente.local" o "https://vcenter.cliente.local/ui").
+    /// </summary>
+    internal static string? CleanFqdn(string? value)
+    {
+        var text = value?.Trim().Split([' ', '\t', '\n', '\r', ',', ';'], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        if (string.IsNullOrEmpty(text) || text.Length > Connections.WebUrls.MaxLength)
+        {
+            return null;
+        }
+
+        if (text.Contains("://", StringComparison.Ordinal))
+        {
+            return Connections.WebUrls.Parse(text).Url?.AbsoluteUri;
+        }
+
+        return HostParser.IsValidHost(text.TrimEnd('.')) ? text.TrimEnd('.').ToLowerInvariant() : null;
     }
 
     /// <summary>Minuscolo e senza accenti, per una ricerca tollerante.</summary>

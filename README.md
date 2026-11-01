@@ -52,7 +52,10 @@ Ogni connessione, e ogni credenziale consegnata, finisce nel registro accessi de
 - **Jump host automatico**: il gateway RustDesk si ricava da Hudu, dal cliente o dal dispositivo
   stesso; in alternativa connessione **diretta**. RustDesk è facoltativo: senza, il portale offre
   solo la connessione diretta (dalla rete del cliente o in VPN).
-- **Indirizzi dall'IPAM di Hudu**, con segnalazione degli asset senza IP o con più IP da scegliere.
+- **Indirizzi dall'IPAM di Hudu**, con segnalazione degli asset senza IP o con più IP da scegliere;
+  l'FQDN dell'IPAM diventa l'indirizzo delle pagine web.
+- **Credenziali solo da Hudu**: si sceglie tra le password assegnate all'asset o collegate come
+  *related*; i collegamenti si correggono in Hudu, non nel portale.
 - **Modifiche in blocco** su più asset (gateway, credenziale, protocollo, visibilità).
 - **Cache d'emergenza**: fino a N connessioni preparate in anticipo, tenute solo in memoria per un
   tempo limitato, utilizzabili anche senza internet.

@@ -56,8 +56,8 @@ server (se la licenza lo consente), rotazione periodica, alert sugli accessi API
   Ogni Launcher comunica versione e PC; gli amministratori vedono chi usa cosa e possono imporre una
   versione minima (i più vecchi ricevono 426 prima che il biglietto venga consumato).
 - **Pagine web nel Launcher**: aprendo la pagina il portale non invia password, solo nome e utente
-  delle credenziali proponibili (collegate all'asset, scelta per la connessione o con l'URL sullo
-  stesso host) e un'autorizzazione firmata per quella scheda (10 ore, legata a utente, asset,
+  delle credenziali proponibili (solo quelle collegate all'asset in Hudu, assegnate o *related*,
+  dello stesso cliente) e un'autorizzazione firmata per quella scheda (10 ore, legata a utente, asset,
   connessione e credenziali). Con "Accesso" il Launcher chiede la password della sola credenziale
   scelta: servono l'autorizzazione e un token 365 dello stesso utente ancora approvato (o, per gli
   admin locali, lo stesso indirizzo); opzione dell'asset e credenziali si ricontrollano in quel

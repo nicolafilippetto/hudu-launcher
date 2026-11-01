@@ -118,6 +118,8 @@ public sealed class CachedAsset
     public string? PrimaryIp { get; set; }
     /// <summary>IP dell'IPAM di Hudu collegati all'asset, uno per riga, dal preferito.</summary>
     public string? IpamAddresses { get; set; }
+    /// <summary>FQDN dell'IPAM per gli IP che lo hanno: una riga per IP, "ip fqdn".</summary>
+    public string? IpamFqdns { get; set; }
     public string? OperatingSystem { get; set; }
     public string? ConsoleAddress { get; set; }
     public string? RustDeskId { get; set; }
@@ -131,6 +133,16 @@ public sealed class CachedAsset
 
     public IReadOnlyList<string> IpamList() =>
         string.IsNullOrEmpty(IpamAddresses) ? [] : IpamAddresses.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>FQDN che l'IPAM di Hudu associa a questo IP, se c'è.</summary>
+    public string? FqdnFor(string? ip) =>
+        ip is null || string.IsNullOrEmpty(IpamFqdns)
+            ? null
+            : IpamFqdns.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Split(' ', 2))
+                .Where(parts => parts.Length == 2 && string.Equals(parts[0], ip, StringComparison.OrdinalIgnoreCase))
+                .Select(parts => parts[1])
+                .FirstOrDefault();
 }
 
 /// <summary>Metadati di una password Hudu. Il valore non viene mai salvato.</summary>
@@ -141,7 +153,24 @@ public sealed class CachedPassword
     public required string Name { get; set; }
     public string? Username { get; set; }
     public string? Url { get; set; }
+    /// <summary>Asset a cui la password è assegnata in Hudu (creata dentro l'asset).</summary>
     public int? AssetId { get; set; }
+    /// <summary>Asset collegati come "related" in Hudu, separati da virgola.</summary>
+    public string? RelatedAssets { get; set; }
+
+    public IReadOnlyList<int> RelatedAssetIds() =>
+        string.IsNullOrEmpty(RelatedAssets)
+            ? []
+            : [.. RelatedAssets.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => int.TryParse(s, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id) ? id : 0)
+                .Where(id => id > 0)];
+
+    /// <summary>
+    /// Password collegata all'asset in Hudu: assegnata o "related", e dello stesso cliente (una
+    /// relazione verso la password di un altro cliente non vale).
+    /// </summary>
+    public bool IsLinkedTo(CachedAsset asset) =>
+        CompanyId == asset.CompanyId && (AssetId == asset.Id || RelatedAssetIds().Contains(asset.Id));
 }
 
 /// <summary>Dispositivo della rubrica condivisa di RustDesk.</summary>

@@ -47,6 +47,22 @@ public sealed class SyncTests
         Assert.Equal("JUMP01", peers[0].Hostname);
     }
 
+    [Fact]
+    public async Task Related_passwords_are_read_from_hudu_relations()
+    {
+        using var factory = new ConsoleTokenFactory();
+        await factory.SeedAsync();
+        using var scope = factory.Services.CreateScope();
+
+        var result = await scope.ServiceProvider.GetRequiredService<SyncService>().RunAsync("test", TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.Message);
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var password = await db.Passwords.AsNoTracking().SingleAsync(p => p.Id == 601, TestContext.Current.CancellationToken);
+        Assert.Equal("20,21", password.RelatedAssets);
+        Assert.Null(password.AssetId);
+    }
+
     /// <summary>Come RustDesk Server Pro con un token della console: GET sì, POST no.</summary>
     private sealed class ConsoleTokenFactory : LauncherFactory
     {

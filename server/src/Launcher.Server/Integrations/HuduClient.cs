@@ -162,6 +162,41 @@ public sealed class HuduClient(IHttpClientFactory httpFactory, SettingsService s
         return result;
     }
 
+    /// <summary>
+    /// Password collegate agli asset come "related" (barra di destra di Hudu): coppie (password, asset).
+    /// L'endpoint non filtra per cliente, quindi si leggono le relazioni tra password e asset in
+    /// entrambe le direzioni e si controllano i tipi anche qui, nel caso i filtri venissero ignorati.
+    /// </summary>
+    public async Task<IReadOnlyList<(int PasswordId, int AssetId)>> GetPasswordRelationsAsync(CancellationToken ct)
+    {
+        var result = new HashSet<(int, int)>();
+        foreach (var (from, to) in new[] { ("AssetPassword", "Asset"), ("Asset", "AssetPassword") })
+        {
+            await foreach (var item in GetPagedAsync("relations", "relations", $"fromable_type={from}&toable_type={to}", ct))
+            {
+                var fromType = GetString(item, "fromable_type");
+                var toType = GetString(item, "toable_type");
+                var fromId = GetInt(item, "fromable_id");
+                var toId = GetInt(item, "toable_id");
+                if (fromId is not > 0 || toId is not > 0)
+                {
+                    continue;
+                }
+
+                if (string.Equals(fromType, "AssetPassword", StringComparison.Ordinal) && string.Equals(toType, "Asset", StringComparison.Ordinal))
+                {
+                    result.Add((fromId.Value, toId.Value));
+                }
+                else if (string.Equals(fromType, "Asset", StringComparison.Ordinal) && string.Equals(toType, "AssetPassword", StringComparison.Ordinal))
+                {
+                    result.Add((toId.Value, fromId.Value));
+                }
+            }
+        }
+
+        return [.. result];
+    }
+
     /// <summary>Indirizzi dell'IPAM (Hudu → IPAM) collegati a un asset; tutti o di un solo cliente.</summary>
     public async Task<IReadOnlyList<HuduIpAddress>> GetIpAddressesAsync(CancellationToken ct, int? companyId = null)
     {

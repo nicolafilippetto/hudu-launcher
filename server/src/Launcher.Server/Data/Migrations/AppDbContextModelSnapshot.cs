@@ -177,6 +177,9 @@ namespace Launcher.Server.Data.Migrations
                     b.Property<string>("IpamAddresses")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("IpamFqdns")
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("IsConnectable")
                         .HasColumnType("INTEGER");
 
@@ -267,6 +270,9 @@ namespace Launcher.Server.Data.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RelatedAssets")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Url")

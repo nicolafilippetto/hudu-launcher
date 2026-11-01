@@ -40,6 +40,8 @@ il portale a tutto il tenant.
 - **Password access: abilitato** (serve al momento della connessione)
 - Se disponibile, limitare la chiave all'IP pubblico in uscita del server Docker
 - Niente permessi di scrittura o cancellazione
+- **Non** limitarla a un solo cliente: l'elenco delle relazioni (password *related* degli asset) non
+  è disponibile alle chiavi limitate a un cliente
 
 Documentare l'esistenza della chiave (scopo, data, rotazione) **senza** il valore.
 
@@ -256,6 +258,12 @@ leggono più (vanno reinseriti dalla sezione admin).
    IP del layout; se ne ha più di uno, chiede di scegliere quello giusto (vale il campo IP del
    layout, se coincide con uno di questi). Dopo una modifica in Hudu, **Aggiorna da Hudu** nella
    pagina del cliente rilegge subito solo quel cliente (al massimo una volta al minuto).
+   Le **credenziali** si scelgono solo tra le password collegate all'asset in Hudu: quella
+   assegnata (creata dentro l'asset, ★) o quelle *related* nella barra di destra (↔), anche se
+   condivise con altri asset. Con una sola password collegata, o una sola assegnata, si usa da
+   sola; una scelta fatta prima e non più collegata viene segnalata ("va collegata in Hudu") e
+   non si usa. Le **pagine web** senza URL scritto nel portale usano l'**FQDN** che l'IPAM
+   associa all'IP (es. `vcenter.cliente.local` o `https://vcenter.cliente.local/ui`).
 6. **Accessi di emergenza**: crearne almeno un secondo (password robusta + app di autenticazione).
 7. Entrare con **Accedi con Microsoft 365**: la richiesta finisce in attesa. Con l'accesso di
    emergenza approvarla in **Utenti → Come admin**; da quel momento l'accesso locale serve solo per

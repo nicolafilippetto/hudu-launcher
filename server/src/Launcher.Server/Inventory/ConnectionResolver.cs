@@ -53,6 +53,7 @@ public sealed class ResolutionContext
     public required ILookup<int, ExtraConnection> Extras { get; init; }
     public required IReadOnlyDictionary<int, CompanySetting> CompanySettings { get; init; }
     public required IReadOnlyDictionary<int, CachedPassword> Passwords { get; init; }
+    /// <summary>Password collegate in Hudu a ogni asset (assegnate o related): vedi <see cref="ConnectionResolver.IndexPasswordsByAsset"/>.</summary>
     public required ILookup<int, CachedPassword> PasswordsByAsset { get; init; }
     public required IReadOnlyDictionary<string, CachedPeer> Peers { get; init; }
     public required IReadOnlyDictionary<string, CachedPeer> PeersByName { get; init; }
@@ -180,9 +181,27 @@ public static class ConnectionResolver
         }
 
         var port = setting?.Port ?? DefaultPort(protocol);
+        var ipHost = host;
+        // Le connessioni aggiuntive senza indirizzo usano quello della principale (l'URL scritto nel
+        // portale, se c'è), non l'FQDN delle pagine web.
+        var extrasHost = webUrl?.Host.Trim('[', ']') ?? host;
         if (webUrl is not null)
         {
             (protocol, host, port, hostIssue) = (WebProtocol(webUrl), webUrl.Host.Trim('[', ']'), webUrl.Port, null);
+        }
+        else if (IsWebProtocol(protocol) && FqdnUrl(asset, host) is { } fqdn)
+        {
+            // Pagina web senza URL scritto nel portale: vale l'FQDN che l'IPAM di Hudu associa all'IP
+            // (risolto dal jump host). Se in Hudu c'è un indirizzo completo, decide anche schema e porta.
+            if (fqdn.Url is { } fqdnUrl)
+            {
+                webUrl = fqdnUrl;
+                (protocol, host, port) = (WebProtocol(fqdnUrl), fqdnUrl.Host.Trim('[', ']'), fqdnUrl.Port);
+            }
+            else
+            {
+                host = fqdn.Host;
+            }
         }
 
         var (passwordId, passwordIssue) = ResolvePassword(setting?.PasswordId, asset, ctx);
@@ -204,7 +223,18 @@ public static class ConnectionResolver
         foreach (var extra in ctx.Extras[asset.Id].OrderBy(e => e.Label, StringComparer.OrdinalIgnoreCase))
         {
             var extraUrl = Connections.WebUrls.Parse(extra.Url).Url;
-            var extraHost = extraUrl?.Host.Trim('[', ']') ?? extra.Host ?? host;
+            var extraHost = extraUrl?.Host.Trim('[', ']') ?? extra.Host ?? extrasHost;
+            if (extraUrl is null && extra.Host is null && IsWebProtocol(extra.Protocol) && FqdnUrl(asset, ipHost) is { } extraFqdn)
+            {
+                // Pagina web sullo stesso indirizzo dell'asset: anche qui l'FQDN dell'IPAM.
+                if (extraFqdn.Url is { } extraFqdnUrl && (extra.Port is null || extra.Port == extraFqdnUrl.Port))
+                {
+                    extraUrl = extraFqdnUrl;
+                }
+
+                extraHost = extraFqdn.Url?.Host.Trim('[', ']') ?? extraFqdn.Host;
+            }
+
             var (extraGateway, extraSource) = !ctx.RustDeskEnabled ? (null, null) : extra.GatewayPeerId is not null
                 ? (extra.GatewayPeerId, "manuale")
                 : extra.Host is null ? (gateway, gatewaySource) : (companyGateway ?? gateway, companyGateway is not null ? companyGatewaySource : gatewaySource);
@@ -219,6 +249,24 @@ public static class ConnectionResolver
         }
 
         return new ResolvedAsset(asset, companyName, setting, connections, ctx.Favorites.Contains(asset.Id));
+    }
+
+    private static bool IsWebProtocol(ConnectionProtocol protocol) => protocol is ConnectionProtocol.Http or ConnectionProtocol.Https;
+
+    /// <summary>FQDN dell'IPAM per l'IP della connessione: un indirizzo completo (Url) o solo il nome host.</summary>
+    private static (Uri? Url, string Host)? FqdnUrl(CachedAsset asset, string? ip)
+    {
+        if (asset.FqdnFor(ip) is not { } fqdn)
+        {
+            return null;
+        }
+
+        if (fqdn.Contains("://", StringComparison.Ordinal))
+        {
+            return Connections.WebUrls.Parse(fqdn).Url is { } url ? (url, url.Host.Trim('[', ']')) : null;
+        }
+
+        return HostParser.IsValidHost(fqdn) ? (null, fqdn) : null;
     }
 
     private static ConnectionProtocol WebProtocol(Uri url) => url.Scheme == Uri.UriSchemeHttp ? ConnectionProtocol.Http : ConnectionProtocol.Https;
@@ -293,21 +341,43 @@ public static class ConnectionResolver
         };
     }
 
+    /// <summary>Indice asset → password collegate in Hudu (assegnate o related).</summary>
+    public static ILookup<int, CachedPassword> IndexPasswordsByAsset(IEnumerable<CachedPassword> passwords) =>
+        passwords
+            .SelectMany(p => (p.AssetId is { } assigned ? [assigned] : Array.Empty<int>()).Concat(p.RelatedAssetIds()).Distinct()
+                .Select(assetId => (AssetId: assetId, Password: p)))
+            .ToLookup(x => x.AssetId, x => x.Password);
+
+    /// <summary>Password collegate all'asset in Hudu, prima quelle assegnate, poi le related, per nome.</summary>
+    public static IReadOnlyList<CachedPassword> LinkedPasswords(CachedAsset asset, ILookup<int, CachedPassword> passwordsByAsset) =>
+        passwordsByAsset[asset.Id]
+            .Where(p => p.IsLinkedTo(asset))
+            .OrderBy(p => p.AssetId == asset.Id ? 0 : 1)
+            .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    /// <summary>
+    /// Credenziale della connessione: solo tra quelle collegate all'asset in Hudu (assegnate o related),
+    /// così i collegamenti si sistemano in Hudu e non nel portale. Senza scelta: l'unica collegata,
+    /// oppure l'unica assegnata se ci sono anche delle related.
+    /// </summary>
     private static (int? Id, string? Issue) ResolvePassword(int? chosen, CachedAsset asset, ResolutionContext ctx)
     {
+        var linked = LinkedPasswords(asset, ctx.PasswordsByAsset);
         if (chosen is { } id)
         {
-            return ctx.Passwords.TryGetValue(id, out var password) && password.CompanyId == asset.CompanyId
-                ? (id, null)
+            return linked.Any(p => p.Id == id) ? (id, null)
+                : ctx.Passwords.ContainsKey(id) ? (null, "Credenziale scelta non collegata all'asset in Hudu: va collegata in Hudu")
                 : (null, "Credenziale scelta non più presente in Hudu");
         }
 
-        var linked = ctx.PasswordsByAsset[asset.Id].ToList();
+        var assigned = linked.Where(p => p.AssetId == asset.Id).ToList();
         return linked.Count switch
         {
             0 => (null, null),
             1 => (linked[0].Id, null),
-            _ => (null, $"{linked.Count} credenziali collegate: sceglierne una"),
+            _ when assigned.Count == 1 => (assigned[0].Id, null),
+            _ => (null, $"{linked.Count} credenziali collegate in Hudu: sceglierne una"),
         };
     }
 

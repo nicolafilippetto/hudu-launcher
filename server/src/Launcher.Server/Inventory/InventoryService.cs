@@ -117,6 +117,10 @@ public sealed class InventoryService(AppDbContext db, Settings.SettingsService s
     public async Task<IReadOnlyList<CachedPassword>> GetCompanyPasswordsAsync(int companyId, CancellationToken ct) =>
         await db.Passwords.AsNoTracking().Where(p => p.CompanyId == companyId).OrderBy(p => p.Name).ToListAsync(ct);
 
+    /// <summary>Password collegate all'asset in Hudu (assegnate o related): le sole che si possono scegliere.</summary>
+    public async Task<IReadOnlyList<CachedPassword>> GetLinkedPasswordsAsync(CachedAsset asset, CancellationToken ct) =>
+        ConnectionResolver.LinkedPasswords(asset, ConnectionResolver.IndexPasswordsByAsset(await GetCompanyPasswordsAsync(asset.CompanyId, ct)));
+
     public async Task<IReadOnlyList<CachedPeer>> GetPeersAsync(CancellationToken ct) =>
         await db.Peers.AsNoTracking().OrderBy(p => p.Alias ?? p.Hostname ?? p.Id).ToListAsync(ct);
 
@@ -158,7 +162,7 @@ public sealed class InventoryService(AppDbContext db, Settings.SettingsService s
             Extras = extras,
             CompanySettings = companySettings,
             Passwords = passwords.ToDictionary(p => p.Id),
-            PasswordsByAsset = passwords.Where(p => p.AssetId is not null).ToLookup(p => p.AssetId!.Value),
+            PasswordsByAsset = ConnectionResolver.IndexPasswordsByAsset(passwords),
             Peers = peers.ToDictionary(p => p.Id, StringComparer.Ordinal),
             PeersByName = ConnectionResolver.IndexPeersByName(peers),
             HuduCompanyGateways = huduGateways,
