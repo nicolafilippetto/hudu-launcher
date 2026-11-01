@@ -218,11 +218,12 @@ public partial class MainWindow : Window
             if (Tabs.Items.Count == 0)
             {
                 SetStatus("Installazione dell'aggiornamento: il Launcher si riapre da solo tra pochi secondi…");
-                _workflow.Shutdown();
                 if (_updater.PrepareRestart())
                 {
                     // Chiusura normale: l'updater attende l'uscita, installa e riapre il Launcher.
                     _closingConfirmed = true;
+                    Hide();
+                    await ShutdownAsync([]);
                     Application.Current.Shutdown();
                 }
 
@@ -422,33 +423,52 @@ public partial class MainWindow : Window
         }
 
         var open = Tabs.Items.OfType<SessionTab>().ToList();
-        if (open.Count == 0)
+        if (open.Count > 0)
         {
-            // Nessuna sessione: si chiude subito, senza annullare la chiusura.
-            _closingConfirmed = true;
-            _workflow.Shutdown();
-            _updater.ApplyOnExit();
-            return;
+            var question = open.Count == 1 ? "Chiudere la connessione aperta?" : $"Chiudere le {open.Count} connessioni aperte?";
+            if (!Dialogs.Confirm(this, question, "Le sessioni e i tunnel verranno chiusi.", "Chiudi tutto"))
+            {
+                e.Cancel = true;
+                return;
+            }
         }
 
-        var question = open.Count == 1 ? "Chiudere la connessione aperta?" : $"Chiudere le {open.Count} connessioni aperte?";
-        if (!Dialogs.Confirm(this, question, "Le sessioni e i tunnel verranno chiusi.", "Chiudi tutto"))
-        {
-            e.Cancel = true;
-            return;
-        }
-
-        // Si chiudono le sessioni (e i tunnel) e poi la finestra, fuori dall'evento di chiusura.
+        // La finestra sparisce subito; sessioni, tunnel e aggiornamento si chiudono dopo, senza
+        // bloccarla (prima restava visibile e "Non risponde" durante la chiusura).
         e.Cancel = true;
         _closingConfirmed = true;
+        Hide();
+        await ShutdownAsync(open);
+        Application.Current.Shutdown();
+    }
+
+    /// <summary>Chiude sessioni e tunnel e avvia l'aggiornamento scaricato, con i tempi nel registro.</summary>
+    private async Task ShutdownAsync(IReadOnlyList<SessionTab> open)
+    {
+        var watch = Stopwatch.StartNew();
         foreach (var tab in open)
         {
             Tabs.Items.Remove(tab);
             await tab.DisposeAsync();
         }
 
-        _workflow.Shutdown();
-        _updater.ApplyOnExit();
-        _ = Dispatcher.BeginInvoke(Close);
+        var sessions = watch.ElapsedMilliseconds;
+        var cleanup = Task.Run(() =>
+        {
+            _workflow.Shutdown();
+            var tunnels = watch.ElapsedMilliseconds;
+            _updater.ApplyOnExit();
+            Log.Info($"Chiusura: sessioni {sessions} ms, tunnel {tunnels - sessions} ms, aggiornamento {watch.ElapsedMilliseconds - tunnels} ms");
+        });
+
+        // Oltre 10 secondi non si aspetta più: l'app si chiude comunque (l'updater attende l'uscita).
+        if (await Task.WhenAny(cleanup, Task.Delay(TimeSpan.FromSeconds(10))) != cleanup)
+        {
+            Log.Warn($"Chiusura lenta: dopo {watch.ElapsedMilliseconds} ms tunnel o aggiornamento non hanno finito");
+        }
+        else if (cleanup.Exception is { } ex)
+        {
+            Log.Error("Chiusura: errore durante la pulizia", ex.GetBaseException());
+        }
     }
 }

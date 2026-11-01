@@ -50,6 +50,9 @@ public sealed class SettingsModel(SettingsService settings, AuditService audit, 
             return Error($"Fuso orario sconosciuto: {zone}", "portal");
         }
 
+        // La conservazione del registro si può ridurre solo fino a 30 giorni, e il cambio resta nel registro.
+        var retention = Math.Clamp(auditRetentionDays, 30, 3650);
+        var previousRetention = settings.Portal.AuditRetentionDays;
         await SaveAsync(new Dictionary<string, string?>
         {
             [SettingKeys.PortalName] = string.IsNullOrWhiteSpace(name) ? null : name.Trim()[..Math.Min(name.Trim().Length, 60)],
@@ -60,8 +63,8 @@ public sealed class SettingsModel(SettingsService settings, AuditService audit, 
             [SettingKeys.SessionHours] = Math.Clamp(sessionHours, 1, 24).ToString(System.Globalization.CultureInfo.InvariantCulture),
             [SettingKeys.TicketSeconds] = Math.Clamp(ticketSeconds, 10, 120).ToString(System.Globalization.CultureInfo.InvariantCulture),
             [SettingKeys.TimeZone] = zone,
-            [SettingKeys.AuditRetentionDays] = Math.Clamp(auditRetentionDays, 30, 3650).ToString(System.Globalization.CultureInfo.InvariantCulture),
-        }, "Portale");
+            [SettingKeys.AuditRetentionDays] = retention.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        }, "Portale", retention == previousRetention ? null : $"conservazione del registro da {previousRetention} a {retention} giorni");
         return RedirectToPage(null, null, "portal");
     }
 
@@ -361,10 +364,10 @@ public sealed class SettingsModel(SettingsService settings, AuditService audit, 
         }
     }
 
-    private async Task SaveAsync(Dictionary<string, string?> values, string section)
+    private async Task SaveAsync(Dictionary<string, string?> values, string section, string? change = null)
     {
         await settings.SaveAsync(values, Email);
-        await audit.WriteAsync(new AuditEntry("settings.update", Email, Details: section), HttpContext);
+        await audit.WriteAsync(new AuditEntry("settings.update", Email, Details: change is null ? section : $"{section}: {change}"), HttpContext);
         Flash = $"Impostazioni \"{section}\" salvate.";
     }
 
