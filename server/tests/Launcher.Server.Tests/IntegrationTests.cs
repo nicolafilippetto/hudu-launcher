@@ -964,7 +964,7 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
         var approved = await LoginAsync("oid-nuovo", "nuovo.tecnico@example.com");
         Assert.Null(approved.Result);
         Assert.Equal("oid-nuovo", approved.Principal!.FindFirstValue(LauncherClaims.ObjectId));
-        Assert.False(approved.Principal.IsAdmin());
+        Assert.False(approved.Principal!.IsAdmin());
 
         // Bloccato: resta fuori.
         user.Status = PortalUserStatus.Blocked;
@@ -1091,7 +1091,7 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
             {
                 [SettingKeys.EntraCertificate] = entra.NextCertificate,
                 [SettingKeys.EntraCertificateKey] = entra.NextCertificateKey,
-            }, "test");
+            }, "test", TestContext.Current.CancellationToken);
             var events = new EntraOidcEvents(scope.ServiceProvider.GetRequiredService<PortalPrincipalFactory>(), settings, scope.ServiceProvider.GetRequiredService<Audit.AuditService>());
             var request = new OpenIdConnectMessage { ClientSecret = "segreto" };
             var context = new Microsoft.AspNetCore.Authentication.OpenIdConnect.AuthorizationCodeReceivedContext(
@@ -1110,7 +1110,7 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
                 [SettingKeys.EntraCertificateKey] = null,
                 [SettingKeys.EntraCertificateNext] = null,
                 [SettingKeys.EntraCertificateNextKey] = null,
-            }, "test");
+            }, "test", TestContext.Current.CancellationToken);
         }
     }
 

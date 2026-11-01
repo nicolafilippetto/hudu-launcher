@@ -501,7 +501,7 @@ public sealed class IpamTests
 public sealed class EntraCredentialTests
 {
     [Fact]
-    public void Assertion_is_signed_with_the_certificate_as_entra_expects()
+    public async Task Assertion_is_signed_with_the_certificate_as_entra_expects()
     {
         var (certificate, key) = EntraCredential.Generate("Hudu Launcher (test)", TimeProvider.System);
         var info = EntraCredential.Describe(certificate)!;
@@ -522,12 +522,12 @@ public sealed class EntraCredentialTests
 
         // La firma si verifica con la sola parte pubblica, quella caricata in Entra.
         using var publicCertificate = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadCertificate(info.RawData);
-        var result = new Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler().ValidateTokenAsync(assertion, new Microsoft.IdentityModel.Tokens.TokenValidationParameters
+        var result = await new Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler().ValidateTokenAsync(assertion, new Microsoft.IdentityModel.Tokens.TokenValidationParameters
         {
             ValidIssuer = client,
             ValidAudience = $"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
             IssuerSigningKey = new Microsoft.IdentityModel.Tokens.X509SecurityKey(publicCertificate),
-        }).GetAwaiter().GetResult();
+        });
         Assert.True(result.IsValid, result.Exception?.Message);
     }
 }
