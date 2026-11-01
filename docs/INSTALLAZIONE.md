@@ -87,8 +87,9 @@ docker compose up -d
 docker compose logs launcher | grep CONFIGURAZIONE   # token per la configurazione iniziale
 ```
 
-L'immagine è pubblicata dalla pipeline GitHub (`latest` per il branch principale, tag con nome del
-branch e commit). Il pacchetto è pubblico: non serve `docker login`.
+L'immagine è pubblicata dalla pipeline GitHub a ogni release (tag `vX.Y.Z`): `latest` è sempre
+l'ultima release, oppure si fissa una versione (`1.4.2`) o una serie (`1.4`). Il pacchetto è
+pubblico: non serve `docker login`.
 
 Il container gira **non root**, con filesystem in sola lettura, nessuna capability e senza shell.
 I dati stanno nel volume `launcher-data` (database SQLite e chiavi cifrate).
