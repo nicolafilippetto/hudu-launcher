@@ -532,7 +532,10 @@ form.inline { display: inline-flex; margin: 0; }
 
 /* --- Pagine di accesso -------------------------------------------------- */
 
-.auth-body { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(1200px 600px at 20% -10%, var(--primary-soft), transparent), var(--bg); }
+.auth-body { min-height: 100vh; background: radial-gradient(1200px 600px at 20% -10%, var(--primary-soft), transparent), var(--bg); }
+/* La centratura è in un contenitore proprio: gli elementi che le estensioni del browser aggiungono
+   alla pagina non diventano righe della griglia e non spostano la scheda. */
+.auth-page { min-height: 100vh; box-sizing: border-box; display: grid; place-items: center; padding: 24px; }
 .auth-card { width: min(420px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; box-shadow: var(--shadow-lg); }
 .auth-brand { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 22px; text-align: center; }
 .auth-brand h1 { font-size: 20px; }

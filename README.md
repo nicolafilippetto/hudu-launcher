@@ -58,7 +58,7 @@ Ogni connessione, e ogni credenziale consegnata, finisce nel registro accessi de
   tempo limitato, utilizzabili anche senza internet.
 - **Accesso con Microsoft 365** (Entra ID) con approvazione dei nuovi utenti nel portale, credenziale
   dell'app con certificato e accessi di emergenza locali con MFA.
-- **Launcher distribuito dal portale**: installer e MSI per Intune inclusi nell'immagine Docker,
+- **Launcher distribuito dal portale**: MSI per utente (anche per Intune) incluso nell'immagine Docker,
   aggiornamenti automatici firmati, versione e ultimo uso per utente, versione minima obbligatoria.
 - Tema chiaro e scuro, interfaccia in italiano.
 
@@ -93,8 +93,9 @@ I dettagli sono in [`docs/SICUREZZA.md`](docs/SICUREZZA.md).
 
 - **Portale**: immagine `ghcr.io/nicolafilippetto/hudu-launcher/launcher-server` (`latest` o una
   versione, es. `1.1.0`) con [`server/docker-compose.yml`](server/docker-compose.yml).
-- **Launcher**: dal menu **Launcher** del portale (installer o MSI per Intune), poi si aggiorna da
-  solo dal portale. Gli stessi file sono nelle [Release](../../releases/latest), con `SHA256SUMS.txt`.
+- **Launcher**: dal menu **Launcher** del portale (MSI per utente, anche per Intune), poi si
+  aggiorna da solo dal portale. Gli stessi file sono nelle [Release](../../releases/latest), con
+  `SHA256SUMS.txt`.
 
 Installer e immagine hanno un'attestazione firmata di GitHub che prova da quale pipeline e da quale
 commit provengono:

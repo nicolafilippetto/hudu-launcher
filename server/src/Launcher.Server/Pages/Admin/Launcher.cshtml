@@ -37,8 +37,7 @@
         <div class="hudu-facts">
             <div><span>Versione</span><strong>@bundle.Version</strong></div>
             <div><span>Aggiornamenti firmati</span><strong>@(bundle.Signed ? "Sì" : "No")</strong></div>
-            <div><span>Installer</span><strong>@(bundle.Setup is { } s ? Format.Size(s.Size) : "—")</strong></div>
-            <div><span>MSI per Intune</span><strong>@(bundle.Msi is { } m ? Format.Size(m.Size) : "—")</strong></div>
+            <div><span>Installer (MSI)</span><strong>@(bundle.Download is { } d ? Format.Size(d.Size) : "—")</strong></div>
         </div>
         @if (!bundle.Signed)
         {
@@ -48,19 +47,15 @@
             </div>
         }
         <div class="download-row">
-            @if (bundle.Setup is { } setup)
+            @if (bundle.Download is { } file)
             {
-                <a class="btn btn-secondary" href="/launcher/@setup.Name" download><svg><use href="#i-download" /></svg>Installer (@setup.Name)</a>
-            }
-            @if (bundle.Msi is { } msi)
-            {
-                <a class="btn btn-secondary" href="/launcher/@msi.Name" download><svg><use href="#i-download" /></svg>MSI per Intune (@msi.Name)</a>
+                <a class="btn btn-secondary" href="/launcher/@file.Name" download><svg><use href="#i-download" /></svg>@file.Name</a>
             }
         </div>
         <p class="muted small">
-            Installer e MSI installano lo stesso Launcher, per utente, in <span class="mono">%LocalAppData%\HuduLauncher</span>: l'MSI
-            è per Intune (app line-of-business, contesto utente). Gli aggiornamenti successivi li fa il Launcher dal portale, non serve
-            ridistribuire l'MSI.
+            Un solo installer, l'MSI: installa il Launcher per utente in <span class="mono">%LocalAppData%\HuduLauncher</span>, senza
+            diritti di amministratore, con un doppio clic o da Intune (app line-of-business, contesto utente). Gli aggiornamenti successivi
+            li fa il Launcher dal portale, non serve ridistribuire l'MSI.
         </p>
     }
 </section>

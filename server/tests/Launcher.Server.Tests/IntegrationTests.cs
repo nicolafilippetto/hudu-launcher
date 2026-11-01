@@ -52,6 +52,7 @@ public class LauncherFactory : WebApplicationFactory<Program>
             """{"Assets":[{"PackageId":"HuduLauncher","Version":"1.4.0","Type":"Full","FileName":"HuduLauncher-1.4.0-full.nupkg","SHA1":"x","SHA256":"y","Size":3}]}""");
         File.WriteAllBytes(Path.Combine(ReleasesDir, "releases.win.json.sig"), [1, 2, 3]);
         File.WriteAllBytes(Path.Combine(ReleasesDir, "HuduLauncher-win-Setup.exe"), [77, 90, 0]);
+        File.WriteAllBytes(Path.Combine(ReleasesDir, "HuduLauncher-win.msi"), [208, 207, 17]);
         File.WriteAllBytes(Path.Combine(ReleasesDir, "HuduLauncher-1.4.0-full.nupkg"), [80, 75, 3]);
         Environment.SetEnvironmentVariable("Launcher__ReleasesDirectory", ReleasesDir);
     }
@@ -821,6 +822,9 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
         Assert.Equal(HttpStatusCode.OK, page.StatusCode);
         var html = await page.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Contains("1.4.0", html, StringComparison.Ordinal);
+        // Un solo installer da scaricare: l'MSI per utente.
+        Assert.Contains("/launcher/HuduLauncher-win.msi", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("/launcher/HuduLauncher-win-Setup.exe", html, StringComparison.Ordinal);
         var token = TokenRegex().Match(html).Groups[1].Value;
 
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri("/Admin/Launcher?handler=Minimum", UriKind.Relative))

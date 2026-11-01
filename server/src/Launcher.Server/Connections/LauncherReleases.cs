@@ -9,7 +9,11 @@ namespace Launcher.Server.Connections;
 public sealed record LauncherFile(string Name, long Size);
 
 /// <summary>Launcher incluso nell'immagine: versione, installer, MSI per Intune e feed firmato.</summary>
-public sealed record LauncherBundle(string Version, LauncherFile? Setup, LauncherFile? Msi, bool Signed);
+public sealed record LauncherBundle(string Version, LauncherFile? Setup, LauncherFile? Msi, bool Signed)
+{
+    /// <summary>Il file da scaricare: l'MSI (per utente, anche con doppio clic); l'installer exe solo se l'MSI manca.</summary>
+    public LauncherFile? Download => Msi ?? Setup;
+}
 
 /// <summary>
 /// Il Launcher per Windows è dentro l'immagine Docker (cartella <c>launcher</c> accanto al portale),

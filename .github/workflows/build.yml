@@ -196,6 +196,10 @@ jobs:
           name: HuduLauncher-${{ needs.launcher.outputs.version }}
           path: server/launcher-release
 
+      # Nel portale si distribuisce un solo installer, l'MSI per utente: l'exe resta solo nelle Release.
+      - name: Solo MSI nell'immagine
+        run: rm -f server/launcher-release/*-Setup.exe
+
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - if: env.PUBLISH == 'true'

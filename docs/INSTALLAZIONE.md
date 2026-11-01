@@ -274,7 +274,9 @@ mette gli stessi file anche nelle **Release** del repository, con `SHA256SUMS.tx
 
 Aggiornando il container si aggiorna anche il Launcher distribuito:
 
-- **Download**: menu **Launcher** in alto nel portale (l'MSI è visibile agli amministratori).
+- **Download**: menu **Launcher** in alto nel portale. Un solo installer, l'**MSI per utente**: si
+  installa con un doppio clic, senza diritti di amministratore, o con Intune. L'installer `.exe`
+  equivalente resta solo nelle Release di GitHub.
 - **Aggiornamenti**: all'apertura il Launcher controlla il portale e propone la nuova versione; se
   ci sono connessioni aperte la installa alla chiusura. Niente diritti di amministratore.
 - **Controllo**: **Amministrazione → Launcher** mostra per ogni utente versione, PC e ultimo uso

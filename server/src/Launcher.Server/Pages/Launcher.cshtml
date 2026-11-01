@@ -23,18 +23,14 @@
         {
             <h2 class="card-title"><svg><use href="#i-download" /></svg>Versione @bundle.Version</h2>
             <p class="muted">
-                Installazione per utente, senza diritti di amministratore, in pochi secondi. Dopo l'installazione i pulsanti di connessione
+                Un doppio clic sul file scaricato: installazione per utente, senza diritti di amministratore, in pochi secondi. Dopo l'installazione i pulsanti di connessione
                 del portale aprono il Launcher. Le versioni nuove arrivano da sole: all'apertura il Launcher controlla il portale e propone
                 l'aggiornamento@(bundle.Signed ? ", accettandolo solo se firmato dalla pipeline del progetto" : "").
             </p>
             <div class="download-row">
-                @if (bundle.Setup is { } setup)
+                @if (bundle.Download is { } file)
                 {
-                    <a class="btn btn-primary" href="/launcher/@setup.Name" download><svg><use href="#i-download" /></svg>Scarica il Launcher (@Format.Size(setup.Size))</a>
-                }
-                @if (User.IsAdmin() && bundle.Msi is { } msi)
-                {
-                    <a class="btn btn-secondary" href="/launcher/@msi.Name" download title="Pacchetto per Intune o altri strumenti di distribuzione">MSI per Intune (@Format.Size(msi.Size))</a>
+                    <a class="btn btn-primary" href="/launcher/@file.Name" download><svg><use href="#i-download" /></svg>Scarica il Launcher (@Format.Size(file.Size))</a>
                 }
             </div>
         }

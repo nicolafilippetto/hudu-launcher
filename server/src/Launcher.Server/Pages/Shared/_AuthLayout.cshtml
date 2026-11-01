@@ -13,6 +13,7 @@
 </head>
 <body class="auth-body">
     <partial name="_Icons" />
+    <div class="auth-page">
     <main class="auth-card">
         <div class="auth-brand">
             @if (Info.HasLogo)
@@ -27,6 +28,7 @@
         </div>
         @RenderBody()
     </main>
+    </div>
     <button type="button" class="btn btn-ghost btn-icon auth-theme" data-theme-toggle title="Tema">
         <svg class="theme-light"><use href="#i-sun" /></svg>
         <svg class="theme-dark"><use href="#i-moon" /></svg>
