@@ -39,9 +39,13 @@ public sealed class LauncherModel(AppDbContext db, LauncherReleases releases, Se
             .ToList();
     }
 
-    public async Task<IActionResult> OnPostMinimumAsync(string? version, CancellationToken ct)
+    /// <param name="version">Versione scritta nel campo (pulsante Salva).</param>
+    /// <param name="preset">Pulsanti rapidi: la versione inclusa oppure "none". Hanno un nome diverso dal campo,
+    /// che altrimenti, vuoto, verrebbe letto al posto del pulsante.</param>
+    public async Task<IActionResult> OnPostMinimumAsync(string? version, string? preset, CancellationToken ct)
     {
-        var value = string.IsNullOrWhiteSpace(version) ? null : version.Trim();
+        var chosen = preset is null ? version : preset == "none" ? null : preset;
+        var value = string.IsNullOrWhiteSpace(chosen) ? null : chosen.Trim();
         if (value is not null && !LauncherVersion.IsValid(value))
         {
             FlashError = "Versione non valida: usa il formato 1.4.0.";

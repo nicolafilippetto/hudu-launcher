@@ -331,10 +331,14 @@ L'installazione è **per utente**, in `%LocalAppData%\HuduLauncher`, senza dirit
 amministrativi. L'app registra da sola il protocollo `hudulauncher://` per l'utente.
 
 **Con l'MSI (consigliato).** Scaricare l'MSI da **Amministrazione → Launcher** (o dalle Release)
-e caricarlo in **App → Windows → Aggiungi → App line-of-business**, assegnato ai PC o al gruppo
-dei tecnici. L'MSI installa sul PC un programma di distribuzione che installa il Launcher per
-ogni utente al suo accesso (comportamento di Velopack: provarlo prima su un PC di test). Le
-versioni successive arrivano dal portale: l'MSI non va ripubblicato a ogni rilascio.
+e caricarlo in **App → Windows → Aggiungi → App line-of-business**, assegnato al gruppo dei
+tecnici. L'MSI è **per utente**, come l'installer: installa lo stesso Launcher nella stessa
+cartella (`%LocalAppData%\HuduLauncher`), quindi exe e MSI non creano installazioni separate.
+Intune lo installa nel contesto dell'utente. Le versioni successive arrivano dal portale: l'MSI
+non va ripubblicato a ogni rilascio.
+
+Se su un PC sono rimaste installazioni fatte con l'MSI della 1.4.1 (che andava in Program Files),
+disinstallarle una volta da *Impostazioni → App*: impostazioni e dati del Launcher restano.
 
 **Con l'installer come app Win32**, in alternativa:
 

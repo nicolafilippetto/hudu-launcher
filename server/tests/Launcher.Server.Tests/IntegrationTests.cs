@@ -828,8 +828,37 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
             Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["version"] = "2.0.0", ["__RequestVerificationToken"] = token }),
         };
         await admin.SendAsync(request, TestContext.Current.CancellationToken);
-        using var scope = factory.Services.CreateScope();
-        Assert.Null(scope.ServiceProvider.GetRequiredService<SettingsService>().LauncherMinVersion);
+        using (var scope = factory.Services.CreateScope())
+        {
+            Assert.Null(scope.ServiceProvider.GetRequiredService<SettingsService>().LauncherMinVersion);
+        }
+
+        // Pulsante rapido "Richiedi la 1.4.0" con il campo vuoto accanto: vale il pulsante.
+        async Task PostAsync(Dictionary<string, string> form)
+        {
+            form["__RequestVerificationToken"] = token;
+            using var post = new HttpRequestMessage(HttpMethod.Post, new Uri("/Admin/Launcher?handler=Minimum", UriKind.Relative)) { Content = new FormUrlEncodedContent(form) };
+            await admin.SendAsync(post, TestContext.Current.CancellationToken);
+        }
+
+        try
+        {
+            await PostAsync(new() { ["version"] = "", ["preset"] = "1.4.0" });
+            using (var scope = factory.Services.CreateScope())
+            {
+                Assert.Equal("1.4.0", scope.ServiceProvider.GetRequiredService<SettingsService>().LauncherMinVersion);
+            }
+
+            await PostAsync(new() { ["version"] = "1.4.0", ["preset"] = "none" });
+            using (var scope = factory.Services.CreateScope())
+            {
+                Assert.Null(scope.ServiceProvider.GetRequiredService<SettingsService>().LauncherMinVersion);
+            }
+        }
+        finally
+        {
+            await SetSettingAsync(SettingKeys.LauncherMinVersion, "");
+        }
     }
 
     [Theory]

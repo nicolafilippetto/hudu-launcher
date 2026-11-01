@@ -58,8 +58,9 @@
             }
         </div>
         <p class="muted small">
-            L'MSI installa il Launcher sul PC per tutti gli utenti (ognuno lo ritrova al proprio accesso): adatto a Intune come app
-            line-of-business. Gli aggiornamenti successivi li fa il Launcher dal portale, non serve ridistribuire l'MSI.
+            Installer e MSI installano lo stesso Launcher, per utente, in <span class="mono">%LocalAppData%\HuduLauncher</span>: l'MSI
+            è per Intune (app line-of-business, contesto utente). Gli aggiornamenti successivi li fa il Launcher dal portale, non serve
+            ridistribuire l'MSI.
         </p>
     }
 </section>
@@ -75,12 +76,12 @@
         <button class="btn btn-primary" type="submit">Salva</button>
         @if (Model.Bundle is { } current && Model.Minimum != current.Version)
         {
-            <button class="btn btn-secondary" type="submit" name="version" value="@current.Version"
+            <button class="btn btn-secondary" type="submit" name="preset" value="@current.Version"
                     data-confirm="Rendere obbligatoria la versione @current.Version? I Launcher più vecchi dovranno aggiornarsi prima di collegarsi.">Richiedi la @current.Version</button>
         }
         @if (Model.Minimum is not null)
         {
-            <button class="btn btn-ghost" type="submit" name="version" value="">Nessun minimo</button>
+            <button class="btn btn-ghost" type="submit" name="preset" value="none">Nessun minimo</button>
         }
     </form>
 </section>

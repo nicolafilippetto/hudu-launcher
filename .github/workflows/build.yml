@@ -114,6 +114,9 @@ jobs:
           -p:PortalUrl="${{ env.PORTAL_URL }}"
           -p:UpdatePublicKey="$env:UPDATE_PUBLIC_KEY"
 
+      # Installer e MSI installano entrambi per utente in %LocalAppData%\HuduLauncher: stessa
+      # installazione qualunque dei due si usi (con il predefinito "Either" l'MSI di Intune andava in
+      # Program Files, separato dall'installazione dell'exe).
       - name: Installer per utente e MSI (Velopack)
         run: |
           dotnet tool install --global vpk --version 1.2.161
@@ -127,6 +130,7 @@ jobs:
             --icon src/Launcher.Connector/Assets/launcher.ico `
             --msi `
             --msiVersion ${{ steps.version.outputs.numeric }} `
+            --instLocation PerUser `
             --outputDir releases
 
       # Il feed (con gli hash dei pacchetti) si firma con una chiave che esiste solo qui: il portale
