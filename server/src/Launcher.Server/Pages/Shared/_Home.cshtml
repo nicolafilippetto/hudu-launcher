@@ -10,6 +10,34 @@
     </div>
 </div>
 
+@if (Model.Launcher is { } launcher)
+{
+    @switch (launcher.State)
+    {
+        case LauncherState.Missing:
+            <div class="alert alert-info launcher-notice">
+                <svg><use href="#i-download" /></svg>
+                <span>Per aprire le connessioni serve <strong>Hudu Launcher per Windows</strong> (versione @launcher.Available).</span>
+                <a class="btn btn-primary btn-sm" href="/Launcher">Scarica il Launcher</a>
+            </div>
+            break;
+        case LauncherState.BelowMinimum:
+            <div class="alert alert-danger launcher-notice">
+                <svg><use href="#i-alert" /></svg>
+                <span>Il tuo Launcher (@launcher.InstalledLabel) non è più accettato: serve almeno la versione @launcher.Minimum. Aprilo e accetta l'aggiornamento, oppure scaricalo.</span>
+                <a class="btn btn-primary btn-sm" href="/Launcher">Scarica il Launcher</a>
+            </div>
+            break;
+        case LauncherState.Outdated:
+            <div class="alert alert-warn launcher-notice">
+                <svg><use href="#i-download" /></svg>
+                <span>È disponibile il Launcher @launcher.Available (hai @launcher.InstalledText): si aggiorna da solo alla prossima apertura.</span>
+                <a class="btn btn-ghost btn-sm" href="/Launcher">Dettagli</a>
+            </div>
+            break;
+    }
+}
+
 <section class="section">
     <h2 class="section-title"><svg><use href="#i-star" /></svg>Preferiti</h2>
     @if (Model.Favorites.Count == 0)

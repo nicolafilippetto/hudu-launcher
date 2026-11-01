@@ -209,6 +209,16 @@ public sealed class ExtraConnection
     public string? UpdatedBy { get; set; }
 }
 
+/// <summary>Launcher usato da un utente: versione dichiarata, PC e ultimo uso.</summary>
+public sealed class LauncherClient
+{
+    /// <summary>Email dell'utente, in minuscolo.</summary>
+    public required string Email { get; set; }
+    public string? Version { get; set; }
+    public string? Machine { get; set; }
+    public DateTimeOffset LastSeenAt { get; set; }
+}
+
 /// <summary>Impostazioni per cliente: il jump host RustDesk predefinito.</summary>
 public sealed class CompanySetting
 {

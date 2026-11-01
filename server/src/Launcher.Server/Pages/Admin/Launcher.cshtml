@@ -1,0 +1,115 @@
+@page
+@model Launcher.Server.Pages.Admin.LauncherModel
+@{
+    ViewData["Title"] = "Launcher";
+    ViewData["AdminSection"] = "launcher";
+}
+@functions {
+    private static (string Css, string Label) Badge(LauncherState state) => state switch
+    {
+        LauncherState.Current => ("chip-ok", "Aggiornato"),
+        LauncherState.Outdated => ("chip-warn", "Da aggiornare"),
+        LauncherState.BelowMinimum => ("chip-danger", "Sotto il minimo"),
+        _ => ("", "Mai usato"),
+    };
+}
+<div class="page-head">
+    <div>
+        <h1>Launcher per Windows</h1>
+        <p class="muted">
+            Il Launcher è incluso nell'immagine del portale, della stessa versione: aggiornando il container si aggiorna anche
+            quello distribuito. I Launcher installati controllano il portale all'apertura e propongono l'aggiornamento.
+        </p>
+    </div>
+</div>
+
+<section class="card">
+    <h2 class="card-title"><svg><use href="#i-download" /></svg>Versione inclusa</h2>
+    @if (Model.Bundle is not { } bundle)
+    {
+        <div class="alert alert-warn">
+            Questa immagine non contiene il Launcher: è stata costruita senza la pipeline del progetto. Download dal portale,
+            aggiornamenti automatici e versione minima non sono disponibili.
+        </div>
+    }
+    else
+    {
+        <div class="hudu-facts">
+            <div><span>Versione</span><strong>@bundle.Version</strong></div>
+            <div><span>Aggiornamenti firmati</span><strong>@(bundle.Signed ? "Sì" : "No")</strong></div>
+            <div><span>Installer</span><strong>@(bundle.Setup is { } s ? Format.Size(s.Size) : "—")</strong></div>
+            <div><span>MSI per Intune</span><strong>@(bundle.Msi is { } m ? Format.Size(m.Size) : "—")</strong></div>
+        </div>
+        @if (!bundle.Signed)
+        {
+            <div class="alert alert-warn">
+                Feed non firmato: i Launcher non installeranno aggiornamenti automatici (possono comunque scaricare il Launcher dal portale).
+                Per firmarli serve la chiave nella pipeline (vedi la guida di installazione).
+            </div>
+        }
+        <div class="download-row">
+            @if (bundle.Setup is { } setup)
+            {
+                <a class="btn btn-secondary" href="/launcher/@setup.Name" download><svg><use href="#i-download" /></svg>Installer (@setup.Name)</a>
+            }
+            @if (bundle.Msi is { } msi)
+            {
+                <a class="btn btn-secondary" href="/launcher/@msi.Name" download><svg><use href="#i-download" /></svg>MSI per Intune (@msi.Name)</a>
+            }
+        </div>
+        <p class="muted small">
+            L'MSI installa il Launcher sul PC per tutti gli utenti (ognuno lo ritrova al proprio accesso): adatto a Intune come app
+            line-of-business. Gli aggiornamenti successivi li fa il Launcher dal portale, non serve ridistribuire l'MSI.
+        </p>
+    }
+</section>
+
+<section class="card">
+    <h2 class="card-title"><svg><use href="#i-shield" /></svg>Versione minima obbligatoria</h2>
+    <p class="muted small">
+        I Launcher più vecchi (anche quelli che non comunicano la versione, cioè precedenti a questa funzione) non possono aprire
+        connessioni e propongono l'aggiornamento. Utile dopo una correzione di sicurezza. Non può superare la versione inclusa.
+    </p>
+    <form method="post" asp-page-handler="Minimum" class="inline-form">
+        <input class="input mono" name="version" value="@Model.Minimum" placeholder="nessuna" maxlength="50" autocomplete="off" spellcheck="false" aria-label="Versione minima" />
+        <button class="btn btn-primary" type="submit">Salva</button>
+        @if (Model.Bundle is { } current && Model.Minimum != current.Version)
+        {
+            <button class="btn btn-secondary" type="submit" name="version" value="@current.Version"
+                    data-confirm="Rendere obbligatoria la versione @current.Version? I Launcher più vecchi dovranno aggiornarsi prima di collegarsi.">Richiedi la @current.Version</button>
+        }
+        @if (Model.Minimum is not null)
+        {
+            <button class="btn btn-ghost" type="submit" name="version" value="">Nessun minimo</button>
+        }
+    </form>
+</section>
+
+<section class="card">
+    <h2 class="card-title"><svg><use href="#i-user" /></svg>Utenti <span class="count">@Model.Users.Count</span></h2>
+    @if (Model.Users.Count == 0)
+    {
+        <p class="muted small">Nessun utente approvato e nessun Launcher ancora collegato.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table class="table">
+                <thead><tr><th>Utente</th><th>Stato</th><th>Versione</th><th>PC</th><th>Ultimo uso</th></tr></thead>
+                <tbody>
+                    @foreach (var row in Model.Users)
+                    {
+                        var (css, label) = Badge(row.Status.State);
+                        <tr>
+                            <td><strong>@(row.Name ?? row.Email)</strong>@if (row.Name is not null) { <div class="muted small">@row.Email</div> }</td>
+                            <td><span class="chip @css">@label</span></td>
+                            <td class="mono">@(row.Status.State == LauncherState.Missing ? "—" : row.Status.InstalledLabel)</td>
+                            <td class="mono small">@(row.Status.Machine ?? "—")</td>
+                            <td class="small muted">@(row.Status.LastSeen is { } seen ? Format.Relative(seen) : "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>

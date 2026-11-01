@@ -8,6 +8,9 @@ server/src/Launcher.Server/local-data/
 *.db-shm
 *.db-wal
 secrets/
+# Launcher da includere nell'immagine: lo mette la pipeline
+server/launcher-release/*
+!server/launcher-release/LEGGIMI.txt
 # Chiavi di sviluppo: mai nel repository
 dev-master.key
 key-*.xml

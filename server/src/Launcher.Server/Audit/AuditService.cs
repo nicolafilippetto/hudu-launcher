@@ -59,6 +59,7 @@ public sealed class AuditService(IDbContextFactory<AppDbContext> dbFactory, ILog
         ["offline.redeem"] = "Cache offline consegnata",
         ["web.login"] = "Accesso web compilato dal Launcher",
         ["web.login.reject"] = "Accesso web rifiutato",
+        ["launcher.outdated"] = "Launcher da aggiornare",
         ["password.copy"] = "Password copiata",
         ["asset.update"] = "Mappatura asset modificata",
         ["company.update"] = "Gateway cliente modificato",

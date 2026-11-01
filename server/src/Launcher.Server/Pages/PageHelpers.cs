@@ -34,6 +34,11 @@ public static class Format
         return TimeZoneInfo.ConvertTime(value.Value, zone).ToString("dd/MM/yyyy HH:mm:ss", Italian);
     }
 
+    /// <summary>Dimensione di un file per i pulsanti di download (es. "98 MB").</summary>
+    public static string Size(long bytes) => bytes >= 1024 * 1024
+        ? (bytes / 1024d / 1024d).ToString("0", Italian) + " MB"
+        : Math.Max(1, bytes / 1024).ToString(Italian) + " KB";
+
     public static string Relative(DateTimeOffset? value)
     {
         if (value is null)

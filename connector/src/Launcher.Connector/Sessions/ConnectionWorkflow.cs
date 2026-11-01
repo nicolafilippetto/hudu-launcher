@@ -10,11 +10,27 @@ namespace Launcher.Connector.Sessions;
 /// </summary>
 public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, OfflineCache offline)
 {
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
+    private static readonly HttpClient Http = CreateHttp();
     private readonly KnownHosts _knownHosts = new(ConnectorSettings.KnownHostsFile);
     private ConnectorConfig? _config;
 
+    /// <summary>Il portale chiede una versione più recente del Launcher (versione minima impostata dagli admin).</summary>
+    public event Action? UpdateRequired;
+
     public RustDeskTunnels Tunnels => tunnels;
+
+    /// <summary>
+    /// Ogni richiesta al portale dice versione del Launcher e nome del PC: gli admin vedono chi usa quale
+    /// versione e il portale può chiedere l'aggiornamento.
+    /// </summary>
+    private static HttpClient CreateHttp()
+    {
+        var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        http.DefaultRequestHeaders.TryAddWithoutValidation("X-Launcher-Version", ConnectorSettings.Version);
+        var machine = new string(Environment.MachineName.Where(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.').Take(64).ToArray());
+        http.DefaultRequestHeaders.TryAddWithoutValidation("X-Launcher-Machine", machine);
+        return http;
+    }
 
     public OfflineCache Offline => offline;
 
@@ -38,6 +54,10 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
         {
             Log.Error("Connessione non riuscita", ex);
             tab.Progress.Fail(ex.Message);
+            if (ex is PortalException { UpdateRequired: true })
+            {
+                UpdateRequired?.Invoke();
+            }
         }
     }
 

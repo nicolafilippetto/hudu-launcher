@@ -388,6 +388,25 @@ namespace Launcher.Server.Data.Migrations
                     b.ToTable("Favorites");
                 });
 
+            modelBuilder.Entity("Launcher.Server.Data.LauncherClient", b =>
+                {
+                    b.Property<string>("Email")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("LastSeenAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Machine")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Version")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Email");
+
+                    b.ToTable("LauncherClients");
+                });
+
             modelBuilder.Entity("Launcher.Server.Data.LayoutConfig", b =>
                 {
                     b.Property<int>("LayoutId")

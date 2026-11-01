@@ -48,6 +48,13 @@ server (se la licenza lo consente), rotazione periodica, alert sugli accessi API
   (predefinita 60 minuti): mai su disco, cancellate alla scadenza, chiudendo il Launcher o spegnendo il
   PC; un nuovo pacchetto sostituisce il precedente. Ogni preparazione e ogni asset consegnato sono nel
   registro (`offline.prepare`, `offline.redeem`).
+- **Aggiornamenti del Launcher**: il portale distribuisce il Launcher incluso nella sua immagine, ma
+  il Launcher installa un aggiornamento solo se il feed (con gli hash dei pacchetti) è firmato con la
+  chiave ECDSA P-256 della pipeline, che esiste solo nei segreti di GitHub; Velopack verifica poi gli
+  hash di ciò che scarica. Chi controllasse il portale non potrebbe distribuire un Launcher
+  modificato. I file del Launcher sono serviti in sola lettura, solo con i nomi e i tipi previsti.
+  Ogni Launcher comunica versione e PC; gli amministratori vedono chi usa cosa e possono imporre una
+  versione minima (i più vecchi ricevono 426 prima che il biglietto venga consumato).
 - **Pagine web nel Launcher**: aprendo la pagina il portale non invia password, solo nome e utente
   delle credenziali proponibili (collegate all'asset, scelta per la connessione o con l'URL sullo
   stesso host) e un'autorizzazione firmata per quella scheda (10 ore, legata a utente, asset,

@@ -36,6 +36,9 @@ public class LauncherFactory : WebApplicationFactory<Program>
 
     private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "launcher-tests-" + Guid.NewGuid().ToString("N"));
 
+    /// <summary>Launcher finto incluso nel portale: versione 1.4.0, installer, feed firmato.</summary>
+    public string ReleasesDir => Path.Combine(_dataDir, "launcher-release");
+
     public RsaSecurityKey SigningKey { get; } = new(RSA.Create(2048)) { KeyId = "test" };
 
     public LauncherFactory()
@@ -44,6 +47,13 @@ public class LauncherFactory : WebApplicationFactory<Program>
         Environment.SetEnvironmentVariable("Launcher__DataDirectory", _dataDir);
         Environment.SetEnvironmentVariable("Launcher__MasterKey", Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
         Environment.SetEnvironmentVariable("Launcher__SetupToken", "setup-di-test");
+        Directory.CreateDirectory(ReleasesDir);
+        File.WriteAllText(Path.Combine(ReleasesDir, "releases.win.json"),
+            """{"Assets":[{"PackageId":"HuduLauncher","Version":"1.4.0","Type":"Full","FileName":"HuduLauncher-1.4.0-full.nupkg","SHA1":"x","SHA256":"y","Size":3}]}""");
+        File.WriteAllBytes(Path.Combine(ReleasesDir, "releases.win.json.sig"), [1, 2, 3]);
+        File.WriteAllBytes(Path.Combine(ReleasesDir, "HuduLauncher-win-Setup.exe"), [77, 90, 0]);
+        File.WriteAllBytes(Path.Combine(ReleasesDir, "HuduLauncher-1.4.0-full.nupkg"), [80, 75, 3]);
+        Environment.SetEnvironmentVariable("Launcher__ReleasesDirectory", ReleasesDir);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -743,6 +753,83 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             await db.AssetSettings.Where(a => a.AssetId == 10).ExecuteDeleteAsync(ct);
         }
+    }
+
+    [Fact]
+    public async Task Portal_serves_the_bundled_launcher_and_nothing_else()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
+        var feed = await client.GetAsync(new Uri("/launcher/releases.win.json", UriKind.Relative), ct);
+        Assert.Equal(HttpStatusCode.OK, feed.StatusCode);
+        Assert.Contains("1.4.0", await feed.Content.ReadAsStringAsync(ct), StringComparison.Ordinal);
+        var setup = await client.GetAsync(new Uri("/launcher/HuduLauncher-win-Setup.exe", UriKind.Relative), ct);
+        Assert.Equal(HttpStatusCode.OK, setup.StatusCode);
+        Assert.Equal("attachment", setup.Content.Headers.ContentDisposition?.DispositionType);
+
+        foreach (var path in new[] { "/launcher/..%2Flauncher.db", "/launcher/missing.exe", "/launcher/.hidden" })
+        {
+            Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(new Uri(path, UriKind.Relative), ct)).StatusCode);
+        }
+    }
+
+    private async Task<HttpResponseMessage> RedeemWithVersionAsync(string ticket, string? version)
+    {
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri("/api/connector/redeem", UriKind.Relative)) { Content = JsonContent.Create(new { ticket }) };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", factory.CreateConnectorToken("tecnico@example.com"));
+        if (version is not null)
+        {
+            request.Headers.Add("X-Launcher-Version", version);
+            request.Headers.Add("X-Launcher-Machine", "PC-TECNICO-01");
+        }
+
+        return await client.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Minimum_launcher_version_is_enforced_without_burning_the_ticket_and_versions_are_recorded()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await SignedInClientAsync("tecnico@example.com");
+        await SetSettingAsync(SettingKeys.LauncherMinVersion, "1.4.0");
+        try
+        {
+            var ticket = await CreateTicketAsync(client);
+            Assert.Equal(HttpStatusCode.UpgradeRequired, (await RedeemWithVersionAsync(ticket, null)).StatusCode);
+            Assert.Equal(HttpStatusCode.UpgradeRequired, (await RedeemWithVersionAsync(ticket, "1.3.9")).StatusCode);
+            Assert.Equal(HttpStatusCode.UpgradeRequired, (await RedeemWithVersionAsync(ticket, "1.4.0-ci.7")).StatusCode);
+
+            // Il biglietto non è stato consumato dai rifiuti: con il Launcher aggiornato funziona.
+            Assert.Equal(HttpStatusCode.OK, (await RedeemWithVersionAsync(ticket, "1.4.0")).StatusCode);
+
+            using var scope = factory.Services.CreateScope();
+            var row = await scope.ServiceProvider.GetRequiredService<AppDbContext>().LauncherClients.SingleAsync(c => c.Email == "tecnico@example.com", ct);
+            Assert.Equal(("1.4.0", "PC-TECNICO-01"), (row.Version, row.Machine));
+        }
+        finally
+        {
+            await SetSettingAsync(SettingKeys.LauncherMinVersion, "");
+        }
+    }
+
+    [Fact]
+    public async Task Admins_cannot_require_a_launcher_newer_than_the_bundled_one()
+    {
+        var admin = await SignedInClientAsync("capo@example.com");
+        var page = await admin.GetAsync(new Uri("/Admin/Launcher", UriKind.Relative), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+        var html = await page.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("1.4.0", html, StringComparison.Ordinal);
+        var token = TokenRegex().Match(html).Groups[1].Value;
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri("/Admin/Launcher?handler=Minimum", UriKind.Relative))
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["version"] = "2.0.0", ["__RequestVerificationToken"] = token }),
+        };
+        await admin.SendAsync(request, TestContext.Current.CancellationToken);
+        using var scope = factory.Services.CreateScope();
+        Assert.Null(scope.ServiceProvider.GetRequiredService<SettingsService>().LauncherMinVersion);
     }
 
     [Theory]

@@ -1,0 +1,272 @@
+name: Build
+
+# Portale e Launcher in un'unica pipeline: il Launcher (installer, MSI e feed firmato degli
+# aggiornamenti) entra nell'immagine Docker del portale, con la stessa versione. Ogni modifica
+# compila e prova tutto (minuti gratuiti nei repository pubblici); main e i tag vX.Y.Z pubblicano
+# l'immagine, i tag creano anche la Release di GitHub.
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Indirizzo predefinito del portale, inserito nell'app (facoltativo: senza, il Launcher lo impara
+  # dal primo link). Settings → Secrets and variables → Actions → Variables (LAUNCHER_PORTAL_URL).
+  # In un repository pubblico l'installer è pubblico: meglio lasciarlo vuoto.
+  PORTAL_URL: ${{ vars.LAUNCHER_PORTAL_URL }}
+
+jobs:
+  server:
+    name: Compilazione e test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: server/global.json
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Pacchetti vulnerabili
+        run: |
+          dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerable.txt
+          if grep -q "has the following vulnerable packages" vulnerable.txt; then exit 1; fi
+
+      - name: Test
+        run: dotnet test --no-restore
+
+  launcher:
+    name: Compilazione, test e installer
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: connector
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Servono i tag per numerare le build di prova dopo l'ultima versione pubblicata.
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: connector/global.json
+
+      - name: Test
+        run: dotnet test tests/Launcher.Connector.Tests
+
+      - name: Versione
+        id: version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          # Tag v1.2.3 → 1.2.3. Le build di prova sono la versione successiva all'ultimo tag con
+          # suffisso (es. 1.2.2-ci.31): si installano sopra la 1.2.1 senza avviso di downgrade e la
+          # 1.2.2 definitiva le aggiorna.
+          if ($env:REF_TYPE -eq "tag") {
+            if ($env:REF_NAME -notmatch '^v(\d+\.\d+\.\d+)$') { throw "Tag non valido: usare vX.Y.Z" }
+            $version = $Matches[1]
+            $numeric = $version
+          } else {
+            $latest = git tag --list 'v*' |
+              Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } |
+              ForEach-Object { [version]$_.Substring(1) } |
+              Sort-Object -Descending | Select-Object -First 1
+            if (-not $latest) { $latest = [version]'1.0.0' }
+            $numeric = '{0}.{1}.{2}' -f $latest.Major, $latest.Minor, ($latest.Build + 1)
+            $version = '{0}-ci.{1}' -f $numeric, $env:RUN_NUMBER
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          # L'MSI accetta solo versioni numeriche.
+          "numeric=$numeric" >> $env:GITHUB_OUTPUT
+          Write-Host "Versione $version"
+
+      - name: Pubblicazione (self-contained, ReadyToRun)
+        env:
+          # Chiave pubblica per verificare il feed degli aggiornamenti (variabile del repository).
+          UPDATE_PUBLIC_KEY: ${{ vars.LAUNCHER_UPDATE_PUBLIC_KEY }}
+        run: >
+          dotnet publish src/Launcher.Connector/Launcher.Connector.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          --output publish
+          -p:Version=${{ steps.version.outputs.version }}
+          -p:PortalUrl="${{ env.PORTAL_URL }}"
+          -p:UpdatePublicKey="$env:UPDATE_PUBLIC_KEY"
+
+      - name: Installer per utente e MSI (Velopack)
+        run: |
+          dotnet tool install --global vpk --version 1.2.161
+          vpk pack `
+            --packId HuduLauncher `
+            --packVersion ${{ steps.version.outputs.version }} `
+            --packDir publish `
+            --mainExe HuduLauncher.exe `
+            --packTitle "Hudu Launcher" `
+            --packAuthors "Hudu Launcher" `
+            --icon src/Launcher.Connector/Assets/launcher.ico `
+            --msi `
+            --msiVersion ${{ steps.version.outputs.numeric }} `
+            --outputDir releases
+
+      # Il feed (con gli hash dei pacchetti) si firma con una chiave che esiste solo qui: il portale
+      # distribuisce gli aggiornamenti ma non può crearne. Chiave privata ECDSA P-256 (PEM) nel segreto
+      # LAUNCHER_UPDATE_KEY, pubblica (base64) nella variabile LAUNCHER_UPDATE_PUBLIC_KEY.
+      - name: Firma del feed degli aggiornamenti
+        env:
+          SIGNING_KEY: ${{ secrets.LAUNCHER_UPDATE_KEY }}
+          PUBLIC_KEY: ${{ vars.LAUNCHER_UPDATE_PUBLIC_KEY }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if (-not $env:SIGNING_KEY) {
+            if ($env:PUBLIC_KEY -and $env:REF_TYPE -eq "tag") { throw "Manca il segreto LAUNCHER_UPDATE_KEY: release non firmata" }
+            Write-Host "::warning::Feed degli aggiornamenti non firmato (segreto LAUNCHER_UPDATE_KEY assente): niente aggiornamenti automatici da questa build."
+            exit 0
+          }
+          $ecdsa = [System.Security.Cryptography.ECDsa]::Create()
+          $ecdsa.ImportFromPem($env:SIGNING_KEY)
+          if ($ecdsa.KeySize -ne 256) { throw "Serve una chiave ECDSA P-256" }
+          $public = [Convert]::ToBase64String($ecdsa.ExportSubjectPublicKeyInfo())
+          if (-not $env:PUBLIC_KEY -or $public -ne $env:PUBLIC_KEY.Trim()) { throw "LAUNCHER_UPDATE_PUBLIC_KEY mancante o diversa dalla chiave di firma" }
+          $feed = [IO.File]::ReadAllBytes((Join-Path $PWD "releases/releases.win.json"))
+          $signature = $ecdsa.SignData($feed, [System.Security.Cryptography.HashAlgorithmName]::SHA256)
+          [IO.File]::WriteAllBytes((Join-Path $PWD "releases/releases.win.json.sig"), $signature)
+          Write-Host "Feed firmato"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: HuduLauncher-${{ steps.version.outputs.version }}
+          path: |
+            connector/releases/*-Setup.exe
+            connector/releases/*.msi
+            connector/releases/*.nupkg
+            connector/releases/RELEASES*
+            connector/releases/releases.*.json
+            connector/releases/releases.*.json.sig
+          if-no-files-found: error
+          retention-days: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+  image:
+    name: Immagine Docker
+    needs: [server, launcher]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      # Si pubblica solo da main e dai tag vX.Y.Z; altrove (branch, Dependabot, pull request) si
+      # controlla soltanto che l'immagine si costruisca.
+      PUBLISH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Il Launcher appena compilato, della stessa versione, dentro l'immagine (cartella /app/launcher).
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: HuduLauncher-${{ needs.launcher.outputs.version }}
+          path: server/launcher-release
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - if: env.PUBLISH == 'true'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}/launcher-server
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: server
+          push: ${{ env.PUBLISH == 'true' }}
+          provenance: true
+          sbom: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Attestazione firmata dell'immagine pubblicata, salvata anche nel registro:
+      # gh attestation verify oci://ghcr.io/<proprietario>/hudu-launcher/launcher-server:latest --repo <proprietario>/hudu-launcher
+      - if: env.PUBLISH == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}/launcher-server
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  release:
+    name: Release GitHub
+    if: github.ref_type == 'tag'
+    needs: launcher
+    runs-on: ubuntu-latest
+    # Solo questo job può scrivere nel repository, e solo per creare la Release e le attestazioni.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: HuduLauncher-${{ needs.launcher.outputs.version }}
+          path: release
+
+      # Prova verificabile che i file escono da questa pipeline e da questo commit:
+      # gh attestation verify HuduLauncher-win-Setup.exe --repo <proprietario>/hudu-launcher
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release/*
+
+      - name: Crea la Release con l'installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.launcher.outputs.version }}
+        run: |
+          cd release
+          sha256sum -- * > SHA256SUMS.txt
+          # La Release può essere già stata creata dal sito di GitHub (anche dal cellulare): in quel
+          # caso si allegano solo i file.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber -- *
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Hudu Launcher $VERSION" --generate-notes -- *
+          fi

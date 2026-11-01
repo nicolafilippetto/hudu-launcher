@@ -33,6 +33,8 @@
   <!-- Indirizzo predefinito del portale, impostabile in compilazione: -p:PortalUrl=https://... -->
   <ItemGroup>
     <AssemblyMetadata Include="DefaultPortalUrl" Value="$(PortalUrl)" />
+    <!-- Chiave pubblica (ECDSA P-256, base64) per verificare il feed degli aggiornamenti: -p:UpdatePublicKey=... -->
+    <AssemblyMetadata Include="UpdatePublicKey" Value="$(UpdatePublicKey)" />
   </ItemGroup>
 
   <ItemGroup>

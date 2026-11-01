@@ -55,6 +55,13 @@
         <Border Grid.Row="1" Padding="12,5" BorderThickness="0,1,0,0" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button x:Name="UpdateButton" Style="{StaticResource ToolButton}" Click="OnUpdateClick" Visibility="Collapsed"
+                            ToolTip="Aggiornamento del Launcher distribuito dal portale">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xE896;" Margin="0,0,6,0" Foreground="{StaticResource AccentBrush}" />
+                            <TextBlock x:Name="UpdateButtonText" Text="Aggiorna" />
+                        </StackPanel>
+                    </Button>
                     <Button x:Name="OfflineButton" Style="{StaticResource ToolButton}" Click="OnOfflineMenu" Visibility="Collapsed"
                             ToolTip="Connessioni dirette pronte da usare senza internet">
                         <StackPanel Orientation="Horizontal">

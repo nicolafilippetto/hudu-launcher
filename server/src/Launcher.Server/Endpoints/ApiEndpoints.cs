@@ -78,6 +78,20 @@ public static class ApiEndpoints
         portal.MapPost("/offline", PrepareOfflineAsync).RequireRateLimiting(RateLimitPolicies.Connect);
         portal.MapPost("/favorites/{assetId:int}", ToggleFavoriteAsync);
 
+        // Launcher incluso nell'immagine: installer, MSI e feed firmato degli aggiornamenti, in sola lettura.
+        // Anonimo come le Release pubbliche su GitHub: il Launcher aggiorna prima di avere un token.
+        app.MapGet("/launcher/{file}", (string file, LauncherReleases releases, HttpContext http) =>
+        {
+            if (releases.Resolve(file) is not { } path)
+            {
+                return Results.NotFound();
+            }
+
+            var download = Path.GetExtension(file) is ".exe" or ".msi";
+            http.Response.Headers.CacheControl = file.EndsWith(".nupkg", StringComparison.Ordinal) ? "public, max-age=86400, immutable" : "no-cache";
+            return Results.File(path, LauncherReleases.ContentType(file), download ? file : null, enableRangeProcessing: true);
+        }).AllowAnonymous().DisableRateLimiting();
+
         var connector = app.MapGroup("/api/connector");
         connector.MapGet("/config", (SettingsService settings) =>
         {
@@ -250,16 +264,45 @@ public static class ApiEndpoints
         return Results.Ok(new { favorite = existing is null });
     }
 
+    /// <summary>
+    /// Versione minima del Launcher impostata dagli admin: i Launcher più vecchi (o che non la dichiarano,
+    /// cioè precedenti a questa funzione) ricevono 426 e propongono l'aggiornamento dal portale.
+    /// Il controllo viene prima del biglietto, che così non si consuma.
+    /// </summary>
+    private static async Task<IResult?> RequireLauncherVersionAsync(HttpContext http, SettingsService settings, AuditService audit, CancellationToken ct)
+    {
+        var minimum = settings.LauncherMinVersion;
+        var version = LauncherClients.VersionOf(http);
+        if (minimum is null || LauncherVersion.Compare(version, minimum) >= 0)
+        {
+            return null;
+        }
+
+        await audit.WriteAsync(new AuditEntry("launcher.outdated", "anonimo", Success: false,
+            Details: $"Launcher {version ?? "senza versione (precedente)"}, minimo {minimum}"), http, ct);
+        return Results.Problem(
+            $"Questo Launcher ({version ?? "versione vecchia"}) va aggiornato: il portale richiede almeno la versione {minimum}. " +
+            "Accetta l'aggiornamento proposto dal Launcher oppure scaricalo dal portale (menu Launcher).",
+            statusCode: StatusCodes.Status426UpgradeRequired);
+    }
+
     private static async Task<IResult> RedeemAsync(
         RedeemRequest request, HttpContext http, TicketService tickets, InventoryService inventory, HuduClient hudu,
         SettingsService settings, PortalPrincipalFactory principals, AuditService audit, WebLoginService webLogins,
-        ILogger<TicketService> logger, CancellationToken ct)
+        LauncherClients clients, ILogger<TicketService> logger, CancellationToken ct)
     {
+        if (await RequireLauncherVersionAsync(http, settings, audit, ct) is { } outdated)
+        {
+            return outdated;
+        }
+
         var (ticket, error) = await AuthorizeRedeemAsync(request, http, tickets, settings, principals, audit, offline: false, ct);
         if (ticket is null)
         {
             return error!;
         }
+
+        await clients.RecordAsync(ticket.UserEmail, http, ct);
 
         var email = ticket.UserEmail;
         var asset = await inventory.GetAssetAsync(ticket.AssetId, email, ct);
@@ -301,8 +344,14 @@ public static class ApiEndpoints
     /// </summary>
     private static async Task<IResult> WebLoginAsync(
         WebLoginRequest request, HttpContext http, WebLoginService webLogins, InventoryService inventory, HuduClient hudu,
-        SettingsService settings, PortalPrincipalFactory principals, AuditService audit, ILogger<WebLoginService> logger, CancellationToken ct)
+        SettingsService settings, PortalPrincipalFactory principals, AuditService audit, LauncherClients clients,
+        ILogger<WebLoginService> logger, CancellationToken ct)
     {
+        if (await RequireLauncherVersionAsync(http, settings, audit, ct) is { } outdated)
+        {
+            return outdated;
+        }
+
         var grant = webLogins.Unprotect(request.Grant);
         if (grant is null)
         {
@@ -374,6 +423,7 @@ public static class ApiEndpoints
                 Results.Problem("Credenziale non disponibile per questa pagina.", statusCode: StatusCodes.Status409Conflict));
         }
 
+        await clients.RecordAsync(grant.Email, http, ct);
         await audit.WriteAsync(new AuditEntry("web.login", grant.Email, CompanyName: asset.CompanyName, AssetId: asset.Asset.Id,
             AssetName: asset.Asset.Name, Target: webUrl, Details: $"credenziale: {chosen.Name}"), http, ct);
         return Results.Ok(new WebLoginResponse(secret.Username, secret.Password));
@@ -382,13 +432,21 @@ public static class ApiEndpoints
     /// <summary>Il Launcher scambia il biglietto offline con le connessioni dirette degli asset scelti.</summary>
     private static async Task<IResult> RedeemOfflineAsync(
         RedeemRequest request, HttpContext http, TicketService tickets, InventoryService inventory, HuduClient hudu,
-        SettingsService settings, PortalPrincipalFactory principals, AuditService audit, ILogger<TicketService> logger, CancellationToken ct)
+        SettingsService settings, PortalPrincipalFactory principals, AuditService audit, LauncherClients clients,
+        ILogger<TicketService> logger, CancellationToken ct)
     {
+        if (await RequireLauncherVersionAsync(http, settings, audit, ct) is { } outdated)
+        {
+            return outdated;
+        }
+
         var (ticket, error) = await AuthorizeRedeemAsync(request, http, tickets, settings, principals, audit, offline: true, ct);
         if (ticket is null)
         {
             return error!;
         }
+
+        await clients.RecordAsync(ticket.UserEmail, http, ct);
 
         if (settings.Portal.OfflineMaxAssets == 0)
         {

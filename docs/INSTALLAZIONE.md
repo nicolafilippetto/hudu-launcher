@@ -200,6 +200,9 @@ portale, il blocco account e le regole del WAF.
 
 ### Aggiornamento, backup, ripristino
 
+Aggiornando il container si aggiorna anche il Launcher distribuito dal portale: i tecnici ricevono
+la proposta di aggiornamento alla prossima apertura.
+
 ```bash
 docker compose pull && docker compose up -d          # aggiornamento
 docker run --rm -v launcher-data:/data -v $PWD:/backup busybox \
@@ -262,12 +265,55 @@ leggono più (vanno reinseriti dalla sezione admin).
 
 ## 5. App Windows (Hudu Launcher)
 
-### Compilazione
+### Compilazione e distribuzione dal portale
 
-La pipeline **Hudu Launcher per Windows** su GitHub produce, a ogni modifica, l'artefatto
-`HuduLauncher-<versione>` con `HuduLauncher-win-Setup.exe`. Per una versione ufficiale si crea un
-tag `vX.Y.Z` (es. `git tag v1.1.0 && git push origin v1.1.0`): la pipeline pubblica l'installer,
-i pacchetti di aggiornamento e `SHA256SUMS.txt` nelle **Release** del repository.
+La pipeline **Build** su GitHub compila il Launcher (installer, MSI per Intune, pacchetto e feed
+degli aggiornamenti) e lo mette **dentro l'immagine Docker del portale**, con la stessa versione.
+Per una versione ufficiale si crea un tag `vX.Y.Z`: la pipeline pubblica l'immagine `X.Y.Z` e
+mette gli stessi file anche nelle **Release** del repository, con `SHA256SUMS.txt`.
+
+Aggiornando il container si aggiorna anche il Launcher distribuito:
+
+- **Download**: menu **Launcher** in alto nel portale (l'MSI è visibile agli amministratori).
+- **Aggiornamenti**: all'apertura il Launcher controlla il portale e propone la nuova versione; se
+  ci sono connessioni aperte la installa alla chiusura. Niente diritti di amministratore.
+- **Controllo**: **Amministrazione → Launcher** mostra per ogni utente versione, PC e ultimo uso
+  (li comunica il Launcher a ogni connessione) e permette di impostare una **versione minima**:
+  i Launcher più vecchi non si collegano e propongono l'aggiornamento.
+
+I Launcher fino alla 1.3.1 non si aggiornano da soli: la prima volta vanno installati a mano
+(download dal portale o MSI con Intune), poi gli aggiornamenti sono automatici.
+
+### Firma degli aggiornamenti (una volta)
+
+Il Launcher installa solo aggiornamenti con il feed firmato dalla pipeline: anche chi
+controllasse il portale non potrebbe distribuire un Launcher modificato. Si crea una coppia di
+chiavi ECDSA P-256, con PowerShell 7 (`pwsh`):
+
+```powershell
+$k = [System.Security.Cryptography.ECDsa]::Create([System.Security.Cryptography.ECCurve+NamedCurves]::nistP256)
+$k.ExportPkcs8PrivateKeyPem() | Set-Content -NoNewline launcher-update-key.pem   # chiave privata
+[Convert]::ToBase64String($k.ExportSubjectPublicKeyInfo())                       # chiave pubblica
+```
+
+oppure con OpenSSL:
+
+```bash
+openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out launcher-update-key.pem
+openssl ec -in launcher-update-key.pem -pubout -outform DER | base64 -w0
+```
+
+Su GitHub, **Settings → Secrets and variables → Actions**:
+
+| Tipo | Nome | Valore |
+|---|---|---|
+| Secret | `LAUNCHER_UPDATE_KEY` | contenuto di `launcher-update-key.pem` |
+| Variable | `LAUNCHER_UPDATE_PUBLIC_KEY` | la riga base64 della chiave pubblica |
+
+Conservare la chiave privata come password in Hudu e cancellare il file. Se la chiave cambia, i
+Launcher già installati rifiutano i nuovi aggiornamenti e vanno reinstallati una volta. Senza
+chiave la pipeline funziona lo stesso, ma senza aggiornamenti automatici (la pagina admin lo
+segnala).
 
 L'indirizzo del portale si può inserire nell'app con la variabile **Settings → Secrets and
 variables → Actions → Variables** `LAUNCHER_PORTAL_URL`. In un repository pubblico l'installer è
@@ -284,6 +330,14 @@ viene rifiutato.
 L'installazione è **per utente**, in `%LocalAppData%\HuduLauncher`, senza diritti
 amministrativi. L'app registra da sola il protocollo `hudulauncher://` per l'utente.
 
+**Con l'MSI (consigliato).** Scaricare l'MSI da **Amministrazione → Launcher** (o dalle Release)
+e caricarlo in **App → Windows → Aggiungi → App line-of-business**, assegnato ai PC o al gruppo
+dei tecnici. L'MSI installa sul PC un programma di distribuzione che installa il Launcher per
+ogni utente al suo accesso (comportamento di Velopack: provarlo prima su un PC di test). Le
+versioni successive arrivano dal portale: l'MSI non va ripubblicato a ogni rilascio.
+
+**Con l'installer come app Win32**, in alternativa:
+
 1. Preparare il pacchetto: `IntuneWinAppUtil.exe -c <cartella> -s HuduLauncher-win-Setup.exe -o <output>`
 2. **App → Windows → Aggiungi → App di Windows (Win32)**
    - Comando di installazione: `HuduLauncher-win-Setup.exe --silent`
@@ -291,8 +345,8 @@ amministrativi. L'app registra da sola il protocollo `hudulauncher://` per l'ute
    - Comportamento di installazione: **Utente**
    - Regola di rilevamento: file `%LocalAppData%\HuduLauncher\current\HuduLauncher.exe` esistente
    - Assegnazione: gruppo dei tecnici
-3. Nuove versioni: caricare il nuovo Setup come nuova app che sostituisce la precedente
-   (supersedence) oppure aggiornare il pacchetto.
+3. Le nuove versioni le installa il Launcher dal portale; ripubblicare il pacchetto serve solo
+   per le nuove installazioni con una versione più recente.
 
 Il runtime WebView2 (terminale SSH/Telnet) è già presente in Windows 10 e 11.
 

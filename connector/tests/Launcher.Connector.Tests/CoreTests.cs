@@ -594,3 +594,32 @@ public sealed class WebLoginScriptTests
     [InlineData("null", WebLoginFill.NoForm)]
     public void Parses_results(string result, WebLoginFill expected) => Assert.Equal(expected, WebLoginScript.Parse(result));
 }
+
+public sealed class UpdateTests
+{
+    [Theory]
+    [InlineData("1.3.1", "1.3.2", -1)]
+    [InlineData("1.3.2-ci.40", "1.3.2", -1)]
+    [InlineData("1.3.2-ci.9", "1.3.2-ci.40", -1)]
+    [InlineData("1.10.0", "1.9.9", 1)]
+    [InlineData("1.3.1+abc", "1.3.1", 0)]
+    [InlineData("?", "1.0.0", -1)]
+    [InlineData(null, null, 0)]
+    public void Compares_versions(string? a, string? b, int expected) => Assert.Equal(expected, Math.Sign(AppVersion.Compare(a, b)));
+
+    [Fact]
+    public void Accepts_only_feeds_signed_with_the_embedded_key()
+    {
+        using var key = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+        var publicKey = Convert.ToBase64String(key.ExportSubjectPublicKeyInfo());
+        var feed = "{\"Assets\":[]}"u8.ToArray();
+        var signature = key.SignData(feed, System.Security.Cryptography.HashAlgorithmName.SHA256);
+
+        Assert.True(UpdateSignature.Verify(feed, signature, publicKey));
+        Assert.False(UpdateSignature.Verify("{\"Assets\":[{}]}"u8.ToArray(), signature, publicKey));
+        using var other = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+        Assert.False(UpdateSignature.Verify(feed, other.SignData(feed, System.Security.Cryptography.HashAlgorithmName.SHA256), publicKey));
+        Assert.False(UpdateSignature.Verify(feed, signature, null));
+        Assert.False(UpdateSignature.Verify(feed, signature, "non-base64!"));
+    }
+}

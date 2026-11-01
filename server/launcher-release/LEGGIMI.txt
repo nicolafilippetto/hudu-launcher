@@ -1,0 +1,4 @@
+Qui la pipeline (.github/workflows/build.yml) mette il Launcher per Windows appena compilato
+(installer, MSI, pacchetto e feed firmato degli aggiornamenti) prima di costruire l'immagine:
+nel container finiscono in /app/launcher e il portale li distribuisce.
+Costruendo l'immagine a mano la cartella resta vuota: il portale funziona, ma senza Launcher incluso.

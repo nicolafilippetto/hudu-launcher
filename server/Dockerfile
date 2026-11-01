@@ -27,6 +27,8 @@ WORKDIR /app
 
 COPY --from=build /app ./
 COPY --from=build --chown=1654:1654 /data-empty /data
+# Launcher per Windows della stessa versione (messo qui dalla pipeline), in sola lettura per il portale.
+COPY launcher-release/ ./launcher/
 
 ENV ASPNETCORE_HTTP_PORTS=8080 \
     ASPNETCORE_ENVIRONMENT=Production \

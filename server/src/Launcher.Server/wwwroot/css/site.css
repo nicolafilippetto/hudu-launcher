@@ -330,6 +330,11 @@ form.inline { display: inline-flex; margin: 0; }
 .company-item.active .company-count { background: var(--primary); color: var(--primary-contrast); }
 
 .content { padding: 22px 28px 60px; min-width: 0; }
+.page-narrow { max-width: 900px; margin: 0 auto; padding: 26px 20px 60px; }
+.launcher-notice { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.launcher-notice > svg { width: 20px; height: 20px; flex: none; }
+.launcher-notice > span { flex: 1; }
+.download-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0 6px; }
 
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
 .page-head p { margin-top: 4px; }

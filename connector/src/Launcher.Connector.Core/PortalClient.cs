@@ -138,7 +138,11 @@ public sealed record SessionEndpoint(string Host, int Port, bool Direct)
     public string UrlHost => Host.Contains(':', StringComparison.Ordinal) ? $"[{Host}]" : Host;
 }
 
-public sealed class PortalException(string message, Exception? inner = null) : Exception(message, inner);
+public sealed class PortalException(string message, Exception? inner = null) : Exception(message, inner)
+{
+    /// <summary>Il portale accetta solo Launcher dalla versione minima impostata dagli admin in su.</summary>
+    public bool UpdateRequired { get; init; }
+}
 
 /// <summary>Chiamate al portale. L'indirizzo è quello delle impostazioni, confermato dall'utente.</summary>
 public sealed class PortalClient(HttpClient http, Uri portal)
@@ -300,8 +304,12 @@ public sealed class PortalClient(HttpClient http, Uri portal)
             {
                 HttpStatusCode.Unauthorized => "Il portale non ha accettato l'accesso Microsoft 365. " + detail,
                 HttpStatusCode.TooManyRequests => "Troppe richieste: attendi qualche minuto.",
+                HttpStatusCode.UpgradeRequired => detail ?? "Il portale richiede una versione più recente del Launcher.",
                 _ => detail ?? $"Errore del portale ({(int)response.StatusCode}).",
-            });
+            })
+            {
+                UpdateRequired = response.StatusCode == HttpStatusCode.UpgradeRequired,
+            };
         }
     }
 

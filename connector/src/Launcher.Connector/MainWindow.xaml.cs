@@ -12,6 +12,9 @@ namespace Launcher.Connector;
 public partial class MainWindow : Window
 {
     private readonly ConnectionWorkflow _workflow;
+    private readonly LauncherUpdater _updater = new();
+    private bool _updateOffered;
+    private bool _updating;
     private readonly System.Windows.Threading.DispatcherTimer _offlineTimer = new() { Interval = TimeSpan.FromSeconds(15) };
     private bool _closingConfirmed;
 
@@ -24,6 +27,7 @@ public partial class MainWindow : Window
         UpdateStatus();
         Closing += OnClosing;
         _workflow.Offline.Changed += () => Dispatcher.BeginInvoke(RenderOffline);
+        _workflow.UpdateRequired += () => Dispatcher.BeginInvoke(() => _ = CheckForUpdatesAsync(required: true));
         _offlineTimer.Tick += (_, _) =>
         {
             _workflow.Offline.ExpireIfNeeded();
@@ -40,6 +44,8 @@ public partial class MainWindow : Window
                 {
                     OnOpenSettings(this, new RoutedEventArgs());
                 }
+
+                _ = CheckForUpdatesAsync(required: false);
             });
         };
     }
@@ -131,6 +137,107 @@ public partial class MainWindow : Window
         }
 
         menu.IsOpen = true;
+    }
+
+    // ------------------------------------------------------------------ aggiornamenti dal portale
+
+    /// <summary>
+    /// Controlla sul portale se c'è una versione più recente; la propone una volta per avvio (sempre se
+    /// il portale la rende obbligatoria). Gli errori non disturbano: si riprova al prossimo avvio.
+    /// </summary>
+    private async Task CheckForUpdatesAsync(bool required)
+    {
+        if (_updating || PortalClient.TryNormalizePortalUrl(ConnectorSettings.PortalUrl) is not { } portal)
+        {
+            return;
+        }
+
+        string? version;
+        try
+        {
+            version = _updater.AvailableVersion ?? await _updater.CheckAsync(portal, CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log.Warn("Controllo degli aggiornamenti non riuscito: " + ex.Message);
+            if (required)
+            {
+                Dialogs.Show(this, "Il Launcher va aggiornato",
+                    "Il portale richiede una versione più recente, ma l'aggiornamento automatico non è riuscito. " +
+                    "Scarica il Launcher dal portale (pulsante Portale in basso a destra) e installalo.", DialogKind.Warning, ex.Message);
+            }
+
+            return;
+        }
+
+        if (version is null)
+        {
+            return;
+        }
+
+        UpdateButtonText.Text = $"Aggiorna a {version}";
+        UpdateButton.Visibility = Visibility.Visible;
+        if (_updateOffered && !required)
+        {
+            return;
+        }
+
+        _updateOffered = true;
+        var text = required
+            ? $"Il portale accetta solo Launcher aggiornati: installa la versione {version} (questa è la {ConnectorSettings.Version}) per continuare a collegarti."
+            : $"È disponibile la versione {version} del Launcher (questa è la {ConnectorSettings.Version}), distribuita dal portale.";
+        text += Tabs.Items.Count > 0
+            ? "\n\nCi sono connessioni aperte: l'aggiornamento si scarica adesso e si installa alla chiusura del Launcher."
+            : "\n\nIl Launcher si chiude, si aggiorna e si riapre in pochi secondi.";
+        if (Dialogs.Confirm(this, required ? "Aggiornamento necessario" : "Aggiornamento disponibile", text, "Aggiorna ora", "Più tardi",
+                required ? DialogKind.Warning : DialogKind.Info))
+        {
+            await UpdateAsync();
+        }
+    }
+
+    private void OnUpdateClick(object sender, RoutedEventArgs e) => _ = UpdateAsync();
+
+    /// <summary>Scarica (pacchetto verificato con gli hash del feed firmato) e installa subito o alla chiusura.</summary>
+    private async Task UpdateAsync()
+    {
+        if (_updating)
+        {
+            return;
+        }
+
+        _updating = true;
+        UpdateButton.IsEnabled = false;
+        try
+        {
+            if (!_updater.IsDownloaded)
+            {
+                await _updater.DownloadAsync(p => Dispatcher.BeginInvoke(() => SetStatus($"Download dell'aggiornamento… {p}%")), CancellationToken.None);
+            }
+
+            if (Tabs.Items.Count == 0)
+            {
+                SetStatus("Installazione dell'aggiornamento…");
+                _workflow.Shutdown();
+                _updater.ApplyAndRestart();
+                return;
+            }
+
+            UpdateButtonText.Text = "Si aggiorna alla chiusura";
+            UpdateStatus();
+            Dialogs.Show(this, "Aggiornamento pronto", "Si installerà alla chiusura del Launcher, senza interrompere le connessioni aperte.");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log.Warn("Aggiornamento non riuscito: " + ex.Message);
+            UpdateStatus();
+            Dialogs.Show(this, "Aggiornamento non riuscito", "Riprova più tardi o scarica il Launcher dal portale.", DialogKind.Warning, ex.Message);
+        }
+        finally
+        {
+            _updating = false;
+            UpdateButton.IsEnabled = true;
+        }
     }
 
     // ------------------------------------------------------------------ cache offline
@@ -314,6 +421,7 @@ public partial class MainWindow : Window
             // Nessuna sessione: si chiude subito, senza annullare la chiusura.
             _closingConfirmed = true;
             _workflow.Shutdown();
+            _updater.ApplyOnExit();
             return;
         }
 
@@ -334,6 +442,7 @@ public partial class MainWindow : Window
         }
 
         _workflow.Shutdown();
+        _updater.ApplyOnExit();
         _ = Dispatcher.BeginInvoke(Close);
     }
 }

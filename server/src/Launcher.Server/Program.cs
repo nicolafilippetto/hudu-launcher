@@ -94,6 +94,8 @@ builder.Services.AddSingleton<PortalPrincipalFactory>();
 builder.Services.AddSingleton<SetupState>();
 builder.Services.AddSingleton<SyncService>();
 builder.Services.AddSingleton<Launcher.Server.Connections.WebLoginService>();
+builder.Services.AddSingleton<Launcher.Server.Connections.LauncherReleases>();
+builder.Services.AddScoped<Launcher.Server.Connections.LauncherClients>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SyncService>());
 builder.Services.AddHostedService<HousekeepingService>();
 builder.Services.AddScoped<HuduClient>();

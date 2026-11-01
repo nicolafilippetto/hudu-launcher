@@ -1,0 +1,65 @@
+@page
+@model LauncherModel
+@inject Launcher.Server.Pages.LayoutInfo Info
+@{
+    ViewData["Title"] = "Launcher per Windows";
+    var status = Model.Status;
+}
+<div class="page-narrow">
+    <div class="page-head">
+        <div>
+            <h1>Hudu Launcher per Windows</h1>
+            <p class="muted">Apre le connessioni del portale: desktop remoto, SSH e Telnet, pagine web, tramite jump host o in diretta.</p>
+        </div>
+    </div>
+
+    <section class="card">
+        @if (Model.Bundle is not { } bundle)
+        {
+            <h2 class="card-title"><svg><use href="#i-alert" /></svg>Launcher non incluso</h2>
+            <p class="muted">Questa installazione del portale non contiene il Launcher (immagine costruita senza la pipeline del progetto). Chiedi all'amministratore.</p>
+        }
+        else
+        {
+            <h2 class="card-title"><svg><use href="#i-download" /></svg>Versione @bundle.Version</h2>
+            <p class="muted">
+                Installazione per utente, senza diritti di amministratore, in pochi secondi. Dopo l'installazione i pulsanti di connessione
+                del portale aprono il Launcher. Le versioni nuove arrivano da sole: all'apertura il Launcher controlla il portale e propone
+                l'aggiornamento@(bundle.Signed ? ", accettandolo solo se firmato dalla pipeline del progetto" : "").
+            </p>
+            <div class="download-row">
+                @if (bundle.Setup is { } setup)
+                {
+                    <a class="btn btn-primary" href="/launcher/@setup.Name" download><svg><use href="#i-download" /></svg>Scarica il Launcher (@Format.Size(setup.Size))</a>
+                }
+                @if (User.IsAdmin() && bundle.Msi is { } msi)
+                {
+                    <a class="btn btn-secondary" href="/launcher/@msi.Name" download title="Pacchetto per Intune o altri strumenti di distribuzione">MSI per Intune (@Format.Size(msi.Size))</a>
+                }
+            </div>
+        }
+    </section>
+
+    <section class="card">
+        <h2 class="card-title"><svg><use href="#i-monitor" /></svg>Il tuo Launcher</h2>
+        @switch (status.State)
+        {
+            case LauncherState.Missing:
+                <p>Non risulta ancora nessuna connessione aperta con il Launcher da questo account.</p>
+                break;
+            case LauncherState.BelowMinimum:
+                <div class="alert alert-danger">Il tuo Launcher (@status.InstalledLabel) non è più accettato: serve almeno la versione @status.Minimum. Apri il Launcher e accetta l'aggiornamento, oppure installa quello qui sopra.</div>
+                break;
+            case LauncherState.Outdated:
+                <div class="alert alert-warn">Hai @status.InstalledText: è disponibile la @status.Available, che il Launcher propone alla prossima apertura.</div>
+                break;
+            default:
+                <div class="alert alert-info">Aggiornato: versione @status.InstalledLabel.</div>
+                break;
+        }
+        @if (status.LastSeen is { } seen)
+        {
+            <p class="muted small">Ultimo uso @Format.Relative(seen)@(status.Machine is null ? "" : $" dal PC {status.Machine}").</p>
+        }
+    </section>
+</div>

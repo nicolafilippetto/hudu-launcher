@@ -70,12 +70,14 @@ public sealed record EditorViewModel(
     IReadOnlyDictionary<string, string> WebDefaults,
     IReadOnlyDictionary<string, string> WebOverrides);
 
-public sealed record HomeViewModel(IReadOnlyList<ResolvedAsset> Favorites, IReadOnlyList<ResolvedAsset> Recent, SyncState? Sync, int CompanyCount);
+public sealed record HomeViewModel(IReadOnlyList<ResolvedAsset> Favorites, IReadOnlyList<ResolvedAsset> Recent, SyncState? Sync, int CompanyCount,
+    LauncherStatus? Launcher = null);
 
 /// <summary>Risultati di ricerca; ScopeCompany valorizzato se la ricerca è limitata a un cliente.</summary>
 public sealed record SearchViewModel(string Query, IReadOnlyList<ResolvedAsset> Results, CachedCompany? ScopeCompany = null);
 
-public sealed class IndexModel(InventoryService inventory, AppDbContext db, AuditService audit, SettingsService settings, SyncService sync) : LauncherPageModel
+public sealed class IndexModel(InventoryService inventory, AppDbContext db, AuditService audit, SettingsService settings, SyncService sync,
+    LauncherReleases releases, LauncherClients clients) : LauncherPageModel
 {
     public IReadOnlyList<CompanySummary> Companies { get; private set; } = [];
     public CompanyView? Company { get; private set; }
@@ -551,7 +553,8 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         await inventory.GetFavoritesAsync(Email, ct),
         await inventory.GetRecentAsync(Email, 8, ct),
         await db.SyncStates.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct),
-        await db.Companies.CountAsync(ct));
+        await db.Companies.CountAsync(ct),
+        releases.Bundle is { } bundle ? LauncherStatus.Of(await clients.FindAsync(Email, ct), bundle.Version, settings.LauncherMinVersion) : null);
 
     private async Task<EditorViewModel?> BuildEditorAsync(int assetId, IReadOnlyList<string> errors, CancellationToken ct)
     {

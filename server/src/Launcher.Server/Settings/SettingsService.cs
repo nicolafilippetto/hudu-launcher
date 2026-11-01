@@ -25,6 +25,7 @@ public static class SettingKeys
 
     public const string RdpDefaults = "rdp.defaults";
     public const string WebDefaults = "web.defaults";
+    public const string LauncherMinVersion = "launcher.minVersion";
     public const string TerminalHighlight = "terminal.highlight";
     public const string TerminalHighlightRules = "terminal.highlightRules";
 
@@ -234,6 +235,9 @@ public sealed class SettingsService(IDbContextFactory<AppDbContext> dbFactory, I
     public Dictionary<string, string> RdpDefaults => Connections.RdpOptionCatalog.Parse(Get(SettingKeys.RdpDefaults));
 
     public Dictionary<string, string> WebDefaults => Connections.WebOptionCatalog.Catalog.Parse(Get(SettingKeys.WebDefaults));
+
+    /// <summary>Versione minima del Launcher accettata dal portale (null = qualsiasi).</summary>
+    public string? LauncherMinVersion => Get(SettingKeys.LauncherMinVersion) is { } value && Connections.LauncherVersion.IsValid(value) ? value : null;
 
     /// <summary>Testo delle regole di colore del terminale (quelle predefinite se mai modificate).</summary>
     public string TerminalRulesText => Get(SettingKeys.TerminalHighlightRules) ?? Connections.HighlightRules.Default;

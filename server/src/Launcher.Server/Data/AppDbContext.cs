@@ -28,6 +28,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
     public DbSet<ExtraConnection> ExtraConnections => Set<ExtraConnection>();
     public DbSet<CompanySetting> CompanySettings => Set<CompanySetting>();
     public DbSet<Favorite> Favorites => Set<Favorite>();
+    public DbSet<LauncherClient> LauncherClients => Set<LauncherClient>();
 
     public DbSet<Ticket> Tickets => Set<Ticket>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
@@ -90,6 +91,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             e.Property(x => x.CompanyId).ValueGeneratedNever();
         });
         builder.Entity<Favorite>().HasKey(x => new { x.UserEmail, x.AssetId });
+        builder.Entity<LauncherClient>().HasKey(x => x.Email);
 
         builder.Entity<Ticket>().HasIndex(x => x.ExpiresAt);
         builder.Entity<AuditEvent>(e =>
