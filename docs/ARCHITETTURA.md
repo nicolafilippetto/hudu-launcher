@@ -247,6 +247,5 @@ Da fare:
 docs/            documentazione di progetto
 server/          ASP.NET Core: portale, API, integrazioni Hudu e RustDesk, Docker
 connector/       WPF: gestore del protocollo, tunnel RustDesk, RDP/SSH/Telnet/web, installer
-scripts/         script PowerShell delle prime prove
 .github/         pipeline di build e Dependabot
 ```

@@ -2,7 +2,6 @@ using Launcher.Server.Audit;
 using Launcher.Server.Connections;
 using Launcher.Server.Data;
 using Launcher.Server.Inventory;
-using Launcher.Server.Security;
 using Launcher.Server.Settings;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;

@@ -101,7 +101,7 @@ Installer e immagine hanno un'attestazione firmata di GitHub che prova da quale 
 commit provengono:
 
 ```bash
-gh attestation verify HuduLauncher-win-Setup.exe --repo nicolafilippetto/hudu-launcher
+gh attestation verify HuduLauncher-win.msi --repo nicolafilippetto/hudu-launcher
 gh attestation verify oci://ghcr.io/nicolafilippetto/hudu-launcher/launcher-server:latest --repo nicolafilippetto/hudu-launcher
 ```
 
@@ -116,7 +116,6 @@ La guida completa (chiavi API, reverse proxy, firewall, distribuzione con Intune
 | [`server/`](server) | Portale web e API (ASP.NET Core 10, SQLite), Dockerfile, `docker-compose.yml`, test |
 | [`connector/`](connector) | Launcher per Windows (WPF .NET 10), installer Velopack, test |
 | [`docs/`](docs) | Installazione, Microsoft 365 (Entra ID), architettura, sicurezza |
-| [`scripts/`](scripts) | Script PowerShell di prova (tunnel RDP e web con RustDesk, IPAM di Hudu) |
 
 ## Sviluppo
 

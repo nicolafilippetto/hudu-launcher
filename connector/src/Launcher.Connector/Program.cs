@@ -16,6 +16,7 @@ public static class Program
             .OnBeforeUninstallFastCallback(_ => ProtocolRegistration.Unregister())
             .Run();
 
+        WebViewOverrides.Clear();
         var request = LaunchRequest.FromArgs(args);
 
         // Se il Launcher è già aperto, gli si passa la richiesta e si esce subito.

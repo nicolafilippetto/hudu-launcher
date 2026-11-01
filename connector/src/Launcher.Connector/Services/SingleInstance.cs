@@ -13,7 +13,10 @@ public static class SingleInstance
     public const string ActivateMessage = "::activate";
 
     private static readonly string Id = "HuduLauncher-" + (WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName);
+    // Non viene letto ma deve restare: tiene in vita il mutex con nome finché il Launcher è aperto.
+#pragma warning disable IDE0052
     private static Mutex? _mutex;
+#pragma warning restore IDE0052
 
     public static bool TryBecomePrimary()
     {

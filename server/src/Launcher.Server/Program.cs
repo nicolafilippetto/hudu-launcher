@@ -9,7 +9,6 @@ using Launcher.Server.Integrations;
 using Launcher.Server.Inventory;
 using Launcher.Server.Security;
 using Launcher.Server.Settings;
-using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;

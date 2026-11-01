@@ -94,7 +94,7 @@ server (se la licenza lo consente), rotazione periodica, alert sugli accessi API
 | SAST multi-linguaggio e segreti | Semgrep 1.182 (regole C#, JavaScript, OWASP Top 10, segreti, Dockerfile, GitHub Actions) | 6 segnalazioni: 4 corrette (attesa sugli aggiornamenti Dependabot), 2 falsi positivi motivati nel codice → **0 aperte** |
 | Dipendenze | `dotnet list package --vulnerable` + Dependabot | Nessuna libreria vulnerabile |
 | DAST | OWASP ZAP 2.16.1, scansione attiva **con sessione da amministratore**, in modalità produzione | 1 difetto reale: il pulsante Esci non inviava il token antiforgery (logout in errore, nessun rischio CSRF perché la richiesta veniva rifiutata) → **corretto e coperto da test**. Altri avvisi analizzati: falsi positivi ("XSLT" dal testo "Microsoft 365") o comportamenti voluti (IP dei clienti mostrati ai tecnici autenticati) |
-| Test automatici | 92 test server, 62 Launcher | Includono: biglietti rubati/scaduti/riusati, token di altro tenant o senza scope, utenti in attesa o bloccati, asserzione del certificato, solo lettura verso Hudu, antiforgery, ruoli |
+| Test automatici | 120 test server, 100 Launcher | Includono: biglietti rubati/scaduti/riusati, token di altro tenant o senza scope, utenti in attesa o bloccati, asserzione del certificato, solo lettura verso Hudu, antiforgery, ruoli, autorizzazioni dell'accesso web (scadute, di altro utente, credenziali non proposte), versione minima del Launcher, firma del feed degli aggiornamenti, nomi di file non ammessi nel download |
 
 In CI (GitHub Actions) girano a ogni modifica, e ogni settimana anche senza modifiche:
 
@@ -102,6 +102,14 @@ In CI (GitHub Actions) girano a ogni modifica, e ogni settimana anche senza modi
 - **CodeQL** con le regole di sicurezza estese su C#, JavaScript e workflow (workflow *CodeQL*);
 - **revisione delle dipendenze** nelle pull request: blocca librerie o azioni con vulnerabilità note;
 - gli analizzatori .NET, in ogni compilazione.
+
+Ultima revisione completa (novembre 2026, dopo pagine web integrate, accesso web da Hudu e
+distribuzione del Launcher dal portale): Semgrep 0 segnalazioni, nessuna libreria vulnerabile o
+deprecata, compilazione senza avvisi, revisione manuale dei nuovi endpoint (`/launcher/{file}`,
+`/api/connector/web-login`, versione minima) e del codice del Launcher (proxy locale, compilazione
+dell'accesso, aggiornamenti). Correzioni: il Launcher ignora le variabili d'ambiente di WebView2 che
+potrebbero aprire una porta di debug sul browser integrato; tolti codice inutilizzato e gli script
+di prova iniziali.
 
 I risultati di Semgrep e CodeQL sono in **Security → Code scanning**. Le azioni di GitHub sono
 fissate per hash del commit e Dependabot propone gli aggiornamenti dopo 7 giorni dall'uscita.
@@ -121,5 +129,18 @@ fissate per hash del commit e Dependabot propone gli aggiornamenti dopo 7 giorni
   locale del tunnel RustDesk. Antivirus/EDR e PC gestiti.
 - **PC del tecnico**: durante la sessione, e per la durata della cache offline, le credenziali sono in
   memoria del Launcher. Antivirus/EDR e Intune sui PC; durata e numero di asset offline limitati dall'admin.
+- **Download del Launcher anonimo** (`/launcher/…`): serve perché il Launcher si aggiorna prima di
+  avere un token. Espone solo file pubblici (gli stessi delle Release) e quindi la versione del
+  portale; non si possono scaricare altri file. Consigliata una regola del WAF che limiti i
+  download ripetuti dallo stesso indirizzo.
+- **Aggiornamenti**: il Launcher installa solo feed firmati dalla pipeline e pacchetti con l'hash
+  del feed. La chiave privata (`LAUNCHER_UPDATE_KEY`) sta solo nei segreti di GitHub: chi può
+  modificare i segreti o i workflow del repository può firmare un aggiornamento. Proteggere
+  l'account GitHub con MFA e limitare chi ha accesso in scrittura.
+- **Tecnico che vuole leggere una password**: il Launcher non mostra né copia le password, ma resta
+  un controllo contro gli errori, non contro un tecnico deciso sul proprio PC (che ha i diritti sul
+  processo del Launcher). Le letture restano tutte nel registro (`ticket.redeem`, `web.login`).
 - Un codice MFA resta valido nella sua finestra di ~30 secondi.
 - Consigliato prima del go-live: **penetration test indipendente** sull'istanza pubblicata dietro il WAF.
+- Da tenere sotto controllo nel registro (meglio se inviato al SIEM): `ticket.reject`,
+  `web.login.reject`, `launcher.outdated`, `ratelimit` e accessi da indirizzi insoliti.
