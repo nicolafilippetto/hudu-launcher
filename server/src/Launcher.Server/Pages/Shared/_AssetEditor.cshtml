@@ -118,10 +118,16 @@
             </label>
         </div>
         <label class="field">
-            <span>URL della pagina web (facoltativo)</span>
-            <input class="input mono" name="WebUrl" value="@setting?.WebUrl" maxlength="500" autocomplete="off" spellcheck="false"
-                   placeholder="@(fqdn is null ? "es. https://vcenter.cliente.local/ui — se vuoto, per le connessioni web si usano indirizzo e porta" : $"se vuoto: {fqdn} (FQDN dell'IPAM di Hudu)")" />
+            <span>Indirizzo delle pagine web</span>
+            <select class="input mono" name="WebAddress">
+                <option value="">FQDN dall'IPAM (@(fqdn ?? "non presente in Hudu: si usa l'IP"))</option>
+                <option value="@ConnectionResolver.WebAddressIp" selected="@(setting?.WebAddress == ConnectionResolver.WebAddressIp)">IP (@(setting?.Host ?? autoHost ?? "nessun IP"))</option>
+            </select>
         </label>
+        @if (!string.IsNullOrEmpty(setting?.WebUrl))
+        {
+            <p class="muted small">L'URL scritto a mano in precedenza (<span class="mono">@setting.WebUrl</span>) non si usa più e verrà tolto al salvataggio: l'indirizzo viene dall'FQDN dell'IPAM di Hudu (per un percorso o una porta, scrivere in Hudu l'indirizzo completo, es. https://vcenter.cliente.local/ui).</p>
+        }
         <div class="grid grid-2">
             <label class="field">
                 <span>Credenziale (da Hudu)</span>

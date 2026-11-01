@@ -73,6 +73,8 @@ public static class ConnectionResolver
     public const string PrimaryKey = "primary";
     public const string ConsoleKey = "console";
     public const string ExtraPrefix = "extra:";
+    /// <summary>Valore di <see cref="AssetSetting.WebAddress"/> per usare l'IP invece dell'FQDN.</summary>
+    public const string WebAddressIp = "ip";
 
     public static int DefaultPort(ConnectionProtocol protocol) => protocol switch
     {
@@ -139,13 +141,8 @@ public static class ConnectionResolver
         var connections = new List<ResolvedConnection>();
 
         // --- Connessione principale ---
-        // Un URL per la pagina web decide protocollo, host e porta (può essere un FQDN, risolto dal jump host).
-        var webUrl = Connections.WebUrls.Parse(setting?.WebUrl).Url;
-        var protocol = setting?.Protocol ?? (webUrl is null ? GuessProtocol(asset.OperatingSystem, layout, ownPeer) : WebProtocol(webUrl));
-        if (protocol is not (ConnectionProtocol.Http or ConnectionProtocol.Https))
-        {
-            webUrl = null;
-        }
+        var protocol = setting?.Protocol ?? GuessProtocol(asset.OperatingSystem, layout, ownPeer);
+        Uri? webUrl = null;
 
         string? gateway;
         string? gatewaySource;
@@ -181,18 +178,13 @@ public static class ConnectionResolver
         }
 
         var port = setting?.Port ?? DefaultPort(protocol);
+        // Le connessioni aggiuntive senza indirizzo usano l'IP della principale.
         var ipHost = host;
-        // Le connessioni aggiuntive senza indirizzo usano quello della principale (l'URL scritto nel
-        // portale, se c'è), non l'FQDN delle pagine web.
-        var extrasHost = webUrl?.Host.Trim('[', ']') ?? host;
-        if (webUrl is not null)
+        var useFqdn = !string.Equals(setting?.WebAddress, WebAddressIp, StringComparison.Ordinal);
+        if (IsWebProtocol(protocol) && useFqdn && FqdnUrl(asset, host) is { } fqdn)
         {
-            (protocol, host, port, hostIssue) = (WebProtocol(webUrl), webUrl.Host.Trim('[', ']'), webUrl.Port, null);
-        }
-        else if (IsWebProtocol(protocol) && FqdnUrl(asset, host) is { } fqdn)
-        {
-            // Pagina web senza URL scritto nel portale: vale l'FQDN che l'IPAM di Hudu associa all'IP
-            // (risolto dal jump host). Se in Hudu c'è un indirizzo completo, decide anche schema e porta.
+            // Pagine web: vale l'FQDN che l'IPAM di Hudu associa all'IP (risolto dal jump host), salvo
+            // la scelta "IP" nell'editor. Se in Hudu c'è un indirizzo completo, decide anche schema e porta.
             if (fqdn.Url is { } fqdnUrl)
             {
                 webUrl = fqdnUrl;
@@ -223,8 +215,8 @@ public static class ConnectionResolver
         foreach (var extra in ctx.Extras[asset.Id].OrderBy(e => e.Label, StringComparer.OrdinalIgnoreCase))
         {
             var extraUrl = Connections.WebUrls.Parse(extra.Url).Url;
-            var extraHost = extraUrl?.Host.Trim('[', ']') ?? extra.Host ?? extrasHost;
-            if (extraUrl is null && extra.Host is null && IsWebProtocol(extra.Protocol) && FqdnUrl(asset, ipHost) is { } extraFqdn)
+            var extraHost = extraUrl?.Host.Trim('[', ']') ?? extra.Host ?? ipHost;
+            if (extraUrl is null && extra.Host is null && useFqdn && IsWebProtocol(extra.Protocol) && FqdnUrl(asset, ipHost) is { } extraFqdn)
             {
                 // Pagina web sullo stesso indirizzo dell'asset: anche qui l'FQDN dell'IPAM.
                 if (extraFqdn.Url is { } extraFqdnUrl && (extra.Port is null || extra.Port == extraFqdnUrl.Port))

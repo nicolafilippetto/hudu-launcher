@@ -33,7 +33,8 @@ public sealed class AssetForm
     public List<ExtraForm> Extras { get; set; } = [];
     /// <summary>Opzioni RDP: chiave → valore; vuoto = predefinito.</summary>
     public Dictionary<string, string?> Rdp { get; set; } = [];
-    public string? WebUrl { get; set; }
+    /// <summary>"" = FQDN dell'IPAM (predefinito), "ip" = IP.</summary>
+    public string? WebAddress { get; set; }
     public Dictionary<string, string?> Web { get; set; } = [];
 }
 
@@ -183,15 +184,14 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
             errors.Add("La nota supera i 500 caratteri.");
         }
 
-        var (webUrl, webUrlError) = WebUrls.Parse(form.WebUrl);
-        if (webUrlError is not null)
+        string? webAddress = null;
+        if (form.WebAddress == ConnectionResolver.WebAddressIp)
         {
-            errors.Add($"URL della pagina web: {webUrlError}.");
+            webAddress = ConnectionResolver.WebAddressIp;
         }
-        else if (webUrl is not null && protocol is not (null or ConnectionProtocol.Http or ConnectionProtocol.Https))
+        else if (!string.IsNullOrEmpty(form.WebAddress))
         {
-            errors.Add("L'URL della pagina web vale solo con il protocollo Web: lascia il protocollo su Automatico o scegli HTTP/HTTPS.");
-            webUrl = null;
+            errors.Add("Indirizzo delle pagine web non valido.");
         }
 
         var extras = new List<(ExtraForm Form, ConnectionProtocol Protocol, string? Host, int? Port, string? Url, int? PasswordId, string? Gateway)>();
@@ -256,7 +256,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         var now = DateTimeOffset.UtcNow;
         var setting = await db.AssetSettings.FindAsync([asset.Id], ct);
         var isEmpty = protocol is null && host is null && port is null && passwordId is null && gateway is null && !form.Hidden && note is null
-            && rdp.Count == 0 && webUrl is null && web.Count == 0;
+            && rdp.Count == 0 && webAddress is null && web.Count == 0;
         if (isEmpty)
         {
             if (setting is not null)
@@ -280,7 +280,9 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
             setting.Hidden = form.Hidden;
             setting.Note = note;
             setting.RdpOptions = RdpOptionCatalog.Serialize(rdp);
-            setting.WebUrl = webUrl?.AbsoluteUri;
+            // L'URL scritto a mano delle versioni precedenti non si usa più: si toglie al salvataggio.
+            setting.WebUrl = null;
+            setting.WebAddress = webAddress;
             setting.WebOptions = OptionCatalog.Serialize(web);
             setting.UpdatedAt = now;
             setting.UpdatedBy = Email;
@@ -319,7 +321,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         await audit.WriteAsync(new AuditEntry("asset.update", Email, CompanyName: company, AssetId: asset.Id, AssetName: asset.Name,
             Details: Summarize(protocol, host, port, passwordId, gateway, form.Hidden, extras.Count)
                      + (rdp.Count > 0 ? "; RDP: " + RdpOptionCatalog.Describe(rdp) : "")
-                     + (webUrl is null ? "" : "; URL: " + webUrl.AbsoluteUri)
+                     + (webAddress is null ? "" : "; pagine web su IP")
                      + (web.Count > 0 ? "; Web: " + WebOptionCatalog.Catalog.Describe(web) : "")), HttpContext, ct);
 
         var resolved = await inventory.GetAssetAsync(asset.Id, Email, ct);
@@ -456,7 +458,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
 
             setting.UpdatedAt = now;
             setting.UpdatedBy = Email;
-            if (setting is { Protocol: null, Host: null, Port: null, PasswordId: null, GatewayPeerId: null, Hidden: false, Note: null, RdpOptions: null, WebUrl: null, WebOptions: null })
+            if (setting is { Protocol: null, Host: null, Port: null, PasswordId: null, GatewayPeerId: null, Hidden: false, Note: null, RdpOptions: null, WebUrl: null, WebAddress: null, WebOptions: null })
             {
                 db.AssetSettings.Remove(setting);
             }

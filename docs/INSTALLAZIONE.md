@@ -262,8 +262,9 @@ leggono più (vanno reinseriti dalla sezione admin).
    assegnata (creata dentro l'asset, ★) o quelle *related* nella barra di destra (↔), anche se
    condivise con altri asset. Con una sola password collegata, o una sola assegnata, si usa da
    sola; una scelta fatta prima e non più collegata viene segnalata ("va collegata in Hudu") e
-   non si usa. Le **pagine web** senza URL scritto nel portale usano l'**FQDN** che l'IPAM
-   associa all'IP (es. `vcenter.cliente.local` o `https://vcenter.cliente.local/ui`).
+   non si usa. Le **pagine web** usano l'**FQDN** che l'IPAM associa all'IP (es.
+   `vcenter.cliente.local`, o `https://vcenter.cliente.local:9443/ui` con porta e percorso);
+   nell'editor si può scegliere di usare l'IP. Senza FQDN nell'IPAM si usa l'IP.
 6. **Accessi di emergenza**: crearne almeno un secondo (password robusta + app di autenticazione).
 7. Entrare con **Accedi con Microsoft 365**: la richiesta finisce in attesa. Con l'accesso di
    emergenza approvarla in **Utenti → Come admin**; da quel momento l'accesso locale serve solo per

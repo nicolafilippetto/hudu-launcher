@@ -732,7 +732,8 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            db.AssetSettings.Add(new AssetSetting { AssetId = 10, WebUrl = "https://srv-dc01.cliente.local/ui" });
+            db.AssetSettings.Add(new AssetSetting { AssetId = 10, Protocol = ConnectionProtocol.Https });
+            (await db.Assets.FindAsync([10], ct))!.IpamFqdns = "10.0.0.10 https://srv-dc01.cliente.local/ui";
             await db.SaveChangesAsync(ct);
         }
 
@@ -778,6 +779,7 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
             using var scope = factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             await db.AssetSettings.Where(a => a.AssetId == 10).ExecuteDeleteAsync(ct);
+            await db.Assets.Where(a => a.Id == 10).ExecuteUpdateAsync(a => a.SetProperty(x => x.IpamFqdns, (string?)null), ct);
         }
     }
 

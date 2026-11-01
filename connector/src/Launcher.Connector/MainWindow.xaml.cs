@@ -217,9 +217,15 @@ public partial class MainWindow : Window
 
             if (Tabs.Items.Count == 0)
             {
-                SetStatus("Installazione dell'aggiornamento…");
+                SetStatus("Installazione dell'aggiornamento: il Launcher si riapre da solo tra pochi secondi…");
                 _workflow.Shutdown();
-                _updater.ApplyAndRestart();
+                if (_updater.PrepareRestart())
+                {
+                    // Chiusura normale: l'updater attende l'uscita, installa e riapre il Launcher.
+                    _closingConfirmed = true;
+                    Application.Current.Shutdown();
+                }
+
                 return;
             }
 

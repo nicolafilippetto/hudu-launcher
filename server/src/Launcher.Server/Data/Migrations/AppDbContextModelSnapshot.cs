@@ -79,6 +79,9 @@ namespace Launcher.Server.Data.Migrations
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("WebAddress")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("WebOptions")
                         .HasColumnType("TEXT");
 

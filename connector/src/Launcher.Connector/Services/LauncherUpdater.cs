@@ -19,6 +19,7 @@ public sealed class LauncherUpdater
     private UpdateManager? _manager;
     private UpdateInfo? _update;
     private VelopackAsset? _downloaded;
+    private bool _applyScheduled;
 
     /// <summary>Chiave pubblica per la firma del feed; senza chiave niente aggiornamenti automatici.</summary>
     public static string? PublicKey { get; } =
@@ -38,14 +39,25 @@ public sealed class LauncherUpdater
             return null;
         }
 
-        var manager = new UpdateManager(new SignedPortalSource(new Uri(portal, "launcher/"), PublicKey));
-        if (!manager.IsInstalled)
+        // Fuori dal thread della finestra: Velopack legge i pacchetti locali e il feed anche in modo
+        // sincrono, e la finestra non deve bloccarsi.
+        var key = PublicKey;
+        var (manager, update) = await Task.Run<(UpdateManager?, UpdateInfo?)>(async () =>
+        {
+            var manager = new UpdateManager(new SignedPortalSource(new Uri(portal, "launcher/"), key));
+            if (!manager.IsInstalled)
+            {
+                return (null, null);
+            }
+
+            ct.ThrowIfCancellationRequested();
+            return (manager, await manager.CheckForUpdatesAsync().ConfigureAwait(false));
+        }, ct);
+        if (manager is null)
         {
             return null;
         }
 
-        ct.ThrowIfCancellationRequested();
-        var update = await manager.CheckForUpdatesAsync();
         _manager = manager;
         _update = update;
         if (update is not null)
@@ -63,24 +75,36 @@ public sealed class LauncherUpdater
             throw new InvalidOperationException("Nessun aggiornamento da scaricare.");
         }
 
-        await _manager.DownloadUpdatesAsync(_update, progress, ct);
-        _downloaded = _update.TargetFullRelease;
+        // Download, verifica degli hash ed eventuali pacchetti delta: lavoro pesante, fuori dalla finestra.
+        var (manager, update) = (_manager, _update);
+        await Task.Run(() => manager.DownloadUpdatesAsync(update, progress, cancelToken: ct), ct);
+        _downloaded = update.TargetFullRelease;
         Log.Info($"Aggiornamento {_downloaded.Version} scaricato e verificato");
     }
 
-    /// <summary>Installa subito e riapre il Launcher (da usare senza connessioni aperte).</summary>
-    public void ApplyAndRestart()
+    /// <summary>
+    /// Prepara l'installazione immediata (senza connessioni aperte): l'updater di Velopack attende
+    /// che il Launcher si chiuda, installa mostrando l'avanzamento e lo riapre. Il chiamante deve poi
+    /// chiudere l'app normalmente: uscire di colpo (come fa ApplyUpdatesAndRestart) con i controlli
+    /// COM e WebView2 ancora attivi bloccava la finestra per qualche secondo ("Non risponde").
+    /// </summary>
+    /// <returns>true se l'updater è partito e l'app va chiusa.</returns>
+    public bool PrepareRestart()
     {
-        if (_manager is not null && _downloaded is not null)
+        if (_manager is null || _downloaded is null)
         {
-            _manager.ApplyUpdatesAndRestart(_downloaded);
+            return false;
         }
+
+        _manager.WaitExitThenApplyUpdates(_downloaded, silent: false, restart: true);
+        _applyScheduled = true;
+        return true;
     }
 
     /// <summary>Installa quando il Launcher si chiude.</summary>
     public void ApplyOnExit()
     {
-        if (_manager is not null && _downloaded is not null)
+        if (_manager is not null && _downloaded is not null && !_applyScheduled)
         {
             _manager.WaitExitThenApplyUpdates(_downloaded, silent: true, restart: false);
         }

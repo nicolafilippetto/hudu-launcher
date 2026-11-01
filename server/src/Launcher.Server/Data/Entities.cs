@@ -213,8 +213,13 @@ public sealed class AssetSetting
     public string? Note { get; set; }
     /// <summary>Opzioni RDP che sovrascrivono i predefiniti (JSON chiave → valore).</summary>
     public string? RdpOptions { get; set; }
-    /// <summary>Indirizzo completo della pagina web principale (es. https://vcenter.cliente.local/ui).</summary>
+    /// <summary>
+    /// URL della pagina web scritto a mano nelle versioni precedenti: non si usa più (l'indirizzo viene
+    /// dall'FQDN dell'IPAM di Hudu). Resta solo per segnalarlo nell'editor; si cancella al salvataggio.
+    /// </summary>
     public string? WebUrl { get; set; }
+    /// <summary>Indirizzo delle pagine web: null = FQDN dell'IPAM (se c'è), "ip" = sempre l'IP.</summary>
+    public string? WebAddress { get; set; }
     /// <summary>Opzioni delle pagine web che sovrascrivono i predefiniti (JSON chiave → valore).</summary>
     public string? WebOptions { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

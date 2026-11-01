@@ -128,14 +128,16 @@ public sealed class ConnectionResolverTests
     }
 
     [Fact]
-    public void Web_url_sets_protocol_host_and_port()
+    public void Fqdn_url_of_the_ipam_sets_protocol_host_and_port()
     {
         var ctx = Context(
             company: new CompanySetting { CompanyId = 1, GatewayPeerId = "111" },
-            setting: new AssetSetting { AssetId = 100, WebUrl = "https://vcenter.cliente.local:9443/ui" },
+            setting: new AssetSetting { AssetId = 100, Protocol = ConnectionProtocol.Https },
             extras: [new ExtraConnection { Id = 3, AssetId = 100, Label = "VAMI", Protocol = ConnectionProtocol.Https, Url = "https://vcenter.cliente.local:5480/" }]);
+        var asset = Asset(os: "VMware Photon OS");
+        asset.IpamFqdns = "10.0.0.10 https://vcenter.cliente.local:9443/ui";
 
-        var resolved = ConnectionResolver.Resolve(Asset(os: "VMware Photon OS"), ctx);
+        var resolved = ConnectionResolver.Resolve(asset, ctx);
         var primary = resolved.Primary!;
         Assert.Equal(ConnectionProtocol.Https, primary.Protocol);
         Assert.Equal("vcenter.cliente.local", primary.Host);
@@ -149,12 +151,15 @@ public sealed class ConnectionResolverTests
     }
 
     [Fact]
-    public void Web_url_is_ignored_for_rdp_and_default_url_uses_target()
+    public void Old_handwritten_url_is_ignored_and_default_url_uses_target()
     {
-        var ctx = Context(setting: new AssetSetting { AssetId = 100, Protocol = ConnectionProtocol.Rdp, WebUrl = "https://x.local/" });
+        var ctx = Context(setting: new AssetSetting { AssetId = 100, WebUrl = "https://x.local/" });
         var primary = ConnectionResolver.Resolve(Asset(), ctx).Primary!;
         Assert.Equal(ConnectionProtocol.Rdp, primary.Protocol);
         Assert.Null(primary.WebUrl);
+
+        var https = ConnectionResolver.Resolve(Asset(), Context(setting: new AssetSetting { AssetId = 100, Protocol = ConnectionProtocol.Https, WebUrl = "https://x.local/" })).Primary!;
+        Assert.Equal("https://10.0.0.10/", https.WebUrl);
 
         var web = ConnectionResolver.Resolve(Asset(), Context(setting: new AssetSetting { AssetId = 100, Protocol = ConnectionProtocol.Https, Port = 8443 })).Primary!;
         Assert.Equal("https://10.0.0.10:8443/", web.WebUrl);
@@ -278,16 +283,20 @@ public sealed class ConnectionResolverTests
     }
 
     [Fact]
-    public void Fqdn_is_not_used_for_rdp_or_when_an_url_is_written()
+    public void Fqdn_is_not_used_for_rdp_or_when_ip_is_chosen()
     {
         var asset = Asset();
         asset.IpamFqdns = "10.0.0.10 srv01.cliente.local";
         Assert.Equal("10.0.0.10", ConnectionResolver.Resolve(asset, Context()).Primary!.Host);
 
         var web = Asset(os: null, layout: 9);
-        web.IpamFqdns = "10.0.0.10 fw.cliente.local";
-        var ctx = Context(setting: new AssetSetting { AssetId = 100, WebUrl = "https://10.0.0.10:4444/" });
-        Assert.Equal("https://10.0.0.10:4444/", ConnectionResolver.Resolve(web, ctx).Primary!.WebUrl);
+        web.IpamFqdns = "10.0.0.10 https://fw.cliente.local/ui";
+        var ctx = Context(
+            setting: new AssetSetting { AssetId = 100, Port = 4444, WebAddress = ConnectionResolver.WebAddressIp },
+            extras: [new ExtraConnection { Id = 5, AssetId = 100, Label = "Admin", Protocol = ConnectionProtocol.Https, Port = 8443 }]);
+        var resolved = ConnectionResolver.Resolve(web, ctx);
+        Assert.Equal("https://10.0.0.10:4444/", resolved.Primary!.WebUrl);
+        Assert.Equal("https://10.0.0.10:8443/", resolved.Connections.Single(c => c.Key == "extra:5").WebUrl);
     }
 
     [Fact]
