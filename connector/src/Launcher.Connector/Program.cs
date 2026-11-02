@@ -35,6 +35,8 @@ public static class Program
         }
 
         ProtocolRegistration.Register();
+        // Collegamenti con l'ID dell'app e l'icona (quelli dell'MSI ne sono privi): fuori dall'avvio.
+        _ = Task.Run(ShortcutRepair.Run);
         var app = new App(request);
         app.InitializeComponent();
         return app.Run();

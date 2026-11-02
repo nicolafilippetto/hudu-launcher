@@ -784,6 +784,23 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
     }
 
     [Fact]
+    public async Task Portal_can_be_installed_as_an_app()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
+        var response = await client.GetAsync(new Uri("/manifest.webmanifest", UriKind.Relative), ct);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("application/manifest+json", response.Content.Headers.ContentType?.MediaType);
+        var manifest = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
+        Assert.Equal("standalone", manifest.GetProperty("display").GetString());
+        foreach (var icon in manifest.GetProperty("icons").EnumerateArray())
+        {
+            var src = icon.GetProperty("src").GetString()!;
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(new Uri(src, UriKind.Relative), ct)).StatusCode);
+        }
+    }
+
+    [Fact]
     public async Task Portal_serves_the_bundled_launcher_and_nothing_else()
     {
         var ct = TestContext.Current.CancellationToken;

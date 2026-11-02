@@ -27,6 +27,34 @@ public static class BrandingEndpoints
             http.Response.Headers.CacheControl = "public, max-age=300";
             return Results.File(asset.Data, asset.ContentType, lastModified: asset.UpdatedAt);
         }).AllowAnonymous();
+
+        // Manifest per installare il portale come app dal browser (Edge/Chrome): finestra propria e
+        // icona nella barra delle applicazioni. Anonimo, come la favicon: il browser lo scarica senza cookie.
+        app.MapGet("/manifest.webmanifest", (Settings.SettingsService settings, HttpContext http) =>
+        {
+            var name = settings.Portal.Name;
+            http.Response.Headers.CacheControl = "public, max-age=3600";
+            return Results.Json(new
+            {
+                id = "/",
+                name,
+                short_name = name.Length <= 15 ? name : "Launcher",
+                description = "Connessioni ai sistemi dei clienti da Hudu",
+                lang = "it",
+                start_url = "/",
+                scope = "/",
+                display = "standalone",
+                background_color = "#000000",
+                theme_color = "#ffffff",
+                icons = new object[]
+                {
+                    new { src = "/img/app-192.png", sizes = "192x192", type = "image/png", purpose = "any" },
+                    new { src = "/img/app-512.png", sizes = "512x512", type = "image/png", purpose = "any" },
+                    new { src = "/img/app-maskable-512.png", sizes = "512x512", type = "image/png", purpose = "maskable" },
+                    new { src = "/img/favicon.svg", sizes = "any", type = "image/svg+xml", purpose = "any" },
+                },
+            }, contentType: "application/manifest+json");
+        }).AllowAnonymous();
     }
 
     /// <summary>

@@ -62,6 +62,7 @@
             document.documentElement.removeAttribute("data-theme");
         }
         try { localStorage.setItem("launcher-theme", theme); } catch (e) { /* ignorato */ }
+        if (window.updateThemeColor) { window.updateThemeColor(); }
     }
 
     document.addEventListener("click", function (event) {
