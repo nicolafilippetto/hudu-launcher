@@ -68,8 +68,8 @@ public sealed class RustDeskTunnels
                 _rules[peerId] = list;
             }
 
-            // RustDesk legge le regole dal file del dispositivo, che crea alla prima connessione da questo
-            // PC: se manca, il file scritto dal Launcher viene ignorato e la finestra del tunnel resta vuota.
+            // RustDesk legge le regole dal file del dispositivo nella cartella del client avviato; se il
+            // file non c'è ancora (dispositivo mai usato da questo PC) lo crea il Launcher lì.
             var peerFile = PeerFilePath(exe, peerId);
             var knownPeer = File.Exists(peerFile);
             list.Add(rule);
@@ -92,28 +92,18 @@ public sealed class RustDeskTunnels
             {
                 // Probabilmente c'era già una finestra di tunnel verso questo dispositivo, aperta
                 // prima del Launcher: si chiude tutto e si riapre con le regole aggiornate.
-                Log.Warn($"Porta {rule.LocalPort} non aperta in {FirstWait.TotalSeconds}s" + (knownPeer ? ", riapro i tunnel" : ""));
-                if (!knownPeer)
-                {
-                    // Riaprire non serve: RustDesk non conosce ancora il dispositivo da questo PC.
-                    list.Remove(rule);
-                    WritePeerFile(exe, peerId, list);
-                    ClosePortForwardWindows(exe);
-                    throw new RustDeskException(
-                        $"RustDesk non ha aperto il tunnel verso {peerId}, che da questo PC non risulta ancora usato. " +
-                        $"Apri RustDesk, collegati una volta a {peerId} dalla rubrica (controllo remoto), chiudi la sessione " +
-                        "e rilancia la connessione dal portale.");
-                }
-
+                Log.Warn($"Porta {rule.LocalPort} non aperta in {FirstWait.TotalSeconds}s, riapro i tunnel");
                 progress?.Report("RustDesk non ha aperto il tunnel, nuovo tentativo…");
                 await RestartAllAsync(exe, ct);
                 if (!await WaitListeningAsync(rule.LocalPort, RetryWait, ct))
                 {
                     list.Remove(rule);
                     WritePeerFile(exe, peerId, list);
+                    Log.Warn($"Tunnel non aperto: regole scritte in {peerFile} per {Path.GetFileName(exe)}");
                     throw new RustDeskException(
                         "RustDesk non ha aperto il tunnel. Controlla la finestra di RustDesk: il dispositivo è online e la " +
-                        "password è corretta? Se il problema resta, aggiorna RustDesk sul jump host e riprova.");
+                        "password è corretta? Se il problema resta, aggiorna RustDesk sul jump host e riprova " +
+                        $"(regole del tunnel in {peerFile}).");
                 }
             }
 
