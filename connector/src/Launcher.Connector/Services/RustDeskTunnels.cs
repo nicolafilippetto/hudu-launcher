@@ -100,9 +100,9 @@ public sealed class RustDeskTunnels
                     WritePeerFile(exe, peerId, list);
                     ClosePortForwardWindows(exe);
                     throw new RustDeskException(
-                        $"Da questo PC non ti sei mai collegato con RustDesk al jump host {peerId}, e RustDesk non apre il " +
-                        "tunnel verso un dispositivo che non conosce. Apri RustDesk, collegati una volta a " + peerId +
-                        " dalla rubrica (controllo remoto), chiudi la sessione e rilancia la connessione dal portale.");
+                        $"RustDesk non ha aperto il tunnel verso {peerId}, che da questo PC non risulta ancora usato. " +
+                        $"Apri RustDesk, collegati una volta a {peerId} dalla rubrica (controllo remoto), chiudi la sessione " +
+                        "e rilancia la connessione dal portale.");
                 }
 
                 progress?.Report("RustDesk non ha aperto il tunnel, nuovo tentativo…");
@@ -205,7 +205,7 @@ public sealed class RustDeskTunnels
         }
 
         using var process = Process.Start(start);
-        Log.Info($"RustDesk avviato: --port-forward {peerId}");
+        Log.Info($"RustDesk avviato: {Path.GetFileName(exe)} --port-forward {peerId} ({exe})");
     }
 
     private void WritePeerFile(string exe, string peerId, IReadOnlyCollection<TunnelRule> rules)
@@ -221,19 +221,42 @@ public sealed class RustDeskTunnels
     }
 
     /// <summary>
-    /// File del dispositivo: <c>%APPDATA%\&lt;nome client&gt;\config\peers\&lt;ID&gt;.toml</c>. Si preferisce
-    /// la cartella che contiene già il file (il dispositivo è stato usato da questo PC).
+    /// File del dispositivo: <c>%APPDATA%\&lt;nome client&gt;\config\peers\&lt;ID&gt;.toml</c>. Conta la cartella del
+    /// client che il Launcher avvia: i client personalizzati (es. "Azienda-RustDesk-Client") usano il nome
+    /// della loro cartella di installazione, che può essere diverso dal nome dell'eseguibile. Un vecchio
+    /// RustDesk standard sullo stesso PC ha una sua cartella che il client personalizzato non legge.
     /// </summary>
     internal static string PeerFilePath(string exe, string peerId)
     {
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var fileName = peerId + ".toml";
-        var candidates = new[] { Path.GetFileNameWithoutExtension(exe), "RustDesk" }
+        var installFolder = Path.GetFileName(Path.GetDirectoryName(exe) ?? "");
+        var clientDirs = new[] { installFolder, Path.GetFileNameWithoutExtension(exe) }
+            .Where(name => name.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Select(name => Path.Combine(appData, name, "config", "peers"))
+            .Select(name => Path.Combine(appData, name, "config"))
             .ToList();
 
-        foreach (var dir in candidates)
+        // 1. Il file del dispositivo nella cartella del client avviato.
+        foreach (var config in clientDirs)
+        {
+            var path = Path.Combine(config, "peers", fileName);
+            if (File.Exists(path))
+            {
+                return path;
+            }
+        }
+
+        // 2. Il client è già stato usato su questo PC (ha la sua configurazione): il file va lì,
+        //    anche se il dispositivo è nuovo.
+        if (clientDirs.FirstOrDefault(Directory.Exists) is { } clientConfig)
+        {
+            return Path.Combine(clientConfig, "peers", fileName);
+        }
+
+        // 3. Ripiego: la cartella di RustDesk standard o un'altra che conosce già il dispositivo.
+        var standard = Path.Combine(appData, "RustDesk", "config", "peers");
+        foreach (var dir in new[] { standard }.Concat(Directory.EnumerateDirectories(appData).Select(d => Path.Combine(d, "config", "peers"))))
         {
             if (File.Exists(Path.Combine(dir, fileName)))
             {
@@ -241,20 +264,7 @@ public sealed class RustDeskTunnels
             }
         }
 
-        foreach (var dir in Directory.EnumerateDirectories(appData))
-        {
-            var path = Path.Combine(dir, "config", "peers", fileName);
-            if (File.Exists(path))
-            {
-                return path;
-            }
-        }
-
-        // Il dispositivo non è ancora noto: si usa la cartella dei dispositivi già esistente del client
-        // (anche con un nome personalizzato, diverso da quello dell'eseguibile).
-        var existing = candidates.FirstOrDefault(Directory.Exists)
-            ?? Directory.EnumerateDirectories(appData).Select(d => Path.Combine(d, "config", "peers")).FirstOrDefault(Directory.Exists);
-        return Path.Combine(existing ?? candidates[0], fileName);
+        return Path.Combine(clientDirs.Count > 0 ? clientDirs[0] : Path.Combine(appData, "RustDesk", "config"), "peers", fileName);
     }
 
     public static string LocateExecutable() =>
