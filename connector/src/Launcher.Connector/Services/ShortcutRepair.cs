@@ -60,7 +60,9 @@ public static class ShortcutRepair
         try
         {
             var file = (IPersistFile)shellLink;
-            file.Load(link, 0);
+            // In lettura e scrittura: aperto in sola lettura, il salvataggio sullo stesso file viene
+            // rifiutato con STG_E_ACCESSDENIED.
+            file.Load(link, StgmReadWrite);
 
             var target = new StringBuilder(1024);
             shellLink.GetPath(target, target.Capacity, IntPtr.Zero, 0);
@@ -99,7 +101,7 @@ public static class ShortcutRepair
                 }
             }
 
-            file.Save(link, true);
+            file.Save(null, true);
             Log.Info($"Collegamento {Path.GetFileName(link)} aggiornato (ID dell'app{(iconOk ? "" : " e icona")}) per la barra delle applicazioni");
         }
         finally
@@ -122,6 +124,7 @@ public static class ShortcutRepair
     }
 
     private const ushort VtLpwstr = 31;
+    private const int StgmReadWrite = 0x2;
 
     /// <summary>PKEY_AppUserModel_ID.</summary>
     private static PropertyKey AppUserModelIdKey => new(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5);

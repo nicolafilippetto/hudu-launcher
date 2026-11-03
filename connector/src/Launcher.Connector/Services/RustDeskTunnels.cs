@@ -68,10 +68,15 @@ public sealed class RustDeskTunnels
                 _rules[peerId] = list;
             }
 
+            // RustDesk legge le regole dal file del dispositivo, che crea alla prima connessione da questo
+            // PC: se manca, il file scritto dal Launcher viene ignorato e la finestra del tunnel resta vuota.
+            var peerFile = PeerFilePath(exe, peerId);
+            var knownPeer = File.Exists(peerFile);
             list.Add(rule);
             _passwords[peerId] = password;
             WritePeerFile(exe, peerId, list);
-            Log.Info($"Tunnel richiesto: 127.0.0.1:{rule.LocalPort} → {remoteHost}:{remotePort} via {peerId}");
+            Log.Info($"Tunnel richiesto: 127.0.0.1:{rule.LocalPort} → {remoteHost}:{remotePort} via {peerId} " +
+                     $"(file del dispositivo {(knownPeer ? "esistente" : "NON presente, creato ora")}: {peerFile})");
 
             if (alreadyOpen)
             {
@@ -87,7 +92,19 @@ public sealed class RustDeskTunnels
             {
                 // Probabilmente c'era già una finestra di tunnel verso questo dispositivo, aperta
                 // prima del Launcher: si chiude tutto e si riapre con le regole aggiornate.
-                Log.Warn($"Porta {rule.LocalPort} non aperta in {FirstWait.TotalSeconds}s, riapro i tunnel");
+                Log.Warn($"Porta {rule.LocalPort} non aperta in {FirstWait.TotalSeconds}s" + (knownPeer ? ", riapro i tunnel" : ""));
+                if (!knownPeer)
+                {
+                    // Riaprire non serve: RustDesk non conosce ancora il dispositivo da questo PC.
+                    list.Remove(rule);
+                    WritePeerFile(exe, peerId, list);
+                    ClosePortForwardWindows(exe);
+                    throw new RustDeskException(
+                        $"Da questo PC non ti sei mai collegato con RustDesk al jump host {peerId}, e RustDesk non apre il " +
+                        "tunnel verso un dispositivo che non conosce. Apri RustDesk, collegati una volta a " + peerId +
+                        " dalla rubrica (controllo remoto), chiudi la sessione e rilancia la connessione dal portale.");
+                }
+
                 progress?.Report("RustDesk non ha aperto il tunnel, nuovo tentativo…");
                 await RestartAllAsync(exe, ct);
                 if (!await WaitListeningAsync(rule.LocalPort, RetryWait, ct))
@@ -96,8 +113,7 @@ public sealed class RustDeskTunnels
                     WritePeerFile(exe, peerId, list);
                     throw new RustDeskException(
                         "RustDesk non ha aperto il tunnel. Controlla la finestra di RustDesk: il dispositivo è online e la " +
-                        "password è corretta? Se non ti sei mai collegato a questo dispositivo da questo PC, fallo una volta " +
-                        "dalla rubrica di RustDesk e riprova.");
+                        "password è corretta? Se il problema resta, aggiorna RustDesk sul jump host e riprova.");
                 }
             }
 
@@ -234,7 +250,11 @@ public sealed class RustDeskTunnels
             }
         }
 
-        return Path.Combine(candidates.FirstOrDefault(Directory.Exists) ?? candidates[0], fileName);
+        // Il dispositivo non è ancora noto: si usa la cartella dei dispositivi già esistente del client
+        // (anche con un nome personalizzato, diverso da quello dell'eseguibile).
+        var existing = candidates.FirstOrDefault(Directory.Exists)
+            ?? Directory.EnumerateDirectories(appData).Select(d => Path.Combine(d, "config", "peers")).FirstOrDefault(Directory.Exists);
+        return Path.Combine(existing ?? candidates[0], fileName);
     }
 
     public static string LocateExecutable() =>
