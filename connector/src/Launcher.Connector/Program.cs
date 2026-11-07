@@ -10,7 +10,11 @@ public static class Program
     public static int Main(string[] args)
     {
         // Deve essere la prima istruzione: gestisce installazione, aggiornamento e disinstallazione.
+        // Nessun AppUserModelID esplicito (stringa vuota = non impostato): i collegamenti creati dall'MSI
+        // non lo hanno, e con un ID diverso Windows non abbinava la finestra al collegamento, mostrando
+        // l'icona generica. Senza ID esplicito l'abbinamento avviene dal percorso dell'eseguibile.
         VelopackApp.Build()
+            .SetAppUserModelId("")
             .OnFirstRun(_ => ProtocolRegistration.Register())
             .OnAfterUpdateFastCallback(_ => ProtocolRegistration.Register())
             .OnBeforeUninstallFastCallback(_ => ProtocolRegistration.Unregister())
@@ -35,8 +39,6 @@ public static class Program
         }
 
         ProtocolRegistration.Register();
-        // Collegamenti con l'ID dell'app e l'icona (quelli dell'MSI ne sono privi): fuori dall'avvio.
-        _ = Task.Run(ShortcutRepair.Run);
         var app = new App(request);
         app.InitializeComponent();
         return app.Run();

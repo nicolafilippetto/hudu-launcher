@@ -41,6 +41,7 @@ public sealed class RustDeskTunnels
     private const string PortForwardTitle = " - Port Forward - ";
     private static readonly TimeSpan FirstWait = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan RetryWait = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan PrepareWait = TimeSpan.FromSeconds(30);
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<string, List<TunnelRule>> _rules = new(StringComparer.Ordinal);
@@ -50,8 +51,9 @@ public sealed class RustDeskTunnels
     /// <summary>Scatta quando i tunnel vengono riaperti: le sessioni aperte possono riconnettersi.</summary>
     public event Action? Restarted;
 
-    public async Task<Tunnel> OpenAsync(string peerId, string? password, string remoteHost, int remotePort, IProgress<string>? progress,
-        string? portalClientPath, CancellationToken ct)
+    /// <param name="peerName">Nome del jump host nella rubrica RustDesk, per i messaggi al tecnico.</param>
+    public async Task<Tunnel> OpenAsync(string peerId, string? password, string? peerName, string remoteHost, int remotePort,
+        IProgress<string>? progress, string? portalClientPath, CancellationToken ct)
     {
         UsePortalClientPath(portalClientPath);
         var exe = LocateExecutable();
@@ -90,20 +92,31 @@ public sealed class RustDeskTunnels
 
             if (!await WaitListeningAsync(rule.LocalPort, FirstWait, ct))
             {
-                // Probabilmente c'era già una finestra di tunnel verso questo dispositivo, aperta
-                // prima del Launcher: si chiude tutto e si riapre con le regole aggiornate.
-                Log.Warn($"Porta {rule.LocalPort} non aperta in {FirstWait.TotalSeconds}s, riapro i tunnel");
-                progress?.Report("RustDesk non ha aperto il tunnel, nuovo tentativo…");
+                // RustDesk non ha letto le regole: di solito non ha ancora un file valido per questo
+                // dispositivo su questo PC (lo crea alla prima connessione), oppure era già aperta una
+                // finestra di tunnel. Si apre una connessione classica, che fa creare il file a RustDesk
+                // nella sua cartella, la si chiude e si riaprono i tunnel con le regole in quel file.
+                Log.Warn($"Porta {rule.LocalPort} non aperta in {FirstWait.TotalSeconds}s: connessione RustDesk per preparare {peerId}, poi riapro i tunnel");
+                progress?.Report("RustDesk non ha aperto il tunnel: preparo il jump host con una connessione RustDesk…");
+                ClosePortForwardWindows(exe);
+                var prepared = await PreparePeerAsync(exe, peerId, password, peerName, knownPeer ? null : peerFile, ct);
+                Log.Info(prepared is null
+                    ? $"Nessun file del dispositivo creato da RustDesk per {peerId} entro {PrepareWait.TotalSeconds}s"
+                    : $"File del dispositivo scritto da RustDesk: {prepared}");
+                WritePeerFile(exe, peerId, list);
+                progress?.Report("Riapertura del tunnel RustDesk…");
                 await RestartAllAsync(exe, ct);
                 if (!await WaitListeningAsync(rule.LocalPort, RetryWait, ct))
                 {
                     list.Remove(rule);
                     WritePeerFile(exe, peerId, list);
-                    Log.Warn($"Tunnel non aperto: regole scritte in {peerFile} per {Path.GetFileName(exe)}");
+                    ClosePortForwardWindows(exe);
+                    var label = string.IsNullOrWhiteSpace(peerName) ? peerId : $"{peerName} ({peerId})";
+                    Log.Warn($"Tunnel non aperto: regole scritte in {PeerFilePath(exe, peerId)} per {Path.GetFileName(exe)}");
                     throw new RustDeskException(
-                        "RustDesk non ha aperto il tunnel. Controlla la finestra di RustDesk: il dispositivo è online e la " +
-                        "password è corretta? Se il problema resta, aggiorna RustDesk sul jump host e riprova " +
-                        $"(regole del tunnel in {peerFile}).");
+                        $"Il tunnel verso il jump host {label} non si apre. Apri RustDesk, cerca \"{peerName ?? peerId}\" nella rubrica, " +
+                        "collegati una volta (controllo remoto), chiudi la sessione e rilancia la connessione dal portale. " +
+                        "Se ancora non va, aggiorna RustDesk sul jump host.");
                 }
             }
 
@@ -183,10 +196,56 @@ public sealed class RustDeskTunnels
         Restarted?.Invoke();
     }
 
-    private static void Launch(string exe, string peerId, string? password)
+    /// <summary>
+    /// Connessione classica al jump host (<c>--connect</c>), che fa scrivere a RustDesk il file del
+    /// dispositivo nella cartella che legge davvero. Appena il file compare (o cambia) la sessione si
+    /// chiude. Restituisce il file scritto, o null se non è comparso entro <see cref="PrepareWait"/>.
+    /// </summary>
+    private static async Task<string?> PreparePeerAsync(string exe, string peerId, string? password, string? peerName, string? launcherFile,
+        CancellationToken ct)
+    {
+        // Il file creato poco fa dal Launcher si toglie: così si vede quando lo scrive RustDesk.
+        if (launcherFile is not null && File.Exists(launcherFile))
+        {
+            File.Delete(launcherFile);
+        }
+
+        var candidates = PeerFileCandidates(exe, peerId);
+        var before = candidates.ToDictionary(path => path, path => File.Exists(path) ? File.GetLastWriteTimeUtc(path) : (DateTime?)null);
+        Launch(exe, peerId, password, "--connect");
+
+        string? written = null;
+        var deadline = DateTime.UtcNow + PrepareWait;
+        while (written is null && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(500, ct);
+            written = candidates.FirstOrDefault(path => File.Exists(path) && File.GetLastWriteTimeUtc(path) != before[path]);
+        }
+
+        // Si lascia a RustDesk il tempo di completare la scrittura, poi si chiude la sessione.
+        await Task.Delay(1500, ct);
+        var processes = Native.ProcessIds(Path.GetFileNameWithoutExtension(exe));
+        var tunnels = FindPortForwardWindows(exe);
+        var sessions = new[] { peerId, peerName }
+            .Where(text => !string.IsNullOrWhiteSpace(text))
+            .SelectMany(text => Native.FindWindows(processes, text!))
+            .Distinct()
+            .Where(hwnd => !tunnels.Contains(hwnd))
+            .ToList();
+        foreach (var hwnd in sessions)
+        {
+            Native.Close(hwnd);
+        }
+
+        Log.Info($"Connessione RustDesk di preparazione verso {peerId}: {sessions.Count} finestre chiuse");
+        await Task.Delay(1000, ct);
+        return written;
+    }
+
+    private static void Launch(string exe, string peerId, string? password, string mode = "--port-forward")
     {
         var start = new ProcessStartInfo(exe) { UseShellExecute = false };
-        start.ArgumentList.Add("--port-forward");
+        start.ArgumentList.Add(mode);
         start.ArgumentList.Add(peerId);
         if (!string.IsNullOrEmpty(password))
         {
@@ -195,7 +254,7 @@ public sealed class RustDeskTunnels
         }
 
         using var process = Process.Start(start);
-        Log.Info($"RustDesk avviato: {Path.GetFileName(exe)} --port-forward {peerId} ({exe})");
+        Log.Info($"RustDesk avviato: {Path.GetFileName(exe)} {mode} {peerId} ({exe})");
     }
 
     private void WritePeerFile(string exe, string peerId, IReadOnlyCollection<TunnelRule> rules)
@@ -218,14 +277,8 @@ public sealed class RustDeskTunnels
     /// </summary>
     internal static string PeerFilePath(string exe, string peerId)
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var clientDirs = ClientConfigDirs(exe);
         var fileName = peerId + ".toml";
-        var installFolder = Path.GetFileName(Path.GetDirectoryName(exe) ?? "");
-        var clientDirs = new[] { installFolder, Path.GetFileNameWithoutExtension(exe) }
-            .Where(name => name.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Select(name => Path.Combine(appData, name, "config"))
-            .ToList();
 
         // 1. Il file del dispositivo nella cartella del client avviato.
         foreach (var config in clientDirs)
@@ -244,18 +297,35 @@ public sealed class RustDeskTunnels
             return Path.Combine(clientConfig, "peers", fileName);
         }
 
-        // 3. Ripiego: la cartella di RustDesk standard o un'altra che conosce già il dispositivo.
-        var standard = Path.Combine(appData, "RustDesk", "config", "peers");
-        foreach (var dir in new[] { standard }.Concat(Directory.EnumerateDirectories(appData).Select(d => Path.Combine(d, "config", "peers"))))
-        {
-            if (File.Exists(Path.Combine(dir, fileName)))
-            {
-                return Path.Combine(dir, fileName);
-            }
-        }
-
-        return Path.Combine(clientDirs.Count > 0 ? clientDirs[0] : Path.Combine(appData, "RustDesk", "config"), "peers", fileName);
+        // 3. Ripiego: la cartella di RustDesk standard, se conosce già il dispositivo.
+        var standard = Path.Combine(StandardConfigDir(), "peers", fileName);
+        return File.Exists(standard) ? standard : Path.Combine(clientDirs[0], "peers", fileName);
     }
+
+    /// <summary>Dove RustDesk può scrivere il file del dispositivo: cartelle del client avviato e di RustDesk standard.</summary>
+    private static List<string> PeerFileCandidates(string exe, string peerId) =>
+        ClientConfigDirs(exe).Append(StandardConfigDir())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(config => Path.Combine(config, "peers", peerId + ".toml"))
+            .ToList();
+
+    /// <summary>
+    /// Cartelle di configurazione del client: i client personalizzati (es. "Azienda-RustDesk-Client") usano
+    /// il nome della cartella di installazione, che può essere diverso dal nome dell'eseguibile.
+    /// </summary>
+    private static List<string> ClientConfigDirs(string exe)
+    {
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var dirs = new[] { Path.GetFileName(Path.GetDirectoryName(exe) ?? ""), Path.GetFileNameWithoutExtension(exe) }
+            .Where(name => name.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(name => Path.Combine(appData, name, "config"))
+            .ToList();
+        return dirs.Count > 0 ? dirs : [StandardConfigDir()];
+    }
+
+    private static string StandardConfigDir() =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RustDesk", "config");
 
     public static string LocateExecutable() =>
         TryLocateExecutable() ?? throw new RustDeskException(

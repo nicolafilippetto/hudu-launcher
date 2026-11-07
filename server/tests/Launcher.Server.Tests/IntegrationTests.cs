@@ -362,6 +362,8 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
         Assert.Equal(3389, body.GetProperty("target").GetProperty("port").GetInt32());
         Assert.Equal("100200300", body.GetProperty("gateway").GetProperty("id").GetString());
         Assert.Equal("password-rustdesk", body.GetProperty("gateway").GetProperty("password").GetString());
+        // Nome del jump host nella rubrica RustDesk, per i messaggi del Launcher.
+        Assert.Equal("JUMP01", body.GetProperty("gateway").GetProperty("name").GetString());
         Assert.Equal("DOM\\admin", body.GetProperty("credential").GetProperty("username").GetString());
         Assert.Equal("P@ssw0rd!", body.GetProperty("credential").GetProperty("password").GetString());
 

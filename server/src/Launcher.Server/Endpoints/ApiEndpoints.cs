@@ -28,8 +28,11 @@ public sealed record OfflineBundleResponse(int ValidSeconds, IReadOnlyList<Redee
 
 public sealed record ConnectorConfigResponse(string? TenantId, string? ClientId, string? Scope, string PortalName);
 
-/// <summary>Jump host RustDesk; ClientPath = client personalizzato indicato dall'admin (facoltativo).</summary>
-public sealed record RedeemGateway(string Id, string? Password, string? ClientPath = null);
+/// <summary>
+/// Jump host RustDesk; ClientPath = client personalizzato indicato dall'admin (facoltativo);
+/// Name = nome del dispositivo nella rubrica RustDesk, per i messaggi al tecnico.
+/// </summary>
+public sealed record RedeemGateway(string Id, string? Password, string? ClientPath = null, string? Name = null);
 
 public sealed record RedeemTarget(string Host, int Port);
 
@@ -312,7 +315,7 @@ public static class ApiEndpoints
             return Results.Problem("La connessione non è più disponibile.", statusCode: StatusCodes.Status409Conflict);
         }
 
-        var (response, credentialNote) = await BuildConnectionAsync(asset, connection, ticket.Direct, settings, hudu, logger, ct);
+        var (response, credentialNote) = await BuildConnectionAsync(asset, connection, ticket.Direct, settings, hudu, inventory, logger, ct);
         if (response.Web is { Login: not "off" })
         {
             // Pagina web: solo nome e utente delle credenziali candidate, più l'autorizzazione per chiedere
@@ -465,7 +468,7 @@ public static class ApiEndpoints
             var notes = new List<string>();
             foreach (var connection in asset.Connections.Where(c => c.CanConnectDirect))
             {
-                var (response, credentialNote) = await BuildConnectionAsync(asset, connection, direct: true, settings, hudu, logger, ct);
+                var (response, credentialNote) = await BuildConnectionAsync(asset, connection, direct: true, settings, hudu, inventory, logger, ct);
                 connections.Add(response);
                 notes.Add($"{connection.Label}: {credentialNote}");
             }
@@ -538,8 +541,10 @@ public static class ApiEndpoints
 
     /// <summary>Dati di una connessione per il Launcher, con la credenziale letta da Hudu in quel momento.</summary>
     private static async Task<(RedeemResponse Response, string CredentialNote)> BuildConnectionAsync(
-        ResolvedAsset asset, ResolvedConnection connection, bool direct, SettingsService settings, HuduClient hudu, ILogger logger, CancellationToken ct)
+        ResolvedAsset asset, ResolvedConnection connection, bool direct, SettingsService settings, HuduClient hudu, InventoryService inventory,
+        ILogger logger, CancellationToken ct)
     {
+        var gatewayName = direct ? null : await inventory.GetPeerNameAsync(connection.GatewayPeerId!, ct);
         RedeemCredential? credential = null;
         string? warning = null;
         // Le interfacce web si aprono nel browser: utente e password si prendono da Hudu, non dal Launcher.
@@ -567,7 +572,7 @@ public static class ApiEndpoints
             asset.CompanyName,
             connection.Label,
             // Connessione diretta: niente jump host e niente password di RustDesk.
-            direct ? null : new RedeemGateway(connection.GatewayPeerId!, settings.RustDesk.ConnectionPassword, settings.RustDesk.ClientPath),
+            direct ? null : new RedeemGateway(connection.GatewayPeerId!, settings.RustDesk.ConnectionPassword, settings.RustDesk.ClientPath, gatewayName),
             new RedeemTarget(connection.Host!, connection.Port),
             credential,
             $"launcher-{asset.Asset.Id}-{connection.Key.Replace(':', '-')}",

@@ -171,7 +171,7 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
         {
             tab.Progress.Step(ConnectStep.Tunnel, gateway.Id);
             var status = new Progress<string>(tab.Progress.Detail);
-            var tunnel = await tunnels.OpenAsync(gateway.Id, gateway.Password, info.Target.Host, info.Target.Port, status, gateway.ClientPath, ct);
+            var tunnel = await tunnels.OpenAsync(gateway.Id, gateway.Password, gateway.Name, info.Target.Host, info.Target.Port, status, gateway.ClientPath, ct);
             tab.AttachTunnel(tunnel);
             endpoint = SessionEndpoint.ForTunnel(tunnel.LocalPort);
         }

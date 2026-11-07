@@ -121,6 +121,10 @@ public sealed class InventoryService(AppDbContext db, Settings.SettingsService s
     public async Task<IReadOnlyList<CachedPassword>> GetLinkedPasswordsAsync(CachedAsset asset, CancellationToken ct) =>
         ConnectionResolver.LinkedPasswords(asset, ConnectionResolver.IndexPasswordsByAsset(await GetCompanyPasswordsAsync(asset.CompanyId, ct)));
 
+    /// <summary>Nome del dispositivo nella rubrica RustDesk (alias, altrimenti hostname), se c'è.</summary>
+    public async Task<string?> GetPeerNameAsync(string peerId, CancellationToken ct) =>
+        await db.Peers.AsNoTracking().Where(p => p.Id == peerId).Select(p => p.Alias ?? p.Hostname).FirstOrDefaultAsync(ct);
+
     public async Task<IReadOnlyList<CachedPeer>> GetPeersAsync(CancellationToken ct) =>
         await db.Peers.AsNoTracking().OrderBy(p => p.Alias ?? p.Hostname ?? p.Id).ToListAsync(ct);
 

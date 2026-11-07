@@ -159,8 +159,30 @@
                 item.hidden = !terms.every(function (t) { return name.indexOf(t) >= 0; });
             });
         });
-        var active = $(".company-item.active");
-        if (active) { active.scrollIntoView({ block: "center" }); }
+    }
+
+    // L'elenco dei clienti resta dov'era tra un clic e l'altro (ogni clic ricarica la pagina). Si
+    // sposta solo se il cliente aperto non si vede, e muove solo l'elenco: scrollIntoView faceva
+    // scorrere anche la pagina, nascondendo l'intestazione del cliente.
+    var companyList = $("[data-company-list]");
+    if (companyList) {
+        try {
+            var savedScroll = sessionStorage.getItem("launcher-company-scroll");
+            if (savedScroll !== null) { companyList.scrollTop = parseInt(savedScroll, 10) || 0; }
+        } catch (e) { /* sessionStorage non disponibile */ }
+
+        var activeCompany = $(".company-item.active", companyList);
+        if (activeCompany) {
+            var itemBox = activeCompany.getBoundingClientRect();
+            var listBox = companyList.getBoundingClientRect();
+            if (itemBox.top < listBox.top || itemBox.bottom > listBox.bottom) {
+                companyList.scrollTop += itemBox.top - listBox.top - companyList.clientHeight / 3;
+            }
+        }
+
+        window.addEventListener("pagehide", function () {
+            try { sessionStorage.setItem("launcher-company-scroll", String(companyList.scrollTop)); } catch (e) { /* ignorato */ }
+        });
     }
 
     // ------------------------------------------------------------------ connessione
