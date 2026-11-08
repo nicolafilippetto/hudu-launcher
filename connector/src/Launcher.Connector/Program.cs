@@ -20,12 +20,16 @@ public static class Program
             .OnBeforeUninstallFastCallback(_ => ProtocolRegistration.Unregister())
             .Run();
 
+        // Tempo tra la creazione del processo e il codice del Launcher: caricamento di .NET e controlli
+        // dell'antivirus sugli eseguibili (lunghi soprattutto al primo avvio dopo un aggiornamento).
+        var startup = StartupDelay();
         WebViewOverrides.Clear();
         var request = LaunchRequest.FromArgs(args);
 
         // Se il Launcher è già aperto, gli si passa la richiesta e si esce subito.
         if (!SingleInstance.TryBecomePrimary())
         {
+            Log.Info($"Link passato al Launcher già aperto (avvio di questo processo: {startup})");
             if (request is not null)
             {
                 SingleInstance.SendToPrimary(request.ToLink());
@@ -39,8 +43,22 @@ public static class Program
         }
 
         ProtocolRegistration.Register();
+        Log.Info($"Avvio del processo: {startup} prima del codice del Launcher");
         var app = new App(request);
         app.InitializeComponent();
         return app.Run();
+    }
+
+    private static string StartupDelay()
+    {
+        try
+        {
+            using var process = System.Diagnostics.Process.GetCurrentProcess();
+            return $"{(DateTime.Now - process.StartTime).TotalMilliseconds:0} ms";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            return "non misurabile";
+        }
     }
 }

@@ -40,10 +40,13 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
         var ct = tab.Cancellation;
         try
         {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
             var (portal, token) = await SignInAsync(request, window, confirmPortal, step => tab.Progress.Step(ConnectStep.SignIn, step), ct);
+            var signIn = watch.ElapsedMilliseconds;
 
             tab.Progress.Step(ConnectStep.Redeem);
             var info = await portal.RedeemAsync(request.Ticket, token, ct);
+            Log.Info($"Biglietto riscattato: accesso 365 {signIn} ms, portale {watch.ElapsedMilliseconds - signIn} ms");
             await StartSessionAsync(info, tab, ct, WebLoginSource(info, portal, request.LocalAuth, window));
         }
         catch (OperationCanceledException)

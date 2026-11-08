@@ -335,7 +335,8 @@ public static class ApiEndpoints
 
         await audit.WriteAsync(new AuditEntry("ticket.redeem", email, CompanyName: asset.CompanyName, AssetId: asset.Asset.Id,
             AssetName: asset.Asset.Name, Target: Describe(connection, ticket.Direct),
-            Details: credentialNote + (ticket.Direct ? "; " + DirectNote : "") + (ticket.AuthMethod == LauncherClaims.MethodLocal ? "; " + LocalTicketNote : "")),
+            Details: credentialNote + (ticket.Direct ? "; " + DirectNote : "") + (ticket.AuthMethod == LauncherClaims.MethodLocal ? "; " + LocalTicketNote : "")
+                     + "; " + RedeemDelay(ticket)),
             http, ct);
         return Results.Ok(response);
     }
@@ -481,6 +482,13 @@ public static class ApiEndpoints
     }
 
     /// <summary>
+    /// Quanto è passato dalla creazione del biglietto nel browser al riscatto da parte del Launcher:
+    /// conferma del browser, avvio del Launcher, accesso 365. Serve a regolare la validità del biglietto.
+    /// </summary>
+    private static string RedeemDelay(Ticket ticket) =>
+        $"riscatto dopo {Math.Max(0, (DateTimeOffset.UtcNow - ticket.CreatedAt).TotalSeconds):0} s";
+
+    /// <summary>
     /// Verifica comune ai riscatti: biglietto valido e non usato, token 365 dello stesso utente (o admin
     /// locale dallo stesso IP, se ammesso), tipo di biglietto giusto per l'endpoint.
     /// </summary>
@@ -507,7 +515,7 @@ public static class ApiEndpoints
         {
             var reason = redeemed?.Error switch
             {
-                RedeemError.Expired => "scaduto",
+                RedeemError.Expired => "scaduto (" + RedeemDelay(redeemed.Ticket) + ")",
                 RedeemError.AlreadyUsed => "già usato",
                 RedeemError.WrongUser when tokenEmail is null => "senza token 365",
                 RedeemError.WrongUser => $"emesso per {redeemed.Ticket.UserEmail}",
