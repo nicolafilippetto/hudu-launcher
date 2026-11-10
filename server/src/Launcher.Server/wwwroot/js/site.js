@@ -226,6 +226,7 @@
         if (offlineMax > 0) { add("button", "btn btn-primary btn-sm", "", "data-offline-prepare"); }
         add("button", "btn btn-secondary btn-sm", "Modifica in blocco", "data-bulk-edit");
         add("button", "btn btn-secondary btn-sm", "Nascondi", "data-bulk-hide");
+        add("button", "btn btn-secondary btn-sm", "Mostra", "data-bulk-show");
         add("button", "btn btn-ghost btn-sm", "Deseleziona", "data-selection-clear");
         return bar;
     }
@@ -249,6 +250,10 @@
             document.body.appendChild(selectionBar);
         }
         $(".selection-count", selectionBar).textContent = ids.length === 1 ? "1 selezionato" : ids.length + " selezionati";
+        // "Nascondi" se tra i selezionati c'è un asset visibile, "Mostra" se ce n'è uno nascosto.
+        var hiddenCount = ids.filter(function (id) { return selection[id].hidden === true; }).length;
+        $("[data-bulk-hide]", selectionBar).hidden = hiddenCount === ids.length;
+        $("[data-bulk-show]", selectionBar).hidden = hiddenCount === 0;
         var offlineButton = $("[data-offline-prepare]", selectionBar);
         if (offlineButton) {
             var withoutIp = ids.filter(function (id) { return !selection[id].direct; }).length;
@@ -265,7 +270,11 @@
     function select(box, on) {
         var id = box.getAttribute("data-pick");
         if (on) {
-            selection[id] = { name: box.getAttribute("data-pick-name") || id, direct: box.getAttribute("data-pick-direct") === "true" };
+            selection[id] = {
+                name: box.getAttribute("data-pick-name") || id,
+                direct: box.getAttribute("data-pick-direct") === "true",
+                hidden: box.getAttribute("data-pick-hidden") === "true"
+            };
         } else {
             delete selection[id];
         }
@@ -314,19 +323,21 @@
             return;
         }
         var hide = event.target.closest("[data-bulk-hide]");
-        if (hide) {
+        var show = event.target.closest("[data-bulk-show]");
+        if (hide || show) {
             var ids = selectedIds();
-            if (!window.confirm("Nascondere " + ids.length + " asset? Si possono ritrovare con \"Mostra anche gli asset nascosti\".")) { return; }
-            busy(hide, true);
+            if (hide && !window.confirm("Nascondere " + ids.length + " asset? Si possono ritrovare con \"Mostra anche gli asset nascosti\".")) { return; }
+            var visibilityButton = hide || show;
+            busy(visibilityButton, true);
             try {
-                var result = await postForm("/?handler=Bulk", { AssetIds: ids.join(","), Visibility: "hide" });
+                var result = await postForm("/?handler=Bulk", { AssetIds: ids.join(","), Visibility: hide ? "hide" : "show" });
                 clearSelection();
                 toast(result.message, "ok");
                 setTimeout(function () { window.location.reload(); }, 600);
             } catch (error) {
                 toast(error.message, "error");
             } finally {
-                busy(hide, false);
+                busy(visibilityButton, false);
             }
             return;
         }

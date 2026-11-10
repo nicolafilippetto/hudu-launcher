@@ -2,7 +2,8 @@
 @model CompanyView
 @{
     var attention = Model.Groups.SelectMany(g => g).Count(a => a.NeedsAttention);
-    var showHidden = Context.Request.Query["hidden"] == "true";
+    // Come il modello della pagina: "true" in qualunque maiuscolo/minuscolo.
+    var showHidden = bool.TryParse(Context.Request.Query["hidden"], out var hiddenQuery) && hiddenQuery;
 }
 <div class="page-head">
     <div>
@@ -23,7 +24,7 @@
                     <svg class="inline"><use href="#i-refresh" /></svg>Aggiorna da Hudu
                 </button>
             </form>
-            <a class="link-subtle" href="/?c=@Model.Company.Id&hidden=@(!showHidden)">
+            <a class="link-subtle" href="/?c=@Model.Company.Id@(showHidden ? "" : "&hidden=true")">
                 @(showHidden ? "Nascondi gli asset nascosti" : "Mostra anche gli asset nascosti")
             </a>
         </div>

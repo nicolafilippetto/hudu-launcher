@@ -7,7 +7,8 @@
 <article class="asset @(Model.Hidden ? "is-hidden" : "") @(issues.Count > 0 ? "has-issues" : "")" data-asset-id="@Model.Asset.Id">
     <label class="asset-pick" title="Seleziona (cache offline, modifica in blocco, nascondi)">
         <input type="checkbox" data-pick="@Model.Asset.Id" data-pick-name="@Model.Asset.Name · @Model.CompanyName"
-               data-pick-direct="@(Model.Connections.Any(c => c.CanConnectDirect) ? "true" : "false")" aria-label="Seleziona @Model.Asset.Name" />
+               data-pick-direct="@(Model.Connections.Any(c => c.CanConnectDirect) ? "true" : "false")"
+               data-pick-hidden="@(Model.Hidden ? "true" : "false")" aria-label="Seleziona @Model.Asset.Name" />
     </label>
     <div class="asset-icon proto-@(primary?.Protocol.ToString().ToLowerInvariant())">
         <svg><use href="#@(primary is null ? "i-server" : Format.Icon(primary.Protocol))" /></svg>
