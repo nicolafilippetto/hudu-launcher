@@ -7,8 +7,6 @@ namespace Launcher.Server.Connections;
 /// <summary>Un'opzione di connessione (Desktop remoto o pagine web): valori ammessi ed etichette per il portale.</summary>
 public sealed record OptionDefinition(string Key, string Label, string Default, IReadOnlyList<(string Value, string Label)> Choices, string? Hint = null)
 {
-    public bool IsSwitch => Choices.Count == 2 && Choices[0].Value == "true";
-
     public string LabelOf(string value) => Choices.FirstOrDefault(c => c.Value == value).Label ?? value;
 }
 

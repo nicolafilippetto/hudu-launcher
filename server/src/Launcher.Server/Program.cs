@@ -305,7 +305,13 @@ if (!app.Environment.IsDevelopment())
 app.UseWhen(
     http => !http.Request.Path.StartsWithSegments("/api"),
     branch => branch.UseStatusCodePagesWithReExecute("/Error", "?code={0}"));
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    // CSS e JavaScript hanno la versione nell'indirizzo (?v=…, cambia a ogni modifica): il browser li
+    // tiene per un anno senza richiederli. Gli altri file statici (icone dell'app) per un giorno.
+    OnPrepareResponse = ctx => ctx.Context.Response.Headers.CacheControl =
+        ctx.Context.Request.Query.ContainsKey("v") ? "public, max-age=31536000, immutable" : "public, max-age=86400",
+});
 app.UseRouting();
 app.UseAuthentication();
 app.UseRateLimiter();

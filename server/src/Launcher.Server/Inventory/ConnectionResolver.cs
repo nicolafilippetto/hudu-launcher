@@ -26,8 +26,6 @@ public sealed record ResolvedConnection(
 
     /// <summary>Collegabile direttamente (tecnico dal cliente o in VPN): basta l'indirizzo.</summary>
     public bool CanConnectDirect => Host is not null;
-
-    public bool UsesCredential => Protocol is ConnectionProtocol.Rdp or ConnectionProtocol.Ssh or ConnectionProtocol.Telnet;
 }
 
 public sealed record ResolvedAsset(

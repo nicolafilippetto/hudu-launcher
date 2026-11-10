@@ -17,8 +17,6 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
     /// <summary>Il portale chiede una versione più recente del Launcher (versione minima impostata dagli admin).</summary>
     public event Action? UpdateRequired;
 
-    public RustDeskTunnels Tunnels => tunnels;
-
     /// <summary>
     /// Ogni richiesta al portale dice versione del Launcher e nome del PC: gli admin vedono chi usa quale
     /// versione e il portale può chiedere l'aggiornamento.

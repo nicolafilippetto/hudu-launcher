@@ -518,11 +518,6 @@ form.inline { display: inline-flex; margin: 0; }
 .row-danger td { background: var(--danger-bg); }
 .row-actions { text-align: right; }
 
-.menu { position: relative; display: inline-block; }
-.menu summary { list-style: none; }
-.menu summary::-webkit-details-marker { display: none; }
-.menu-panel { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; width: 280px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; gap: 8px; text-align: left; }
-
 .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
 .filters .input { width: auto; min-width: 170px; }
 .pager { display: flex; gap: 10px; align-items: center; justify-content: center; }

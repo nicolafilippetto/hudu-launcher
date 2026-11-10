@@ -3,17 +3,23 @@
 # ---- Compilazione -----------------------------------------------------------
 FROM mcr.microsoft.com/dotnet/sdk:10.0.403-resolute AS build
 WORKDIR /src
+# Solo le librerie native dell'architettura dell'immagine: senza, la pubblicazione includeva SQLite
+# per circa 25 piattaforme (~34 MB). TARGETARCH lo imposta Docker (amd64 o arm64).
+ARG TARGETARCH
 
 # Prima solo i file di progetto: il restore resta in cache finché non cambiano le dipendenze.
 COPY global.json Launcher.slnx ./
 COPY src/Launcher.Server/Launcher.Server.csproj src/Launcher.Server/
-RUN dotnet restore src/Launcher.Server/Launcher.Server.csproj
+RUN dotnet restore src/Launcher.Server/Launcher.Server.csproj \
+        --runtime linux-$([ "$TARGETARCH" = "arm64" ] && echo arm64 || echo x64)
 
 COPY .editorconfig ./
 COPY src/ src/
 RUN dotnet publish src/Launcher.Server/Launcher.Server.csproj \
         --configuration Release \
         --no-restore \
+        --runtime linux-$([ "$TARGETARCH" = "arm64" ] && echo arm64 || echo x64) \
+        --self-contained false \
         --output /app \
         -p:UseAppHost=false \
         -p:DebugType=none \
