@@ -598,6 +598,24 @@ public sealed class WebLoginScriptTests
 public sealed class UpdateTests
 {
     [Theory]
+    [InlineData("HuduLauncher-1.4.10-full.nupkg", "1.4.10")]
+    [InlineData("HuduLauncher-1.4.10-ci.3-delta.nupkg", "1.4.10-ci.3")]
+    [InlineData("HuduLauncher-1.4.10.zip", null)]
+    [InlineData("HuduLauncher-full.nupkg", null)]
+    [InlineData("HuduLauncher-1.4.10-other.nupkg", null)]
+    public void Package_version_comes_from_the_file_name(string fileName, string? version) =>
+        Assert.Equal(version, PackageFiles.VersionOf(fileName));
+
+    [Theory]
+    [InlineData("HuduLauncher-1.4.9-full.nupkg", true)]
+    [InlineData("HuduLauncher-1.4.10-ci.3-full.nupkg", true)]
+    [InlineData("HuduLauncher-1.4.10-full.nupkg", false)]
+    [InlineData("HuduLauncher-1.4.11-full.nupkg", false)]
+    [InlineData("altro.nupkg", false)]
+    public void Only_older_packages_are_removed(string fileName, bool older) =>
+        Assert.Equal(older, PackageFiles.IsOlder(fileName, "1.4.10"));
+
+    [Theory]
     [InlineData("1.3.1", "1.3.2", -1)]
     [InlineData("1.3.2-ci.40", "1.3.2", -1)]
     [InlineData("1.3.2-ci.9", "1.3.2-ci.40", -1)]

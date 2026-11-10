@@ -62,6 +62,34 @@ public static class AppVersion
     }
 }
 
+/// <summary>Pacchetti di Velopack nella cartella dell'installazione: <c>&lt;id&gt;-&lt;versione&gt;-full|delta.nupkg</c>.</summary>
+public static class PackageFiles
+{
+    /// <summary>Versione dal nome del file ("HuduLauncher-1.4.10-ci.3-full.nupkg" → "1.4.10-ci.3"), o null.</summary>
+    public static string? VersionOf(string fileName)
+    {
+        if (!fileName.EndsWith(".nupkg", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var name = fileName[..^".nupkg".Length];
+        var first = name.IndexOf('-', StringComparison.Ordinal);
+        var last = name.LastIndexOf('-');
+        if (first <= 0 || last <= first || name[(last + 1)..] is not ("full" or "delta"))
+        {
+            return null;
+        }
+
+        var version = name[(first + 1)..last];
+        return AppVersion.TryParse(version, out _) ? version : null;
+    }
+
+    /// <summary>Pacchetto di una versione precedente a quella in uso (si può togliere).</summary>
+    public static bool IsOlder(string fileName, string currentVersion) =>
+        VersionOf(fileName) is { } version && AppVersion.Compare(version, currentVersion) < 0;
+}
+
 /// <summary>
 /// Firma del feed degli aggiornamenti. La pipeline firma il feed (releases.win.json) con una chiave
 /// ECDSA P-256 che sta solo nei segreti di GitHub; il Launcher contiene la chiave pubblica e accetta

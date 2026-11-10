@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text;
 using Launcher.Connector.Core;
 using Velopack;
+using Velopack.Locators;
 using Velopack.Logging;
 using Velopack.Sources;
 
@@ -28,6 +29,44 @@ public sealed class LauncherUpdater
 
     public string? AvailableVersion => _update?.TargetFullRelease.Version.ToString();
 
+    /// <summary>
+    /// Percorsi dell'installazione per Velopack. Negli avvii normali VelopackApp.Run non si esegue
+    /// (vedi Program), quindi il locator si crea qui, solo quando serve un aggiornamento.
+    /// </summary>
+    private static IVelopackLocator Locator() =>
+        VelopackLocator.IsCurrentSet ? VelopackLocator.Current : VelopackLocator.CreateDefaultForPlatform();
+
+    /// <summary>
+    /// Toglie i pacchetti di versioni precedenti a quella in uso (cartella packages dell'installazione),
+    /// come faceva VelopackApp.Run, ma decidendo dal nome del file senza aprire gli archivi. I pacchetti
+    /// della versione in uso o più recenti (aggiornamento già scaricato) restano.
+    /// </summary>
+    public static void RemoveOldPackages()
+    {
+        try
+        {
+            var current = ConnectorSettings.Version;
+            var packages = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "packages"));
+            if (!Directory.Exists(packages) || !AppVersion.TryParse(current, out _))
+            {
+                return;
+            }
+
+            foreach (var file in Directory.EnumerateFiles(packages, "*.nupkg"))
+            {
+                if (PackageFiles.IsOlder(Path.GetFileName(file), current))
+                {
+                    File.Delete(file);
+                    Log.Info("Pacchetto vecchio rimosso: " + Path.GetFileName(file));
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Warn("Pulizia dei pacchetti vecchi non riuscita: " + ex.Message);
+        }
+    }
+
     public bool IsDownloaded => _downloaded is not null;
 
     /// <summary>Versione più recente disponibile sul portale, o null se si è aggiornati (o se non si può aggiornare).</summary>
@@ -44,7 +83,7 @@ public sealed class LauncherUpdater
         var key = PublicKey;
         var (manager, update) = await Task.Run<(UpdateManager?, UpdateInfo?)>(async () =>
         {
-            var manager = new UpdateManager(new SignedPortalSource(new Uri(portal, "launcher/"), key));
+            var manager = new UpdateManager(new SignedPortalSource(new Uri(portal, "launcher/"), key), null, Locator());
             if (!manager.IsInstalled)
             {
                 return (null, null);
