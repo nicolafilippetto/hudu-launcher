@@ -22,6 +22,11 @@
         ? $"Automatico: {primary.GatewayPeerId} ({primary.GatewaySource})"
         : "Automatico";
     var consoleHidden = Model.ConsoleRow?.Hidden == true;
+    // Aggiuntive senza host: stesso indirizzo della principale (per le pagine web l'FQDN dell'IPAM, se c'è).
+    var primaryIp = setting?.Host ?? autoHost;
+    var extraHostHint = primaryIp is null
+        ? "Indirizzo del dispositivo"
+        : $"Vuoto = {primaryIp}, come la principale" + (fqdn is not null && setting?.WebAddress != ConnectionResolver.WebAddressIp ? $" (pagine web: {fqdn})" : "");
 }
 @functions {
     private static string PasswordLabel(CachedPassword p) =>
@@ -114,7 +119,7 @@
         <div class="grid grid-3">
             <label class="field">
                 <span>Protocollo</span>
-                <select class="input" name="Protocol" data-protocol data-auto-protocol="@(primary?.Protocol ?? Model.GuessedProtocol)">
+                <select class="input" name="Protocol" data-protocol data-auto-protocol="@Model.GuessedProtocol">
                     <option value="">Automatico (@Format.ProtocolName(Model.GuessedProtocol))</option>
                     @foreach (var p in protocols)
                     {
@@ -138,10 +143,10 @@
             </label>
             <label class="field">
                 <span>Porta</span>
-                <input class="input mono" name="Port" value="@setting?.Port" inputmode="numeric" placeholder="@(primary?.Port > 0 ? primary.Port.ToString() : "")" autocomplete="off" />
+                <input class="input mono" name="Port" value="@setting?.Port" inputmode="numeric" placeholder="@(primary?.Port > 0 ? primary.Port.ToString() : "")" autocomplete="off" data-port-input />
             </label>
         </div>
-        <label class="field">
+        <label class="field" data-for="Http Https">
             <span>Indirizzo delle pagine web</span>
             <select class="input mono" name="WebAddress">
                 <option value="">FQDN dall'IPAM (@(fqdn ?? "non presente in Hudu: si usa l'IP"))</option>
@@ -153,8 +158,10 @@
             <p class="muted small">L'URL scritto a mano in precedenza (<span class="mono">@setting.WebUrl</span>) non si usa più e verrà tolto al salvataggio: l'indirizzo viene dall'FQDN dell'IPAM di Hudu (per un percorso o una porta, scrivere in Hudu l'indirizzo completo, es. https://vcenter.cliente.local/ui).</p>
         }
         <div class="grid grid-2">
-            <label class="field">
-                <span>Credenziale (da Hudu)</span>
+            <label class="field" data-for="Rdp Ssh Telnet Winbox Http Https Oracle">
+                <span data-for="Rdp Ssh Telnet Winbox">Credenziale (da Hudu, inviata al Launcher)</span>
+                <span data-for="Http Https">Credenziale proposta per "Accesso" (da Hudu)</span>
+                <span data-for="Oracle">Credenziale (da Hudu: si mostra solo l'utente, la password no)</span>
                 <select class="input" name="PasswordId">
                     <option value="">Automatica (@autoCredential)</option>
                     @foreach (var p in Model.Passwords)
@@ -202,16 +209,19 @@
                 </label>
                 <label class="field">
                     <span>Porta</span>
-                    <input class="input mono" name="@(prefix)Port" value="@extra.Port" placeholder="predefinita" inputmode="numeric" autocomplete="off" />
+                    <input class="input mono" name="@(prefix)Port" value="@extra.Port" placeholder="predefinita" inputmode="numeric" autocomplete="off" data-port-input />
                 </label>
             </div>
             <label class="field">
-                <span>Host o indirizzo completo</span>
-                <input class="input mono" name="@(prefix)Host" value="@(extra.Url ?? extra.Host)" placeholder="Vuoto = IP della principale · per il web anche https://…" list="ipam-list" autocomplete="off" spellcheck="false" />
+                <span data-for="Http Https">Host o indirizzo completo (anche https://…)</span>
+                <span data-not-for="Http Https">Host o IP</span>
+                <input class="input mono" name="@(prefix)Host" value="@(extra.Url ?? extra.Host)" placeholder="@extraHostHint" list="ipam-list" autocomplete="off" spellcheck="false" />
             </label>
             <div class="grid grid-2">
-                <label class="field">
-                    <span>Credenziale (da Hudu)</span>
+                <label class="field" data-for="Rdp Ssh Telnet Winbox Http Https Oracle">
+                    <span data-for="Rdp Ssh Telnet Winbox">Credenziale (da Hudu, inviata al Launcher)</span>
+                    <span data-for="Http Https">Credenziale proposta per "Accesso" (da Hudu)</span>
+                    <span data-for="Oracle">Credenziale (da Hudu: si mostra solo l'utente, la password no)</span>
                     <select class="input" name="@(prefix)PasswordId">
                         <option value="">Nessuna credenziale</option>
                         @foreach (var p in Model.Passwords)
@@ -266,16 +276,19 @@
                 </label>
                 <label class="field">
                     <span>Porta</span>
-                    <input class="input mono" name="Console.Port" value="@row?.Port" placeholder="@(hudu?.Port.ToString() ?? "predefinita")" inputmode="numeric" autocomplete="off" />
+                    <input class="input mono" name="Console.Port" value="@row?.Port" placeholder="@(hudu?.Port.ToString() ?? "predefinita")" inputmode="numeric" autocomplete="off" data-port-input />
                 </label>
             </div>
             <label class="field">
-                <span>Host o indirizzo completo</span>
+                <span data-for="Http Https">Host o indirizzo completo (anche https://…)</span>
+                <span data-not-for="Http Https">Host o IP</span>
                 <input class="input mono" name="Console.Host" value="@(row?.Url ?? row?.Host)" placeholder="@(hudu?.Url ?? hudu?.Host ?? "es. https://idrac-srv01.cliente.local/")" list="ipam-list" autocomplete="off" spellcheck="false" />
             </label>
             <div class="grid grid-2">
-                <label class="field">
-                    <span>Credenziale (da Hudu)</span>
+                <label class="field" data-for="Rdp Ssh Telnet Winbox Http Https Oracle">
+                    <span data-for="Rdp Ssh Telnet Winbox">Credenziale (da Hudu, inviata al Launcher)</span>
+                    <span data-for="Http Https">Credenziale proposta per "Accesso" (da Hudu)</span>
+                    <span data-for="Oracle">Credenziale (da Hudu: si mostra solo l'utente, la password no)</span>
                     <select class="input" name="Console.PasswordId">
                         <option value="">Nessuna credenziale</option>
                         @foreach (var p in Model.Passwords)
@@ -326,16 +339,19 @@
                 </label>
                 <label class="field">
                     <span>Porta</span>
-                    <input class="input mono" name="Extras[__i__].Port" placeholder="predefinita" inputmode="numeric" autocomplete="off" />
+                    <input class="input mono" name="Extras[__i__].Port" placeholder="predefinita" inputmode="numeric" autocomplete="off" data-port-input />
                 </label>
             </div>
             <label class="field">
-                <span>Host o indirizzo completo</span>
-                <input class="input mono" name="Extras[__i__].Host" placeholder="Vuoto = IP della principale · per il web anche https://…" list="ipam-list" autocomplete="off" spellcheck="false" />
+                <span data-for="Http Https">Host o indirizzo completo (anche https://…)</span>
+                <span data-not-for="Http Https">Host o IP</span>
+                <input class="input mono" name="Extras[__i__].Host" placeholder="@extraHostHint" list="ipam-list" autocomplete="off" spellcheck="false" />
             </label>
             <div class="grid grid-2">
-                <label class="field">
-                    <span>Credenziale (da Hudu)</span>
+                <label class="field" data-for="Rdp Ssh Telnet Winbox Http Https Oracle">
+                    <span data-for="Rdp Ssh Telnet Winbox">Credenziale (da Hudu, inviata al Launcher)</span>
+                    <span data-for="Http Https">Credenziale proposta per "Accesso" (da Hudu)</span>
+                    <span data-for="Oracle">Credenziale (da Hudu: si mostra solo l'utente, la password no)</span>
                     <select class="input" name="Extras[__i__].PasswordId">
                         <option value="">Nessuna credenziale</option>
                         @foreach (var p in linked)

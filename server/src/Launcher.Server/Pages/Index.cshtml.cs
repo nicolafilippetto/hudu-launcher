@@ -215,8 +215,18 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         var passwordId = ParsePassword(form.PasswordId, companyPasswords, errors);
         var gateway = ParseGateway(form.Gateway, errors);
         var note = string.IsNullOrWhiteSpace(form.Note) ? null : form.Note.Trim();
-        var rdp = RdpOptionCatalog.Clean(form.Rdp);
-        var web = WebOptionCatalog.Catalog.Clean(form.Web);
+        // Si salvano solo le opzioni del protocollo effettivo (quello scelto o, se automatico, quello dedotto
+        // come mostra l'editor): le sezioni degli altri protocolli sono nascoste e non devono restare attive.
+        var layout = await db.LayoutConfigs.AsNoTracking().FirstOrDefaultAsync(l => l.LayoutId == asset.LayoutId, ct);
+        var effective = protocol ?? ConnectionResolver.GuessProtocol(asset.OperatingSystem, layout, null);
+        var rdp = effective == ConnectionProtocol.Rdp ? RdpOptionCatalog.Clean(form.Rdp) : new Dictionary<string, string>();
+        var web = effective is ConnectionProtocol.Http or ConnectionProtocol.Https ? WebOptionCatalog.Catalog.Clean(form.Web) : new Dictionary<string, string>();
+        if (effective == ConnectionProtocol.Tcp)
+        {
+            // "Altro": la credenziale non si usa e il campo è nascosto.
+            passwordId = null;
+        }
+
         if (note?.Length > 500)
         {
             errors.Add("La nota supera i 500 caratteri.");
@@ -705,7 +715,8 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         // Si salvano solo le opzioni del tipo di connessione scelto: le altre sezioni sono nascoste.
         var rdp = effective == ConnectionProtocol.Rdp ? RdpOptionCatalog.Serialize(RdpOptionCatalog.Clean(extra.Rdp)) : null;
         var web = effective is ConnectionProtocol.Http or ConnectionProtocol.Https ? OptionCatalog.Serialize(WebOptionCatalog.Catalog.Clean(extra.Web)) : null;
-        return new ParsedExtra(extra, label, protocol, host, port, url, ParsePassword(extra.PasswordId, companyPasswords, errors),
+        var passwordId = effective == ConnectionProtocol.Tcp ? null : ParsePassword(extra.PasswordId, companyPasswords, errors);
+        return new ParsedExtra(extra, label, protocol, host, port, url, passwordId,
             ParseGateway(extra.Gateway, errors), rdp, web, databaseName, databaseKind);
     }
 

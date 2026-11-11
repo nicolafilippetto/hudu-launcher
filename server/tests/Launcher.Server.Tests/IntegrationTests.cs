@@ -905,6 +905,10 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
                 ["Extras[1].Label"] = "Agente",
                 ["Extras[1].Protocol"] = "Tcp",
                 ["Extras[1].Port"] = "9000",
+                // Campi nascosti per questi protocolli: non si salvano.
+                ["Extras[1].PasswordId"] = "530",
+                ["Rdp[clipboard]"] = "false",
+                ["Web[certificate]"] = "accept",
                 // Scheda aggiunta e poi eliminata: resta nel modulo, segnata da togliere.
                 ["Extras[2].Remove"] = "true",
                 ["Console.Id"] = "",
@@ -921,10 +925,11 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var setting = await db.AssetSettings.AsNoTracking().SingleAsync(x => x.AssetId == 30, ct);
                 Assert.Equal((ConnectionProtocol.Oracle, "ORCL", DatabaseKinds.Sid), (setting.Protocol!.Value, setting.DatabaseName, setting.DatabaseKind));
+                Assert.Equal(((string?)null, (string?)null), (setting.RdpOptions, setting.WebOptions));
                 var rows = await db.ExtraConnections.AsNoTracking().Where(x => x.AssetId == 30).ToListAsync(ct);
                 Assert.Equal(3, rows.Count);
                 Assert.Single(rows, x => x.IsConsole && x.Hidden);
-                Assert.Single(rows, x => x.Protocol == ConnectionProtocol.Tcp && x.Port == 9000);
+                Assert.Single(rows, x => x.Protocol == ConnectionProtocol.Tcp && x.Port == 9000 && x.PasswordId == null);
             }
 
             // Il riscatto Oracle porta il database e l'utente, mai la password; i Launcher 1.5.1 ricevono 426.

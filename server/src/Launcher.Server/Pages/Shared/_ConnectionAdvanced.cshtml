@@ -4,13 +4,13 @@
     var web = WebOptionCatalog.Catalog.Parse(Model.Web);
     var kind = Model.DatabaseKind ?? DatabaseKinds.ServiceName;
 }
-@* Le sezioni si mostrano in base al protocollo della scheda (site.js, data-for). *@
-<details class="conn-advanced" open="@(rdp.Count + web.Count > 0)" data-advanced>
+@* Le sezioni si mostrano in base al protocollo della scheda (site.js, data-for); senza sezioni utili
+   (SSH, Telnet, WinBox, Altro) le avanzate spariscono del tutto. *@
+<details class="conn-advanced" open="@(rdp.Count + web.Count > 0)" data-advanced data-for="Rdp Http Https Oracle">
     <summary>
         <strong>Impostazioni avanzate</strong>
         <span class="muted small">"Predefinito" segue le impostazioni dell'amministratore</span>
     </summary>
-    <p class="muted small" data-advanced-none>Nessuna impostazione avanzata per questo tipo di connessione.</p>
 
     <div class="conn-advanced-group" data-for="Rdp">
         <h4>Desktop remoto</h4>

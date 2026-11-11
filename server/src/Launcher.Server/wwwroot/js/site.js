@@ -673,6 +673,7 @@
 
     var protocolIcons = { Rdp: "i-monitor", Ssh: "i-terminal", Telnet: "i-terminal", Http: "i-globe", Https: "i-globe",
         Winbox: "i-router", Oracle: "i-database", Tcp: "i-cable" };
+    var defaultPorts = { Rdp: 3389, Ssh: 22, Telnet: 23, Http: 80, Https: 443, Winbox: 8291, Oracle: 1521 };
 
     function tabFor(panel) {
         return panel ? $('[data-tab="' + panel.getAttribute("data-panel") + '"]', dialogBody) : null;
@@ -694,14 +695,22 @@
         var select = panel ? $("[data-protocol]", panel) : null;
         if (!select) { return; }
         var protocol = select.value || select.getAttribute("data-auto-protocol") || "";
-        var any = false;
-        $$("[data-for]", panel).forEach(function (group) {
-            var on = group.getAttribute("data-for").split(" ").indexOf(protocol) >= 0;
-            group.hidden = !on;
-            any = any || on;
+        // Solo i campi che servono a questo tipo di connessione (data-for = protocolli per cui si vede).
+        $$("[data-for]", panel).forEach(function (element) {
+            element.hidden = element.getAttribute("data-for").split(" ").indexOf(protocol) < 0;
         });
-        var none = $("[data-advanced-none]", panel);
-        if (none) { none.hidden = any; }
+        $$("[data-not-for]", panel).forEach(function (element) {
+            element.hidden = element.getAttribute("data-not-for").split(" ").indexOf(protocol) >= 0;
+        });
+        // Porta: con il protocollo automatico (o come in Hudu) il valore calcolato dal portale, altrimenti
+        // il predefinito del protocollo scelto; "Altro" non ne ha uno.
+        $$("[data-port-input]", panel).forEach(function (input) {
+            if (!input.hasAttribute("data-placeholder-auto")) {
+                input.setAttribute("data-placeholder-auto", input.getAttribute("placeholder") || "");
+            }
+            input.placeholder = !select.value ? input.getAttribute("data-placeholder-auto")
+                : defaultPorts[protocol] ? "predefinita: " + defaultPorts[protocol] : "obbligatoria";
+        });
         // Oracle: il nome del database è obbligatorio, quindi le avanzate si aprono da sole.
         var details = $("[data-advanced]", panel);
         if (details && protocol === "Oracle") { details.open = true; }
