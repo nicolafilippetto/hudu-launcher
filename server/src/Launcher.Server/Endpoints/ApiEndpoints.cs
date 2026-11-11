@@ -5,6 +5,7 @@ using Launcher.Server.Connections;
 using Launcher.Server.Data;
 using Launcher.Server.Integrations;
 using Launcher.Server.Inventory;
+using Launcher.Server.Pages;
 using Launcher.Server.Security;
 using Launcher.Server.Settings;
 using Microsoft.AspNetCore.Antiforgery;
@@ -38,6 +39,12 @@ public sealed record RedeemTarget(string Host, int Port);
 
 public sealed record RedeemCredential(string? Username, string? Password);
 
+/// <summary>
+/// Database Oracle: nome (service name o SID) per la voce del tnsnames.ora, più utente e nome della
+/// credenziale di Hudu da mostrare al tecnico. La password non si invia: il tecnico la scrive nel suo strumento.
+/// </summary>
+public sealed record RedeemDatabase(string Name, string Kind, string? Username, string? CredentialName);
+
 public sealed record RedeemResponse(
     [property: JsonConverter(typeof(JsonStringEnumConverter<ConnectionProtocol>))] ConnectionProtocol Protocol,
     string Name,
@@ -52,7 +59,8 @@ public sealed record RedeemResponse(
     TerminalOptions? Terminal,
     string? HuduUrl,
     WebOptions? Web = null,
-    WebLoginInfo? WebLogin = null);
+    WebLoginInfo? WebLogin = null,
+    RedeemDatabase? Database = null);
 
 /// <summary>Richiesta del Launcher per compilare l'accesso di una pagina web con la credenziale scelta.</summary>
 public sealed record WebLoginRequest(string? Grant, int CredentialId);
@@ -326,6 +334,16 @@ public static class ApiEndpoints
             return Results.Problem("La connessione non è più disponibile.", statusCode: StatusCodes.Status409Conflict);
         }
 
+        if (!LauncherSupports(LauncherClients.VersionOf(http), connection.Protocol))
+        {
+            await audit.WriteAsync(new AuditEntry("launcher.outdated", email, Success: false, AssetId: asset.Asset.Id,
+                Details: $"Launcher {LauncherClients.VersionOf(http) ?? "precedente"} senza supporto per {Format.ProtocolName(connection.Protocol)}"), http, ct);
+            return Results.Problem(
+                $"Le connessioni {Format.ProtocolName(connection.Protocol)} richiedono il Launcher {NewProtocolsVersion} o successivo: " +
+                "accetta l'aggiornamento proposto dal Launcher, poi rilancia la connessione dal portale.",
+                statusCode: StatusCodes.Status426UpgradeRequired);
+        }
+
         var (response, credentialNote) = await BuildConnectionAsync(asset, connection, ticket.Direct, settings, hudu, inventory, logger, ct);
         if (response.Web is { Login: not "off" })
         {
@@ -412,7 +430,7 @@ public static class ApiEndpoints
                 Results.Problem("La connessione non è più disponibile.", statusCode: StatusCodes.Status409Conflict));
         }
 
-        var options = WebOptionCatalog.Resolve(webUrl, settings.WebDefaults, WebOptionCatalog.Catalog.Parse(asset.Setting?.WebOptions));
+        var options = WebOptionCatalog.Resolve(webUrl, settings.WebDefaults, WebOptionCatalog.Catalog.Parse(connection.Settings.Web));
         var chosen = WebLoginService.Candidates(asset, connection, await inventory.GetCompanyPasswordsAsync(asset.Asset.CompanyId, ct))
             .FirstOrDefault(p => p.Id == request.CredentialId);
         if (options.Login == "off" || chosen is null)
@@ -478,7 +496,7 @@ public static class ApiEndpoints
             }
 
             var notes = new List<string>();
-            foreach (var connection in asset.Connections.Where(c => c.CanConnectDirect))
+            foreach (var connection in asset.Connections.Where(c => c.CanConnectDirect && LauncherSupports(LauncherClients.VersionOf(http), c.Protocol)))
             {
                 var (response, credentialNote) = await BuildConnectionAsync(asset, connection, direct: true, settings, hudu, inventory, logger, ct);
                 connections.Add(response);
@@ -567,8 +585,9 @@ public static class ApiEndpoints
         RedeemCredential? credential = null;
         string? warning = null;
         // Le interfacce web si aprono nel browser: utente e password si prendono da Hudu, non dal Launcher.
-        var isWeb = connection.Protocol is ConnectionProtocol.Http or ConnectionProtocol.Https;
-        if (!isWeb && connection.PasswordId is { } credentialId)
+        // Database e servizi TCP generici: la password la scrive il tecnico nel suo programma, non si invia.
+        var sendsPassword = connection.Protocol is not (ConnectionProtocol.Http or ConnectionProtocol.Https or ConnectionProtocol.Oracle or ConnectionProtocol.Tcp);
+        if (sendsPassword && connection.PasswordId is { } credentialId)
         {
             try
             {
@@ -597,15 +616,34 @@ public static class ApiEndpoints
             $"launcher-{asset.Asset.Id}-{connection.Key.Replace(':', '-')}",
             warning,
             connection.Protocol == ConnectionProtocol.Rdp
-                ? RdpOptionCatalog.Resolve(settings.RdpDefaults, RdpOptionCatalog.Parse(asset.Setting?.RdpOptions))
+                ? RdpOptionCatalog.Resolve(settings.RdpDefaults, RdpOptionCatalog.Parse(connection.Settings.Rdp))
                 : null,
             connection.Protocol is ConnectionProtocol.Ssh or ConnectionProtocol.Telnet ? settings.Terminal : null,
             asset.Asset.HuduUrl,
             connection.WebUrl is { } webUrl
-                ? WebOptionCatalog.Resolve(webUrl, settings.WebDefaults, WebOptionCatalog.Catalog.Parse(asset.Setting?.WebOptions))
+                ? WebOptionCatalog.Resolve(webUrl, settings.WebDefaults, WebOptionCatalog.Catalog.Parse(connection.Settings.Web))
+                : null,
+            Database: connection.Protocol == ConnectionProtocol.Oracle
+                ? new RedeemDatabase(connection.Settings.DatabaseName ?? "", connection.Settings.DatabaseKind ?? DatabaseKinds.ServiceName,
+                    connection.Username, connection.PasswordName)
                 : null);
-        return (response, credential is null ? "senza credenziale" : $"credenziale: {connection.PasswordName}");
+        var note = credential is not null ? $"credenziale: {connection.PasswordName}"
+            : !sendsPassword && connection.PasswordName is not null ? $"credenziale indicata senza password: {connection.PasswordName}"
+            : "senza credenziale";
+        return (response, note);
     }
+
+    /// <summary>Prima versione del Launcher che apre WinBox, Oracle e i tunnel TCP generici.</summary>
+    public const string NewProtocolsVersion = "1.5.2";
+
+    /// <summary>
+    /// I Launcher precedenti non conoscono i nuovi protocolli (non saprebbero leggere la risposta):
+    /// per loro la connessione si rifiuta con 426, così il Launcher propone l'aggiornamento.
+    /// </summary>
+    public static bool LauncherSupports(string? version, ConnectionProtocol protocol) =>
+        protocol is not (ConnectionProtocol.Winbox or ConnectionProtocol.Oracle or ConnectionProtocol.Tcp)
+        // Anche le build di prova della stessa versione (1.5.2-ci.N) li conoscono già.
+        || LauncherVersion.Compare(version, NewProtocolsVersion + "-ci.0") >= 0;
 
     private static string Describe(ResolvedConnection c, bool direct = false) =>
         $"{c.Protocol.ToString().ToLowerInvariant()}://{c.Host}:{c.Port} " + (direct ? "diretta" : $"via {c.GatewayPeerId}");

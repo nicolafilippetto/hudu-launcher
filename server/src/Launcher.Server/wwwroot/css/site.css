@@ -475,6 +475,32 @@ form.inline { display: inline-flex; margin: 0; }
 .extra-row { display: grid; grid-template-columns: minmax(110px, 1.2fr) 100px minmax(110px, 1.2fr) 76px minmax(140px, 1.4fr) minmax(110px, 1fr) 34px; gap: 6px; align-items: center; }
 [data-extra-add] { align-self: flex-start; }
 .extra-row.is-removed { display: none; }
+
+/* Editor a schede: principale, aggiuntive, console, + */
+.conn-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 16px; border-bottom: 1px solid var(--border); }
+.conn-tab { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; padding: 8px 12px; margin-bottom: -1px; border: 1px solid transparent; border-bottom: 0; border-radius: var(--radius-sm) var(--radius-sm) 0 0; background: none; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; }
+.conn-tab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conn-tab svg { width: 16px; height: 16px; flex: none; }
+.conn-tab:hover { color: var(--text); background: var(--surface-hover); }
+.conn-tab.is-active { color: var(--text); background: var(--surface); border-color: var(--border); box-shadow: inset 0 2px 0 var(--primary); }
+.conn-tab.is-muted span { text-decoration: line-through; }
+.conn-tab-add { color: var(--primary); }
+.conn-panel { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--border); border-top: 0; border-radius: 0 0 var(--radius) var(--radius); }
+.conn-panel[hidden] { display: none; }
+.conn-panel-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.conn-panel-actions .check { padding-bottom: 0; }
+.conn-advanced { border-top: 1px dashed var(--border); padding-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+.conn-advanced summary { cursor: pointer; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.conn-advanced-group[hidden], .conn-advanced [data-advanced-none][hidden] { display: none; }
+.conn-advanced-group h4 { margin: 4px 0 8px; font-size: 13px; }
+.btn.danger { color: var(--danger, #c0392b); }
+
+/* Pulsanti di connessione: principale arancione, poi la seconda o "Altre connessioni" */
+.connect-more svg.chevron { width: 14px; height: 14px; margin-left: 2px; margin-right: 0; }
+.connect-option-head { padding: 6px 10px 2px; font-size: 12px; font-weight: 650; color: var(--muted); }
+.connect-option-row { display: flex; align-items: center; gap: 8px; }
+.connect-option-row svg { width: 16px; height: 16px; flex: none; }
+
 .no-gateway .extra-row { grid-template-columns: minmax(110px, 1.2fr) 100px minmax(110px, 1.2fr) 76px minmax(140px, 1.4fr) 34px; }
 
 /* --- Gateway cliente ----------------------------------------------------- */

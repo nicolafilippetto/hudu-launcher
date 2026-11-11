@@ -84,7 +84,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             e.HasKey(x => x.AssetId);
             e.Property(x => x.AssetId).ValueGeneratedNever();
         });
-        builder.Entity<ExtraConnection>().HasIndex(x => x.AssetId);
+        builder.Entity<ExtraConnection>(e =>
+        {
+            e.HasIndex(x => x.AssetId);
+            e.Property(x => x.StoredProtocol).HasColumnName("Protocol");
+        });
         builder.Entity<CompanySetting>(e =>
         {
             e.HasKey(x => x.CompanyId);

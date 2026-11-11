@@ -371,9 +371,10 @@
         if (connectMenu) { connectMenu.remove(); connectMenu = null; }
     }
 
-    async function startConnection(button, mode) {
+    async function startConnection(button, mode, anchor) {
         closeConnectMenu();
-        busy(button, true);
+        var shown = anchor || button;
+        busy(shown, true);
         try { localStorage.setItem("launcher-connect-mode", mode); } catch (e) { /* ignorato */ }
         try {
             var result = await postJson("/api/connect", {
@@ -386,11 +387,76 @@
         } catch (error) {
             toast(error.message, "error");
         } finally {
-            setTimeout(function () { busy(button, false); }, 1500);
+            setTimeout(function () { busy(shown, false); }, 1500);
         }
     }
 
-    function openConnectMenu(button) {
+    function connectWith(button, anchor) {
+        // RustDesk spento: esiste solo la connessione diretta, niente menu.
+        if (document.body.getAttribute("data-rustdesk") === "off") {
+            startConnection(button, "direct", anchor);
+        } else {
+            openConnectMenu(button, anchor);
+        }
+    }
+
+    function menuItem(title, detail, enabled, icon) {
+        var item = document.createElement("button");
+        item.type = "button";
+        item.className = "connect-option";
+        item.setAttribute("role", "menuitem");
+        item.disabled = !enabled;
+        var strong = document.createElement("strong");
+        if (icon) {
+            strong.className = "connect-option-row";
+            var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            var use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+            use.setAttribute("href", "#" + icon);
+            svg.appendChild(use);
+            strong.appendChild(svg);
+            strong.appendChild(document.createTextNode(title));
+        } else {
+            strong.textContent = title;
+        }
+        var small = document.createElement("span");
+        small.textContent = detail;
+        item.appendChild(strong);
+        item.appendChild(small);
+        return item;
+    }
+
+    function showMenu(anchor, focusIndex) {
+        document.body.appendChild(connectMenu);
+        placeConnectMenu(anchor);
+        var buttons = $$(".connect-option", connectMenu);
+        if (buttons[focusIndex]) { buttons[focusIndex].focus(); }
+    }
+
+    // "Altre connessioni": prima si sceglie la connessione, poi (come per le altre) jump host o diretta.
+    function openMoreMenu(more) {
+        closeConnectMenu();
+        var list = more.parentNode.querySelector("[data-connect-more-list]");
+        if (!list) { return; }
+        connectMenu = document.createElement("div");
+        connectMenu.className = "connect-menu";
+        connectMenu.setAttribute("role", "menu");
+        var first = -1;
+        $$("[data-connect]", list).forEach(function (button, index) {
+            var item = menuItem(button.textContent.trim(), button.getAttribute("data-target") || "", !button.disabled,
+                button.getAttribute("data-icon"));
+            item.title = button.title;
+            item.addEventListener("click", function (event) {
+                event.stopPropagation();
+                connectWith(button, more);
+            });
+            connectMenu.appendChild(item);
+            if (first < 0 && !button.disabled) { first = index; }
+        });
+        showMenu(more, first);
+    }
+
+    function openConnectMenu(button, anchor) {
+        anchor = anchor || button;
         closeConnectMenu();
         var gateway = button.getAttribute("data-gateway");
         var target = button.getAttribute("data-target") || "";
@@ -404,27 +470,21 @@
             { mode: "gateway", title: "Tramite jump host", detail: gateway ? "RustDesk " + gateway : "nessun gateway disponibile", enabled: !!gateway },
             { mode: "direct", title: "Diretta", detail: target + " · dal cliente o in VPN", enabled: true }
         ];
+        var title = document.createElement("div");
+        title.className = "connect-option-head";
+        title.textContent = button.textContent.trim();
+        if (anchor !== button) { connectMenu.appendChild(title); }
         options.forEach(function (option) {
-            var item = document.createElement("button");
-            item.type = "button";
-            item.className = "connect-option";
-            item.setAttribute("role", "menuitem");
-            item.disabled = !option.enabled;
-            var strong = document.createElement("strong");
-            strong.textContent = option.title;
-            var small = document.createElement("span");
-            small.textContent = option.detail;
-            item.appendChild(strong);
-            item.appendChild(small);
-            item.addEventListener("click", function () { startConnection(button, option.mode); });
+            var item = menuItem(option.title, option.detail, option.enabled);
+            item.addEventListener("click", function (event) {
+                event.stopPropagation();
+                startConnection(button, option.mode, anchor);
+            });
             connectMenu.appendChild(item);
         });
-        document.body.appendChild(connectMenu);
-        placeConnectMenu(button);
-        var buttons = $$(".connect-option", connectMenu);
         var index = options.findIndex(function (o) { return o.mode === last && o.enabled; });
         if (index < 0) { index = options.findIndex(function (o) { return o.enabled; }); }
-        if (buttons[index]) { buttons[index].focus(); }
+        showMenu(anchor, index);
     }
 
     // Il menu resta sempre dentro la finestra: sotto il pulsante se c'è spazio, altrimenti sopra
@@ -445,15 +505,16 @@
     window.addEventListener("scroll", closeConnectMenu, true);
 
     document.addEventListener("click", function (event) {
+        var more = event.target.closest("[data-connect-more]");
+        if (more) {
+            event.stopPropagation();
+            openMoreMenu(more);
+            return;
+        }
         var button = event.target.closest("[data-connect]");
         if (button && !button.disabled) {
             event.stopPropagation();
-            // RustDesk spento: esiste solo la connessione diretta, niente menu.
-            if (document.body.getAttribute("data-rustdesk") === "off") {
-                startConnection(button, "direct");
-            } else {
-                openConnectMenu(button);
-            }
+            connectWith(button);
             return;
         }
         if (connectMenu && !event.target.closest(".connect-menu")) { closeConnectMenu(); }
@@ -532,6 +593,7 @@
             });
             if (!response.ok) { throw new Error(await readError(response)); }
             dialogBody.innerHTML = await response.text();
+            syncEditor();
             var first = $("select, input:not([type=hidden])", dialogBody);
             if (first) { first.focus(); }
         } catch (error) {
@@ -607,7 +669,77 @@
         if (event.target.matches("[data-breakglass-toggle]")) { syncBreakGlass(event.target.closest("form")); }
     });
 
+    // ------------------------------------------------------------------ editor a schede
+
+    var protocolIcons = { Rdp: "i-monitor", Ssh: "i-terminal", Telnet: "i-terminal", Http: "i-globe", Https: "i-globe",
+        Winbox: "i-router", Oracle: "i-database", Tcp: "i-cable" };
+
+    function tabFor(panel) {
+        return panel ? $('[data-tab="' + panel.getAttribute("data-panel") + '"]', dialogBody) : null;
+    }
+
+    function selectTab(name) {
+        $$("[data-tab]", dialogBody).forEach(function (tab) {
+            var on = tab.getAttribute("data-tab") === name;
+            tab.classList.toggle("is-active", on);
+            tab.setAttribute("aria-selected", on ? "true" : "false");
+        });
+        $$("[data-panel]", dialogBody).forEach(function (panel) {
+            panel.hidden = panel.getAttribute("data-panel") !== name;
+        });
+    }
+
+    // Protocollo effettivo della scheda: quello scelto o, se "automatico", quello dedotto dal portale.
+    function syncPanel(panel) {
+        var select = panel ? $("[data-protocol]", panel) : null;
+        if (!select) { return; }
+        var protocol = select.value || select.getAttribute("data-auto-protocol") || "";
+        var any = false;
+        $$("[data-for]", panel).forEach(function (group) {
+            var on = group.getAttribute("data-for").split(" ").indexOf(protocol) >= 0;
+            group.hidden = !on;
+            any = any || on;
+        });
+        var none = $("[data-advanced-none]", panel);
+        if (none) { none.hidden = any; }
+        // Oracle: il nome del database è obbligatorio, quindi le avanzate si aprono da sole.
+        var details = $("[data-advanced]", panel);
+        if (details && protocol === "Oracle") { details.open = true; }
+        var tab = tabFor(panel);
+        var use = tab && !tab.classList.contains("is-muted") ? $("use", tab) : null;
+        if (use && protocolIcons[protocol]) { use.setAttribute("href", "#" + protocolIcons[protocol]); }
+    }
+
+    function syncEditor() {
+        $$("[data-panel]", dialogBody).forEach(syncPanel);
+    }
+
+    function newTabButton(index) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "conn-tab";
+        button.setAttribute("role", "tab");
+        button.setAttribute("aria-selected", "false");
+        button.setAttribute("data-tab", "extra-" + index);
+        var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        var use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+        use.setAttribute("href", "#i-globe");
+        svg.appendChild(use);
+        var label = document.createElement("span");
+        label.setAttribute("data-tab-label", "");
+        label.textContent = "Nuova connessione";
+        button.appendChild(svg);
+        button.appendChild(label);
+        return button;
+    }
+
     document.addEventListener("click", function (event) {
+        if (!dialogBody || !dialogBody.contains(event.target)) { return; }
+        var tab = event.target.closest("[data-tab]");
+        if (tab) {
+            selectTab(tab.getAttribute("data-tab"));
+            return;
+        }
         var add = event.target.closest("[data-extra-add]");
         if (add) {
             var template = $("[data-extra-template]", dialogBody);
@@ -616,21 +748,68 @@
             var html = template.innerHTML.replace(/__i__/g, String(index));
             // HTML del <template> generato dal server (Razor, già codificato); __i__ è solo un indice numerico.
             // nosemgrep: typescript.react.security.audit.react-unsanitized-method.react-unsanitized-method
-            $("[data-extras]", dialogBody).insertAdjacentHTML("beforeend", html);
-            var rows = $$("[data-extra-row]", dialogBody);
-            var input = $("input:not([type=hidden])", rows[rows.length - 1]);
+            template.insertAdjacentHTML("beforebegin", html);
+            add.parentNode.insertBefore(newTabButton(index), $('[data-tab="console"]', dialogBody) || add);
+            var panel = $('[data-panel="extra-' + index + '"]', dialogBody);
+            syncPanel(panel);
+            selectTab("extra-" + index);
+            var input = $("[data-label-input]", panel);
             if (input) { input.focus(); }
             return;
         }
         var remove = event.target.closest("[data-extra-delete]");
         if (remove) {
             var row = remove.closest("[data-extra-row]");
-            var flag = $("[data-extra-remove]", row);
-            if ($('input[name$=".Id"]', row)) {
-                flag.value = "true";
-                row.classList.add("is-removed");
-            } else {
-                row.remove();
+            var rowTab = tabFor(row);
+            // Si segna da togliere al salvataggio senza toglierla dal modulo: gli indici Extras[n]
+            // devono restare consecutivi, altrimenti il portale ignora le schede che seguono.
+            $("[data-extra-remove]", row).value = "true";
+            row.classList.add("is-removed");
+            row.removeAttribute("data-panel");
+            if (rowTab) { rowTab.parentNode.removeChild(rowTab); }
+            selectTab("primary");
+            return;
+        }
+        var reset = event.target.closest("[data-console-reset]");
+        if (reset) {
+            var consolePanel = reset.closest("[data-console-panel]");
+            $$("input:not([type=hidden]):not([type=checkbox])", consolePanel).forEach(function (field) { field.value = ""; });
+            $$("select", consolePanel).forEach(function (field) {
+                field.selectedIndex = 0;
+                field.classList.remove("is-overridden");
+            });
+            var hide = $("[data-console-hide]", consolePanel);
+            if (hide && hide.checked) {
+                hide.checked = false;
+                hide.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+            syncPanel(consolePanel);
+            var consoleLabel = $("[data-tab-label]", tabFor(consolePanel));
+            if (consoleLabel) { consoleLabel.textContent = "Console"; }
+            toast("Console come in Hudu: salva per confermare.");
+        }
+    });
+
+    document.addEventListener("input", function (event) {
+        var input = event.target.closest("[data-label-input]");
+        if (!input || !dialogBody || !dialogBody.contains(input)) { return; }
+        var label = $("[data-tab-label]", tabFor(input.closest("[data-panel]")));
+        if (label) { label.textContent = input.value.trim() || input.getAttribute("data-label-default") || "Nuova connessione"; }
+    });
+
+    document.addEventListener("change", function (event) {
+        if (!dialogBody || !dialogBody.contains(event.target)) { return; }
+        if (event.target.matches("[data-protocol]")) {
+            syncPanel(event.target.closest("[data-panel]"));
+        }
+        if (event.target.matches("[data-advanced] select") && !/DatabaseKind$/.test(event.target.name)) {
+            event.target.classList.toggle("is-overridden", event.target.value !== "");
+        }
+        if (event.target.matches("[data-console-hide]")) {
+            var tab = tabFor(event.target.closest("[data-panel]"));
+            if (tab) {
+                tab.classList.toggle("is-muted", event.target.checked);
+                $("use", tab).setAttribute("href", event.target.checked ? "#i-eye-off" : "#i-shield");
             }
         }
     });
@@ -662,6 +841,7 @@
             var html = await response.text();
             if (response.status === 422) {
                 dialogBody.innerHTML = html;
+                syncEditor();
                 return;
             }
             if (!response.ok) { throw new Error("Salvataggio non riuscito (" + response.status + ")"); }

@@ -1,0 +1,12 @@
+@model ConnectButtonModel
+@{ var connection = Model.Connection; }
+<button type="button" class="btn @Model.CssClass btn-connect"
+        data-connect="@Model.AssetId" data-key="@connection.Key"
+        data-gateway="@(connection.CanConnect ? connection.GatewayPeerId : null)"
+        data-target="@connection.Host:@connection.Port"
+        data-icon="@Format.Icon(connection.Protocol)"
+        title="@Format.ConnectionTitle(connection)"
+        aria-haspopup="menu"
+        disabled="@(!connection.CanConnectDirect)">
+    <svg><use href="#@Format.Icon(connection.Protocol)" /></svg>@connection.Label
+</button>
