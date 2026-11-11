@@ -334,13 +334,32 @@ sotto) o lasciarlo imparare dal primo link.
 
 Se l'indirizzo non è impostato in nessuno dei due modi, il Launcher lo **chiede al primo link**
 aperto dal portale ("Usare questo indirizzo come portale?") e lo ricorda; si cambia
-dall'ingranaggio in basso a destra. Un link che arriva da un portale diverso da quello impostato
-viene rifiutato.
+dall'ingranaggio in basso a destra. All'avvio non compare nessuna schermata di configurazione.
+Un link che arriva da un portale diverso da quello impostato viene rifiutato.
 
 ### Distribuzione con Intune
 
 L'installazione è **per utente**, in `%LocalAppData%\HuduLauncher`, senza diritti
 amministrativi. L'app registra da sola il protocollo `hudulauncher://` per l'utente.
+
+Se l'installer viene avviato con un account diverso da quello collegato a Windows (per esempio
+*Esegui come altro utente* con l'account amministrativo), il Launcher se ne accorge al primo avvio,
+non si avvia e spiega di installarlo dall'account normale del tecnico (e come togliere la copia
+finita nell'altro profilo).
+
+**Modalità in background (predefinita).** Il Launcher parte all'accesso a Windows senza finestra
+(voce *Run* dell'utente, nessun servizio di sistema né diritto amministrativo) e resta nell'area di
+notifica. Da lì:
+
+- prepara subito l'accesso Microsoft 365 e lo rinnova ogni 20 minuti, così la prima connessione
+  non aspetta il broker di Windows, nemmeno dopo ore di inattività;
+- controlla gli aggiornamenti all'avvio e ogni 4 ore e, quando è nascosto e senza connessioni
+  aperte, li installa in silenzio e riparte in background;
+- chiudendo la finestra (X) il Launcher si nasconde e resta pronto; per uscire del tutto si usa
+  **Esci** dal menu dell'icona.
+
+Il tecnico può disattivarla dall'ingranaggio in basso a destra; l'amministratore può imporla o
+toglierla con il valore `AutoStart` (sotto).
 
 **Con l'MSI (consigliato).** Scaricare l'MSI da **Amministrazione → Launcher** (o dalle Release)
 e caricarlo in **App → Windows → Aggiungi → App line-of-business**, assegnato al gruppo dei
@@ -374,7 +393,7 @@ Chiave `HKCU\Software\Policies\HuduLauncher` (o `HKLM\...` per tutto il PC):
 |---|---|---|
 | `PortalUrl` | Stringa | Indirizzo del portale, se non inserito in compilazione |
 | `RustDeskPath` | Stringa | Percorso del client RustDesk, se non è trovato da solo (link `rustdesk://` registrato, `C:\Program Files\RustDesk` o una cartella con "rustdesk" nel nome). Ha la precedenza sul percorso impostato nel portale |
-| `AutoStart` | Stringa | `1`: il Launcher si avvia all'accesso a Windows, ridotto a icona (la prima connessione della giornata non aspetta il caricamento dell'app e dell'accesso 365); `0`: mai. Se manca, lo sceglie il tecnico nelle impostazioni del Launcher |
+| `AutoStart` | Stringa | `1`: modalità in background sempre attiva (avvio all'accesso a Windows, accesso 365 e aggiornamenti preparati in anticipo); `0`: mai, il Launcher si apre solo dai link e si chiude con la finestra. Se manca, è attiva e il tecnico può spegnerla nelle impostazioni del Launcher |
 
 ### Niente richiesta "Aprire hudulauncher?" nel browser
 

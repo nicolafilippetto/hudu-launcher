@@ -71,7 +71,9 @@ un tunnel RustDesk. Nessuna credenziale da digitare, nessun segreto salvato sul 
    - monouso, valido **30 secondi**;
    - legato a **utente** (UPN/oid) e **connessione** (id asset + protocollo).
 3. Il browser apre `hudulauncher://connect?ticket=<biglietto>`. Il link non contiene altro.
-4. Il connettore ottiene un token 365 in silenzio (MSAL + WAM, accesso singolo di Windows)
+4. Il connettore "prenota" il biglietto (`POST /api/connector/claim`, senza autenticazione: una
+   sola volta, porta la scadenza a 2 minuti per coprire un accesso 365 lento e non rivela se il
+   biglietto esiste), ottiene un token 365 in silenzio (MSAL + WAM, accesso singolo di Windows)
    e chiama `POST /api/connector/redeem` sul portale.
 5. Il server verifica biglietto valido, non usato, non scaduto e **stesso utente** del token.
    Legge la credenziale da Hudu **in quel momento** e restituisce:

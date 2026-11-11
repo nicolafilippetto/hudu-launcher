@@ -33,10 +33,11 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
     public OfflineCache Offline => offline;
 
     /// <summary>
-    /// All'avvio: configurazione del portale e accesso 365 preparati in background, senza finestre, così
-    /// la prima connessione non aspetta il caricamento del broker di Windows.
+    /// All'avvio e poi periodicamente: configurazione del portale e accesso 365 preparati in background,
+    /// senza finestre, così la connessione non aspetta il caricamento del broker di Windows e il token
+    /// resta fresco anche dopo ore di inattività.
     /// </summary>
-    public async Task WarmUpAsync(IntPtr window)
+    public async Task WarmUpAsync(IntPtr window, bool periodic = false)
     {
         if (PortalClient.TryNormalizePortalUrl(ConnectorSettings.PortalUrl) is not { } url || url.Scheme != Uri.UriSchemeHttps)
         {
@@ -46,7 +47,7 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
         try
         {
             _config ??= await new PortalClient(Http, url).GetConfigAsync(CancellationToken.None);
-            await auth.WarmUpAsync(_config, window, CancellationToken.None);
+            await auth.WarmUpAsync(_config, window, periodic, CancellationToken.None);
         }
         catch (Exception ex) when (ex is PortalException or HttpRequestException or TaskCanceledException or Microsoft.Identity.Client.MsalException)
         {
@@ -139,6 +140,9 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
             throw new PortalException("L'accesso con Microsoft 365 richiede il portale in https. In prova su http funzionano solo le connessioni degli admin locali.");
         }
 
+        // Prima di tutto si "prenota" il biglietto: il portale gli concede il tempo dell'accesso 365,
+        // che al primo uso del giorno può richiedere più dei secondi normali di validità.
+        await portal.ClaimAsync(request.Ticket, ct);
         step(null);
         _config ??= await portal.GetConfigAsync(ct);
         try

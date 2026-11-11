@@ -3,24 +3,33 @@ using Microsoft.Win32;
 namespace Launcher.Connector.Services;
 
 /// <summary>
-/// Avvio del Launcher all'accesso a Windows, ridotto a icona (voce "Run" dell'utente, nessun diritto
-/// amministrativo). Il primo avvio della giornata (caricamento dell'app e del broker 365) avviene così
-/// all'accesso, e la prima connessione dal portale parte subito. Facoltativo: lo sceglie il tecnico
-/// nelle impostazioni, oppure l'amministratore con il criterio AutoStart (1 o 0).
+/// Modalità in background: il Launcher parte all'accesso a Windows senza finestra, resta
+/// nell'area di notifica e prepara tutto prima che serva (accesso 365, aggiornamenti), così la prima
+/// connessione dal portale parte subito. Usa la voce "Run" dell'utente, senza diritti amministrativi.
+/// Attiva di serie; il tecnico può disattivarla nelle impostazioni, l'amministratore imporla con il
+/// criterio AutoStart (1 o 0).
 /// </summary>
 public static class AutoStart
 {
-    public const string MinimizedArgument = "--minimized";
+    public const string BackgroundArgument = "--background";
+
+    /// <summary>Argomento delle versioni fino alla 1.4.12, ancora accettato dalle voci non aggiornate.</summary>
+    public const string LegacyArgument = "--minimized";
+
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string ValueName = "HuduLauncher";
 
-    public static bool IsEnabled
+    /// <summary>Criterio dell'amministratore, poi scelta del tecnico; di serie attiva.</summary>
+    public static bool IsWanted => ConnectorSettings.AutoStartChoice ?? true;
+
+    public static bool IsBackgroundStart(IEnumerable<string> args) =>
+        args.Any(a => a.Equals(BackgroundArgument, StringComparison.OrdinalIgnoreCase) || a.Equals(LegacyArgument, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Scelta del tecnico dalle impostazioni: si ricorda e si applica subito.</summary>
+    public static void Choose(bool enabled)
     {
-        get
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-            return key?.GetValue(ValueName) is string;
-        }
+        ConnectorSettings.SaveAutoStartChoice(enabled);
+        Set(enabled);
     }
 
     public static void Set(bool enabled)
@@ -37,7 +46,7 @@ public static class AutoStart
                 key.DeleteValue(ValueName, throwOnMissingValue: false);
             }
 
-            Log.Info(enabled ? "Avvio all'accesso a Windows attivato" : "Avvio all'accesso a Windows disattivato");
+            Log.Info(enabled ? "Avvio in background all'accesso a Windows attivato" : "Avvio in background all'accesso a Windows disattivato");
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -46,12 +55,12 @@ public static class AutoStart
     }
 
     /// <summary>
-    /// All'avvio: applica il criterio dell'amministratore, se c'è, e tiene aggiornato il percorso
-    /// dell'eseguibile nella voce già presente.
+    /// All'avvio: allinea la voce "Run" alla scelta (criterio, tecnico o predefinita) e tiene aggiornato
+    /// il percorso dell'eseguibile.
     /// </summary>
     public static void Refresh()
     {
-        var wanted = ConnectorSettings.AutoStartPolicy ?? IsEnabled;
+        var wanted = IsWanted;
         using var key = Registry.CurrentUser.OpenSubKey(RunKey);
         var current = key?.GetValue(ValueName) as string;
         if (wanted != (current is not null) || (wanted && current != Command))
@@ -60,5 +69,5 @@ public static class AutoStart
         }
     }
 
-    private static string Command => $"\"{Environment.ProcessPath}\" {MinimizedArgument}";
+    private static string Command => $"\"{Environment.ProcessPath}\" {BackgroundArgument}";
 }

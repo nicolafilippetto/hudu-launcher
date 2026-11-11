@@ -64,6 +64,7 @@ public static class RateLimitPolicies
     public const string Connect = "connect";
     public const string Redeem = "redeem";
     public const string WebLogin = "web-login";
+    public const string Claim = "claim";
     public const string Login = "login";
 }
 
@@ -113,6 +114,16 @@ public static class ApiEndpoints
         connector.MapPost("/redeem-offline", RedeemOfflineAsync)
             .AllowAnonymous()
             .RequireRateLimiting(RateLimitPolicies.Redeem)
+            .DisableAntiforgery();
+        // Prenotazione del biglietto appena il Launcher riceve il link (prima dell'accesso 365, che può
+        // essere lento): risponde sempre allo stesso modo, senza dire se il biglietto esiste.
+        connector.MapPost("/claim", async (RedeemRequest request, TicketService tickets, CancellationToken ct) =>
+            {
+                await tickets.ClaimAsync(request.Ticket, ct);
+                return Results.NoContent();
+            })
+            .AllowAnonymous()
+            .RequireRateLimiting(RateLimitPolicies.Claim)
             .DisableAntiforgery();
         // Anonimo come il riscatto: dentro si verificano autorizzazione della scheda e token 365 (o admin locale).
         connector.MapPost("/web-login", WebLoginAsync)

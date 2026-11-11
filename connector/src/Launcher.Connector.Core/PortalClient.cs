@@ -276,6 +276,25 @@ public sealed class PortalClient(HttpClient http, Uri portal)
             ?? throw new PortalException("Risposta del portale non valida.");
     }
 
+    /// <summary>
+    /// Segnala al portale che il biglietto è arrivato al Launcher, così resta valido per il tempo
+    /// dell'accesso 365 anche quando il broker di Windows è lento. Non serve autenticazione e gli
+    /// errori si ignorano: se non riesce, il biglietto vale per il tempo normale.
+    /// </summary>
+    public async Task ClaimAsync(string ticket, CancellationToken ct)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(5));
+            using var response = await http.PostAsJsonAsync(new Uri(Portal, "api/connector/claim"), new { ticket }, timeout.Token);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            // Portale più vecchio o non raggiungibile: si prosegue con il riscatto normale.
+        }
+    }
+
     private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         HttpResponseMessage response;

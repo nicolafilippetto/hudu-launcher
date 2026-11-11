@@ -572,6 +572,9 @@ namespace Launcher.Server.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<long?>("ClaimedAt")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ClientIp")
                         .HasColumnType("TEXT");
 

@@ -39,7 +39,10 @@ server (se la licenza lo consente), rotazione periodica, alert sugli accessi API
 - **Launcher (Windows)**: per ricevere una credenziale serve un **biglietto** monouso (256 bit casuali,
   30 secondi, legato all'utente; nel database c'è solo l'hash) **e** un token Microsoft 365 dello stesso
   utente, ancora approvato nel portale, con scope dedicato. Un link `hudulauncher://` contraffatto non contiene host né credenziali e
-  viene rifiutato.
+  viene rifiutato. Appena ricevuto il link, il Launcher prenota il biglietto: la scadenza si porta a
+  2 minuti una sola volta, per coprire il primo accesso 365 della giornata. La prenotazione non
+  autentica nessuno e non rivela nulla (risponde sempre 204, con un proprio limite di richieste): il
+  riscatto continua a richiedere il token 365 dello stesso utente.
 - **Connessione diretta** (senza RustDesk): stesso biglietto e stessa autenticazione; il Launcher non
   riceve la password di RustDesk, che non gli serve.
 - **Cache d'emergenza offline**: il tecnico sceglie nel portale fino a N asset (N deciso dall'admin,

@@ -33,8 +33,8 @@ public static class SettingsDialog
         var autoStartPolicy = ConnectorSettings.AutoStartPolicy;
         var autoStart = new CheckBox
         {
-            Content = "Avvia il Launcher all'accesso a Windows (ridotto a icona)",
-            IsChecked = autoStartPolicy ?? AutoStart.IsEnabled,
+            Content = "Tieni il Launcher pronto in background (avvio con Windows)",
+            IsChecked = AutoStart.IsWanted,
             IsEnabled = autoStartPolicy is null,
             Margin = new Thickness(0, 6, 0, 4),
         };
@@ -45,15 +45,17 @@ public static class SettingsDialog
         {
             try
             {
-                if (!fromPolicy)
+                // Indirizzo lasciato vuoto: resta da proporre con il primo link del portale.
+                var empty = ConnectorSettings.PortalUrl is null && url.Text.Trim() is "" or "https://" or "http://";
+                if (!fromPolicy && !empty)
                 {
                     var normalized = PortalClient.ValidatePortalUrl(url.Text).ToString().TrimEnd('/');
                     ConnectorSettings.SavePortalUrl(normalized);
                 }
 
-                if (autoStartPolicy is null && autoStart.IsChecked != AutoStart.IsEnabled)
+                if (autoStartPolicy is null && autoStart.IsChecked != AutoStart.IsWanted)
                 {
-                    AutoStart.Set(autoStart.IsChecked == true);
+                    AutoStart.Choose(autoStart.IsChecked == true);
                 }
 
                 window.DialogResult = true;
@@ -83,7 +85,9 @@ public static class SettingsDialog
         panel.Children.Add(new TextBlock
         {
             Text = autoStartPolicy is null
-                ? "Il primo avvio della giornata (caricamento dell'app e dell'accesso Microsoft 365) avviene all'accesso a Windows: la prima connessione dal portale parte subito."
+                ? "Il Launcher parte all'accesso a Windows senza finestra e resta nell'area di notifica (vicino all'orologio): " +
+                  "tiene pronto l'accesso Microsoft 365 e si aggiorna da solo, così le connessioni dal portale partono subito. " +
+                  "Chiudendo la finestra resta attivo; per uscire del tutto usa Esci dall'icona."
                 : "Impostato dall'amministratore tramite criterio.",
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,

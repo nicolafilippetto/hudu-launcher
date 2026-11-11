@@ -128,14 +128,16 @@ public sealed class LauncherUpdater
     /// COM e WebView2 ancora attivi bloccava la finestra per qualche secondo ("Non risponde").
     /// </summary>
     /// <returns>true se l'updater è partito e l'app va chiusa.</returns>
-    public bool PrepareRestart()
+    /// <param name="background">In background: installazione senza finestre e riavvio di nuovo in background.</param>
+    public bool PrepareRestart(bool background = false)
     {
         if (_manager is null || _downloaded is null)
         {
             return false;
         }
 
-        _manager.WaitExitThenApplyUpdates(_downloaded, silent: false, restart: true);
+        _manager.WaitExitThenApplyUpdates(_downloaded, silent: background, restart: true,
+            restartArgs: background ? [AutoStart.BackgroundArgument] : null);
         _applyScheduled = true;
         return true;
     }

@@ -16,7 +16,13 @@ public partial class MainWindow : Window
     private bool _updateOffered;
     private bool _updating;
     private readonly System.Windows.Threading.DispatcherTimer _offlineTimer = new() { Interval = TimeSpan.FromSeconds(15) };
-    private bool _closingConfirmed;
+
+    /// <summary>Manutenzione in background: accesso 365 rinnovato e controllo degli aggiornamenti.</summary>
+    private readonly System.Windows.Threading.DispatcherTimer _maintenance = new() { Interval = TimeSpan.FromMinutes(20) };
+    private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(4);
+    private DateTimeOffset _lastUpdateCheck;
+    private TrayIcon? _tray;
+    private bool _exiting;
 
     public MainWindow(ConnectionWorkflow workflow)
     {
@@ -34,22 +40,53 @@ public partial class MainWindow : Window
             RenderOffline();
         };
         _offlineTimer.Start();
-        Loaded += (_, _) =>
+        _maintenance.Tick += (_, _) =>
         {
-            // Primo avvio senza indirizzo del portale: si chiede subito, a meno che sia stato aperto
-            // da un link del portale (in quel caso l'indirizzo lo propone il link).
-            Dispatcher.BeginInvoke(() =>
+            _ = _workflow.WarmUpAsync(Handle, periodic: true);
+            if (DateTimeOffset.UtcNow - _lastUpdateCheck >= UpdateCheckInterval)
             {
-                if (ConnectorSettings.PortalUrl is null && Tabs.Items.Count == 0)
-                {
-                    OnOpenSettings(this, new RoutedEventArgs());
-                }
-
                 _ = CheckForUpdatesAsync(required: false);
-                _ = _workflow.WarmUpAsync(Handle);
-            });
+            }
         };
     }
+
+    /// <summary>
+    /// Lavoro d'avvio, anche con la finestra nascosta: icona nell'area di notifica, aggiornamenti e
+    /// accesso 365 preparati subito, poi rinnovati periodicamente. L'indirizzo del portale non si
+    /// chiede più all'avvio: arriva dalla compilazione, da un criterio o dal primo link del portale.
+    /// </summary>
+    public void Start(bool background)
+    {
+        _tray = new TrayIcon(BringToFront, ExitFromTray);
+        _ = CheckForUpdatesAsync(required: false);
+        _ = _workflow.WarmUpAsync(Handle);
+        _maintenance.Start();
+        if (background)
+        {
+            Log.Info("Launcher pronto in background (icona nell'area di notifica)");
+        }
+    }
+
+    /// <summary>Disconnessione o spegnimento di Windows: pulizia veloce, senza attese né domande.</summary>
+    public void PrepareForSessionEnd()
+    {
+        if (_exiting)
+        {
+            return;
+        }
+
+        _exiting = true;
+        _tray?.Dispose();
+        _workflow.Shutdown();
+        _updater.ApplyOnExit();
+        Log.Info("Chiusura per fine sessione di Windows");
+    }
+
+    /// <summary>
+    /// Finestra nascosta, nessuna connessione e cache offline vuota (si perderebbe al riavvio): si può
+    /// aggiornare senza disturbare.
+    /// </summary>
+    private bool Idle => !IsVisible && Tabs.Items.Count == 0 && _workflow.Offline.Items.Count == 0;
 
     private void UpdateStatus() =>
         StatusText.Text = $"Versione {ConnectorSettings.Version} · Portale: {ConnectorSettings.PortalUrl ?? "non configurato (Impostazioni in basso a destra)"}";
@@ -154,6 +191,7 @@ public partial class MainWindow : Window
         }
 
         string? version;
+        _lastUpdateCheck = DateTimeOffset.UtcNow;
         try
         {
             version = _updater.AvailableVersion ?? await _updater.CheckAsync(portal, CancellationToken.None);
@@ -161,7 +199,7 @@ public partial class MainWindow : Window
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Log.Warn("Controllo degli aggiornamenti non riuscito: " + ex.Message);
-            if (required)
+            if (required && IsVisible)
             {
                 Dialogs.Show(this, "Il Launcher va aggiornato",
                     "Il portale richiede una versione più recente, ma l'aggiornamento automatico non è riuscito. " +
@@ -178,6 +216,12 @@ public partial class MainWindow : Window
 
         UpdateButtonText.Text = $"Aggiorna a {version}";
         UpdateButton.Visibility = Visibility.Visible;
+        if (Idle)
+        {
+            await UpdateSilentlyAsync(version);
+            return;
+        }
+
         if (_updateOffered && !required)
         {
             return;
@@ -198,6 +242,41 @@ public partial class MainWindow : Window
     }
 
     private void OnUpdateClick(object sender, RoutedEventArgs e) => _ = UpdateAsync();
+
+    /// <summary>
+    /// In background: scarica, installa senza finestre e riparte nascosto. Se nel frattempo il tecnico
+    /// ha aperto il Launcher, l'aggiornamento resta pronto e si installa alla chiusura.
+    /// </summary>
+    private async Task UpdateSilentlyAsync(string version)
+    {
+        if (_updating)
+        {
+            return;
+        }
+
+        _updating = true;
+        try
+        {
+            if (!_updater.IsDownloaded)
+            {
+                await _updater.DownloadAsync(_ => { }, CancellationToken.None);
+            }
+
+            if (Idle && _updater.PrepareRestart(background: true))
+            {
+                Log.Info($"Aggiornamento alla versione {version} in background");
+                await ExitAsync([]);
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log.Warn("Aggiornamento in background non riuscito: " + ex.Message);
+        }
+        finally
+        {
+            _updating = false;
+        }
+    }
 
     /// <summary>Scarica (pacchetto verificato con gli hash del feed firmato) e installa subito o alla chiusura.</summary>
     private async Task UpdateAsync()
@@ -222,10 +301,7 @@ public partial class MainWindow : Window
                 if (_updater.PrepareRestart())
                 {
                     // Chiusura normale: l'updater attende l'uscita, installa e riapre il Launcher.
-                    _closingConfirmed = true;
-                    Hide();
-                    await ShutdownAsync([]);
-                    Application.Current.Shutdown();
+                    await ExitAsync([]);
                 }
 
                 return;
@@ -363,6 +439,11 @@ public partial class MainWindow : Window
 
     public void BringToFront()
     {
+        if (!IsVisible)
+        {
+            Show();
+        }
+
         if (WindowState == WindowState.Minimized)
         {
             WindowState = WindowState.Normal;
@@ -416,9 +497,61 @@ public partial class MainWindow : Window
         Process.Start(new ProcessStartInfo("explorer.exe", $"\"{ConnectorSettings.LogDirectory}\"") { UseShellExecute = true })?.Dispose();
     }
 
+    /// <summary>
+    /// X della finestra: in modalità background il Launcher si nasconde nell'area di notifica (chiudendo
+    /// le connessioni) e resta pronto; altrimenti esce. Per uscire del tutto c'è Esci nell'icona.
+    /// </summary>
     private async void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (_closingConfirmed)
+        if (_exiting)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+        var open = Tabs.Items.OfType<SessionTab>().ToList();
+        if (!ConfirmCloseSessions(open))
+        {
+            return;
+        }
+
+        if (!AutoStart.IsWanted)
+        {
+            await ExitAsync(open);
+            return;
+        }
+
+        Hide();
+        foreach (var tab in open)
+        {
+            await CloseTabAsync(tab);
+        }
+
+        if (!ConnectorSettings.TrayHintShown)
+        {
+            ConnectorSettings.TrayHintShown = true;
+            _tray?.Notify("Il Launcher resta pronto", "Continua a lavorare in background. Per riaprirlo usa l'icona qui o un link del portale; per uscire, Esci dal menu dell'icona.");
+        }
+
+        // Un aggiornamento in attesa si installa adesso che non disturba.
+        _ = CheckForUpdatesAsync(required: false);
+    }
+
+    private bool ConfirmCloseSessions(IReadOnlyList<SessionTab> open)
+    {
+        if (open.Count == 0)
+        {
+            return true;
+        }
+
+        var question = open.Count == 1 ? "Chiudere la connessione aperta?" : $"Chiudere le {open.Count} connessioni aperte?";
+        return Dialogs.Confirm(this, question, "Le sessioni e i tunnel verranno chiusi.", "Chiudi tutto");
+    }
+
+    /// <summary>Esci dal menu dell'icona: chiude tutto e termina il Launcher.</summary>
+    private void ExitFromTray()
+    {
+        if (_exiting)
         {
             return;
         }
@@ -426,20 +559,26 @@ public partial class MainWindow : Window
         var open = Tabs.Items.OfType<SessionTab>().ToList();
         if (open.Count > 0)
         {
-            var question = open.Count == 1 ? "Chiudere la connessione aperta?" : $"Chiudere le {open.Count} connessioni aperte?";
-            if (!Dialogs.Confirm(this, question, "Le sessioni e i tunnel verranno chiusi.", "Chiudi tutto"))
-            {
-                e.Cancel = true;
-                return;
-            }
+            BringToFront();
         }
 
-        // La finestra sparisce subito; sessioni, tunnel e aggiornamento si chiudono dopo, senza
-        // bloccarla (prima restava visibile e "Non risponde" durante la chiusura).
-        e.Cancel = true;
-        _closingConfirmed = true;
+        if (ConfirmCloseSessions(open))
+        {
+            _ = ExitAsync(open);
+        }
+    }
+
+    /// <summary>
+    /// Uscita vera: la finestra sparisce subito; sessioni, tunnel e aggiornamento si chiudono dopo,
+    /// senza bloccarla (prima restava visibile e "Non risponde" durante la chiusura).
+    /// </summary>
+    private async Task ExitAsync(IReadOnlyList<SessionTab> open)
+    {
+        _exiting = true;
+        _maintenance.Stop();
         Hide();
         await ShutdownAsync(open);
+        _tray?.Dispose();
         Application.Current.Shutdown();
     }
 

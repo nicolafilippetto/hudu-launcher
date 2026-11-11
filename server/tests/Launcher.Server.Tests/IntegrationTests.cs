@@ -372,6 +372,37 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
     }
 
     [Fact]
+    public async Task Claimed_ticket_gets_more_time_once_and_is_redeemed_normally()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await SignedInClientAsync("tecnico@example.com");
+        var ticket = await CreateTicketAsync(client);
+        var anonymous = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
+
+        async Task<Ticket> LatestAsync()
+        {
+            using var scope = factory.Services.CreateScope();
+            return await scope.ServiceProvider.GetRequiredService<AppDbContext>().Tickets.AsNoTracking()
+                .OrderByDescending(t => t.CreatedAt).FirstAsync(ct);
+        }
+
+        var before = await LatestAsync();
+        Assert.Equal(HttpStatusCode.NoContent, (await anonymous.PostAsJsonAsync(new Uri("/api/connector/claim", UriKind.Relative), new { ticket }, ct)).StatusCode);
+        var claimed = await LatestAsync();
+        Assert.NotNull(claimed.ClaimedAt);
+        Assert.True(claimed.ExpiresAt > before.ExpiresAt);
+        Assert.True(claimed.ExpiresAt <= DateTimeOffset.UtcNow + Launcher.Server.Connections.TicketService.ClaimWindow);
+
+        // Una seconda prenotazione non allunga ancora; un biglietto inesistente risponde uguale.
+        await anonymous.PostAsJsonAsync(new Uri("/api/connector/claim", UriKind.Relative), new { ticket }, ct);
+        Assert.Equal(claimed.ExpiresAt, (await LatestAsync()).ExpiresAt);
+        Assert.Equal(HttpStatusCode.NoContent, (await anonymous.PostAsJsonAsync(new Uri("/api/connector/claim", UriKind.Relative), new { ticket = "inesistente-0123456789abcdef" }, ct)).StatusCode);
+
+        // Il biglietto prenotato si riscatta come gli altri (utente e uso singolo restano verificati dal riscatto).
+        Assert.Equal(HttpStatusCode.OK, (await RedeemAsync(ticket, factory.CreateConnectorToken("tecnico@example.com"))).StatusCode);
+    }
+
+    [Fact]
     public async Task Ticket_of_another_user_is_rejected_and_burned()
     {
         var client = await SignedInClientAsync("tecnico@example.com");

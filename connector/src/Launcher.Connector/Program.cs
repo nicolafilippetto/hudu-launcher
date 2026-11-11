@@ -62,14 +62,36 @@ public static class Program
             _ = Task.Run(LauncherUpdater.RemoveOldPackages);
         }
 
+        // Installato o avviato con un account diverso da quello collegato a Windows: il Launcher
+        // finirebbe nel profilo sbagliato (link del portale, avvio in background, registri).
+        if (AccountCheck.OtherSessionUser(out var processUser) is { } sessionUser)
+        {
+            Log.Warn($"Avvio con l'account {processUser}, ma in Windows è collegato {sessionUser}: Launcher non avviato");
+            ShowWrongAccount(processUser, sessionUser);
+            return 1;
+        }
+
         WebViewOverrides.Clear();
         ProtocolRegistration.Register();
         AutoStart.Refresh();
-        var minimized = args.Contains(AutoStart.MinimizedArgument, StringComparer.OrdinalIgnoreCase);
-        Log.Info($"Avvio del processo: {startup} prima del codice del Launcher" + (minimized ? " (avvio all'accesso a Windows)" : ""));
-        var app = new App(request, minimized);
+        var background = AutoStart.IsBackgroundStart(args);
+        Log.Info($"Avvio del processo: {startup} prima del codice del Launcher" + (background ? " (in background, all'accesso a Windows o dopo un aggiornamento)" : ""));
+        var app = new App(request, background);
         app.InitializeComponent();
         return app.Run();
+    }
+
+    private static void ShowWrongAccount(string processUser, string sessionUser)
+    {
+        var app = new App(null);
+        app.InitializeComponent();
+        Sessions.Dialogs.Show(null, "Installa il Launcher con il tuo account",
+            $"Il Launcher è stato avviato con l'account {processUser}, ma in Windows è collegato {sessionUser}.\n\n" +
+            "Il Launcher si installa per utente, senza diritti amministrativi: avvia l'installer con un doppio clic dal tuo " +
+            "account normale, senza \"Esegui come amministratore\" né \"Esegui come altro utente\".\n\n" +
+            $"Per togliere la copia installata in {processUser}: Impostazioni > App > App installate > Hudu Launcher > Disinstalla, " +
+            "accedendo con quell'account.",
+            Sessions.DialogKind.Warning);
     }
 
     private static string StartupDelay()

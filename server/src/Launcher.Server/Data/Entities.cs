@@ -283,6 +283,8 @@ public sealed class Ticket
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }
     public DateTimeOffset? RedeemedAt { get; set; }
+    /// <summary>Prenotazione del Launcher appena ricevuto il link: la scadenza è stata estesa (una volta sola).</summary>
+    public DateTimeOffset? ClaimedAt { get; set; }
     public string? ClientIp { get; set; }
 
     /// <summary>Accesso con cui è stato emesso: "entra" (serve il token del connettore) o "local" (admin locale).</summary>

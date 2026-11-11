@@ -9,14 +9,14 @@ namespace Launcher.Connector;
 public partial class App : Application
 {
     private readonly LaunchRequest? _initialRequest;
-    private readonly bool _startMinimized;
+    private readonly bool _background;
     private readonly CancellationTokenSource _shutdown = new();
 
-    /// <param name="startMinimized">Avvio all'accesso a Windows: la finestra parte ridotta a icona.</param>
-    public App(LaunchRequest? initialRequest, bool startMinimized = false)
+    /// <param name="background">Avvio in background (accesso a Windows o dopo un aggiornamento silenzioso): nessuna finestra.</param>
+    public App(LaunchRequest? initialRequest, bool background = false)
     {
         _initialRequest = initialRequest;
-        _startMinimized = startMinimized && initialRequest is null;
+        _background = background && initialRequest is null;
     }
 
     protected override void OnStartup(StartupEventArgs e)
@@ -28,12 +28,15 @@ public partial class App : Application
         var workflow = new ConnectionWorkflow(new RustDeskTunnels(), new EntraAuth(), new OfflineCache(TimeProvider.System));
         var window = new MainWindow(workflow);
         MainWindow = window;
-        if (_startMinimized)
+        // La finestra nascosta non chiude l'app: si esce solo da Esci (icona) o chiudendo senza background.
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        SessionEnding += (_, _) => window.PrepareForSessionEnd();
+        if (!_background)
         {
-            window.WindowState = WindowState.Minimized;
+            window.Show();
         }
 
-        window.Show();
+        window.Start(_background);
 
         if (_initialRequest is not null)
         {

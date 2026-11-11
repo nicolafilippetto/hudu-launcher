@@ -102,6 +102,29 @@ public sealed class TicketService(AppDbContext db, SettingsService settings, Tim
         return new RedeemedTicket(ticket, RedeemError.None);
     }
 
+    /// <summary>Quanto vale un biglietto prenotato dal Launcher: il tempo per l'accesso 365, anche lento.</summary>
+    public static readonly TimeSpan ClaimWindow = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Prenotazione: il Launcher, appena riceve il link e prima dell'accesso 365, porta la scadenza del
+    /// biglietto a <see cref="ClaimWindow"/> da adesso. Una volta sola e solo per un biglietto ancora
+    /// valido e non usato: il riscatto resta legato all'utente (token 365) e monouso.
+    /// </summary>
+    public async Task ClaimAsync(string? token, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(token) || token.Length > 100)
+        {
+            return;
+        }
+
+        var id = Hash(token.Trim());
+        var now = time.GetUtcNow();
+        var until = now + ClaimWindow;
+        await db.Tickets
+            .Where(t => t.Id == id && t.RedeemedAt == null && t.ClaimedAt == null && t.ExpiresAt >= now && t.ExpiresAt < until)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.ClaimedAt, now).SetProperty(t => t.ExpiresAt, until), ct);
+    }
+
     /// <summary>Asset di un pacchetto offline.</summary>
     public static IReadOnlyList<int> OfflineAssetIds(Ticket ticket) =>
         (ticket.OfflineAssets ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)

@@ -36,14 +36,19 @@ public sealed class EntraAuth
     }
 
     /// <summary>
-    /// Prepara l'accesso all'avvio del Launcher: carica il broker e ottiene un token senza mai mostrare
-    /// finestre, così la prima connessione non aspetta. Se serve l'interazione, si rimanda alla connessione.
+    /// Prepara l'accesso all'avvio del Launcher, e poi lo rinnova periodicamente: carica il broker e ottiene
+    /// un token senza mai mostrare finestre, così la connessione non aspetta. Se serve l'interazione, si
+    /// rimanda alla connessione.
     /// </summary>
-    public async Task WarmUpAsync(ConnectorConfig config, IntPtr window, CancellationToken ct)
+    public async Task WarmUpAsync(ConnectorConfig config, IntPtr window, bool periodic, CancellationToken ct)
     {
         var watch = Stopwatch.StartNew();
         var ready = await TrySilentAsync(GetApp(config, window), [config.Scope!], ct) is not null;
-        Log.Info($"Accesso 365 preparato all'avvio in {watch.ElapsedMilliseconds} ms" + (ready ? "" : " (alla prima connessione servirà l'accesso interattivo)"));
+        // Il rinnovo periodico si registra solo se lento o se serve l'accesso interattivo.
+        if (!periodic || !ready || watch.ElapsedMilliseconds > 2000)
+        {
+            Log.Info($"Accesso 365 {(periodic ? "rinnovato" : "preparato all'avvio")} in {watch.ElapsedMilliseconds} ms" + (ready ? "" : " (alla prima connessione servirà l'accesso interattivo)"));
+        }
     }
 
     private static async Task<string?> TrySilentAsync(IPublicClientApplication app, string[] scopes, CancellationToken ct)

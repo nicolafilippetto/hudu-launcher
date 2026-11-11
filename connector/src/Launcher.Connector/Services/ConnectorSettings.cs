@@ -81,8 +81,30 @@ public static class ConnectorSettings
         }
     }
 
-    /// <summary>Criterio dell'amministratore per l'avvio all'accesso a Windows: true, false o null (sceglie il tecnico).</summary>
-    public static bool? AutoStartPolicy => ReadFrom("AutoStart", policyOnly: true) switch
+    /// <summary>Il tecnico ha già visto l'avviso che il Launcher, chiuso, resta nell'area di notifica.</summary>
+    public static bool TrayHintShown
+    {
+        get => Read("TrayHintShown") == "1";
+        set
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(UserKey);
+            key.SetValue("TrayHintShown", value ? "1" : "0", RegistryValueKind.String);
+        }
+    }
+
+    /// <summary>Criterio dell'amministratore per la modalità in background: true, false o null (sceglie il tecnico).</summary>
+    public static bool? AutoStartPolicy => ParseFlag(ReadFrom("AutoStart", policyOnly: true));
+
+    /// <summary>Criterio dell'amministratore o, se non c'è, scelta del tecnico; null se nessuno ha scelto.</summary>
+    public static bool? AutoStartChoice => ParseFlag(Read("AutoStart"));
+
+    public static void SaveAutoStartChoice(bool enabled)
+    {
+        using var key = Registry.CurrentUser.CreateSubKey(UserKey);
+        key.SetValue("AutoStart", enabled ? "1" : "0", RegistryValueKind.String);
+    }
+
+    private static bool? ParseFlag(string? value) => value switch
     {
         "1" => true,
         "0" => false,
