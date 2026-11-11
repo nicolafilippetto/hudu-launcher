@@ -134,6 +134,9 @@ public sealed class SessionTab : TabItem, IAsyncDisposable
         {
             ConnectionProtocol.Rdp => "\uE7F4",
             ConnectionProtocol.Ssh or ConnectionProtocol.Telnet => "\uE756",
+            ConnectionProtocol.Winbox => "\uE839",
+            ConnectionProtocol.Oracle => "\uE8F1",
+            ConnectionProtocol.Tcp => "\uE71B",
             _ => "\uE774",
         };
         UpdateState();

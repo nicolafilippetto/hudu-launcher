@@ -5,7 +5,7 @@ using Launcher.Connector.Services;
 
 namespace Launcher.Connector.Sessions;
 
-/// <summary>Impostazioni del Launcher: indirizzo del portale e avvio all'accesso a Windows.</summary>
+/// <summary>Impostazioni del Launcher: indirizzo del portale, avvio all'accesso a Windows, WinBox e tnsnames.ora.</summary>
 public static class SettingsDialog
 {
     /// <summary>Mostra la finestra; restituisce true se è stato salvato qualcosa.</summary>
@@ -92,6 +92,10 @@ public static class SettingsDialog
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,
         });
+        panel.Children.Add(PathRow(window, "WinBox (MikroTik)", () => ConnectorSettings.WinboxPath, ConnectorSettings.WinboxPathFromPolicy,
+            Winbox.Browse, "Si chiede alla prima connessione WinBox."));
+        panel.Children.Add(PathRow(window, "tnsnames.ora per le connessioni Oracle", () => ConnectorSettings.TnsNamesPath, ConnectorSettings.TnsNamesPathFromPolicy,
+            OracleTnsNames.Browse, "Si chiede alla prima connessione Oracle; deve essere modificabile."));
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
         buttons.Children.Add(save);
         buttons.Children.Add(cancel);
@@ -104,5 +108,33 @@ public static class SettingsDialog
         };
 
         return window.ShowDialog() == true;
+    }
+
+    /// <summary>Percorso di un programma o file del tecnico, con "Sfoglia…" (si salva subito, se valido).</summary>
+    private static StackPanel PathRow(Window window, string title, Func<string?> current, bool fromPolicy, Func<Window, string?> browse, string hint)
+    {
+        var row = new StackPanel { Margin = new Thickness(0, 14, 0, 0) };
+        row.Children.Add(new TextBlock { Text = title, FontWeight = FontWeights.SemiBold });
+        var line = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
+        var path = new TextBox { Text = current() ?? "", IsReadOnly = true, VerticalContentAlignment = VerticalAlignment.Center };
+        var browseButton = new Button { Content = "Sfoglia…", Padding = new Thickness(12, 3, 12, 3), Margin = new Thickness(8, 0, 0, 0), IsEnabled = !fromPolicy };
+        browseButton.Click += (_, _) =>
+        {
+            if (browse(window) is { } chosen)
+            {
+                path.Text = chosen;
+            }
+        };
+        DockPanel.SetDock(browseButton, Dock.Right);
+        line.Children.Add(browseButton);
+        line.Children.Add(path);
+        row.Children.Add(line);
+        row.Children.Add(new TextBlock
+        {
+            Text = fromPolicy ? "Impostato dall'amministratore tramite criterio." : (current() is null ? "Non ancora indicato. " : "") + hint,
+            Opacity = 0.7,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        return row;
     }
 }

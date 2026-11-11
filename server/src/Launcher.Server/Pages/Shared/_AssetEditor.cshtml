@@ -21,6 +21,12 @@
     var autoGateway = setting?.GatewayPeerId is null && primary?.GatewayPeerId is not null
         ? $"Automatico: {primary.GatewayPeerId} ({primary.GatewaySource})"
         : "Automatico";
+    var consoleHidden = Model.ConsoleRow?.Hidden == true;
+    // Aggiuntive senza host: stesso indirizzo della principale (per le pagine web l'FQDN dell'IPAM, se c'è).
+    var primaryIp = setting?.Host ?? autoHost;
+    var extraHostHint = primaryIp is null
+        ? "Indirizzo del dispositivo"
+        : $"Vuoto = {primaryIp}, come la principale" + (fqdn is not null && setting?.WebAddress != ConnectionResolver.WebAddressIp ? $" (pagine web: {fqdn})" : "");
 }
 @functions {
     private static string PasswordLabel(CachedPassword p) =>
@@ -85,12 +91,35 @@
         <div class="alert alert-warn"><strong>@ipam.Count IP nell'IPAM per questo asset:</strong> scegli quello da usare per la connessione.</div>
     }
 
-    <fieldset class="card-fieldset">
-        <legend>Connessione principale</legend>
+    @* Schede: principale, aggiuntive, console (suggerita da Hudu) e "+" per aggiungerne. Ogni scheda ha
+       gli stessi campi e le sue impostazioni avanzate; le sezioni seguono il protocollo scelto (site.js). *@
+    <div class="conn-tabs" role="tablist" aria-label="Connessioni" data-conn-tabs>
+        <button type="button" class="conn-tab is-active" role="tab" aria-selected="true" data-tab="primary">
+            <svg><use href="#@Format.Icon(primary?.Protocol ?? Model.GuessedProtocol)" /></svg><span>Principale</span>
+        </button>
+        @for (var i = 0; i < Model.Extras.Count; i++)
+        {
+            var extra = Model.Extras[i];
+            <button type="button" class="conn-tab" role="tab" aria-selected="false" data-tab="extra-@i">
+                <svg><use href="#@Format.Icon(extra.Protocol ?? ConnectionProtocol.Https)" /></svg><span data-tab-label>@extra.Label</span>
+            </button>
+        }
+        @if (Model.HasConsole)
+        {
+            <button type="button" class="conn-tab @(consoleHidden ? "is-muted" : "")" role="tab" aria-selected="false" data-tab="console">
+                <svg><use href="#@(consoleHidden ? "i-eye-off" : "i-shield")" /></svg><span data-tab-label>@(string.IsNullOrWhiteSpace(Model.ConsoleRow?.Label) ? "Console" : Model.ConsoleRow.Label)</span>
+            </button>
+        }
+        <button type="button" class="conn-tab conn-tab-add" data-extra-add data-next-index="@Model.Extras.Count" title="Aggiungi una connessione" aria-label="Aggiungi una connessione">
+            <svg><use href="#i-plus" /></svg>
+        </button>
+    </div>
+
+    <section class="conn-panel" role="tabpanel" data-panel="primary">
         <div class="grid grid-3">
             <label class="field">
                 <span>Protocollo</span>
-                <select class="input" name="Protocol">
+                <select class="input" name="Protocol" data-protocol data-auto-protocol="@Model.GuessedProtocol">
                     <option value="">Automatico (@Format.ProtocolName(Model.GuessedProtocol))</option>
                     @foreach (var p in protocols)
                     {
@@ -114,10 +143,10 @@
             </label>
             <label class="field">
                 <span>Porta</span>
-                <input class="input mono" name="Port" value="@setting?.Port" inputmode="numeric" placeholder="@(primary?.Port.ToString() ?? "")" autocomplete="off" />
+                <input class="input mono" name="Port" value="@setting?.Port" inputmode="numeric" placeholder="@(primary?.Port > 0 ? primary.Port.ToString() : "")" autocomplete="off" data-port-input />
             </label>
         </div>
-        <label class="field">
+        <label class="field" data-for="Http Https">
             <span>Indirizzo delle pagine web</span>
             <select class="input mono" name="WebAddress">
                 <option value="">FQDN dall'IPAM (@(fqdn ?? "non presente in Hudu: si usa l'IP"))</option>
@@ -129,8 +158,10 @@
             <p class="muted small">L'URL scritto a mano in precedenza (<span class="mono">@setting.WebUrl</span>) non si usa più e verrà tolto al salvataggio: l'indirizzo viene dall'FQDN dell'IPAM di Hudu (per un percorso o una porta, scrivere in Hudu l'indirizzo completo, es. https://vcenter.cliente.local/ui).</p>
         }
         <div class="grid grid-2">
-            <label class="field">
-                <span>Credenziale (da Hudu)</span>
+            <label class="field" data-for="Rdp Ssh Telnet Winbox Http Https Oracle">
+                <span data-for="Rdp Ssh Telnet Winbox">Credenziale (da Hudu, inviata al Launcher)</span>
+                <span data-for="Http Https">Credenziale proposta per "Accesso" (da Hudu)</span>
+                <span data-for="Oracle">Credenziale (da Hudu: si mostra solo l'utente, la password no)</span>
                 <select class="input" name="PasswordId">
                     <option value="">Automatica (@autoCredential)</option>
                     @foreach (var p in Model.Passwords)
@@ -152,6 +183,206 @@
                 <input type="hidden" name="Gateway" value="@setting?.GatewayPeerId" />
             }
         </div>
+        <partial name="_ConnectionAdvanced" model="@(new ConnectionAdvancedModel("", setting?.RdpOptions, setting?.WebOptions, setting?.DatabaseName, setting?.DatabaseKind, Model.RdpDefaults, Model.WebDefaults))" />
+    </section>
+
+    @for (var i = 0; i < Model.Extras.Count; i++)
+    {
+        var extra = Model.Extras[i];
+        var prefix = $"Extras[{i}].";
+        <section class="conn-panel" role="tabpanel" data-panel="extra-@i" data-extra-row hidden>
+            <input type="hidden" name="@(prefix)Id" value="@extra.Id" />
+            <input type="hidden" name="@(prefix)Remove" value="false" data-extra-remove />
+            <div class="grid grid-3">
+                <label class="field">
+                    <span>Nome</span>
+                    <input class="input" name="@(prefix)Label" value="@extra.Label" placeholder="es. Interfaccia web" maxlength="40" data-label-input />
+                </label>
+                <label class="field">
+                    <span>Protocollo</span>
+                    <select class="input" name="@(prefix)Protocol" data-protocol>
+                        @foreach (var p in protocols)
+                        {
+                            <option value="@p" selected="@(extra.Protocol == p)">@Format.ProtocolName(p)</option>
+                        }
+                    </select>
+                </label>
+                <label class="field">
+                    <span>Porta</span>
+                    <input class="input mono" name="@(prefix)Port" value="@extra.Port" placeholder="predefinita" inputmode="numeric" autocomplete="off" data-port-input />
+                </label>
+            </div>
+            <label class="field">
+                <span data-for="Http Https">Host o indirizzo completo (anche https://…)</span>
+                <span data-not-for="Http Https">Host o IP</span>
+                <input class="input mono" name="@(prefix)Host" value="@(extra.Url ?? extra.Host)" placeholder="@extraHostHint" list="ipam-list" autocomplete="off" spellcheck="false" />
+            </label>
+            <div class="grid grid-2">
+                <label class="field" data-for="Rdp Ssh Telnet Winbox Http Https Oracle">
+                    <span data-for="Rdp Ssh Telnet Winbox">Credenziale (da Hudu, inviata al Launcher)</span>
+                    <span data-for="Http Https">Credenziale proposta per "Accesso" (da Hudu)</span>
+                    <span data-for="Oracle">Credenziale (da Hudu: si mostra solo l'utente, la password no)</span>
+                    <select class="input" name="@(prefix)PasswordId">
+                        <option value="">Nessuna credenziale</option>
+                        @foreach (var p in Model.Passwords)
+                        {
+                            <option value="@p.Id" selected="@(extra.PasswordId == p.Id)">@PasswordLabel(p, asset)</option>
+                        }
+                    </select>
+                </label>
+                @if (Info.RustDeskEnabled)
+                {
+                    <label class="field">
+                        <span>Gateway RustDesk</span>
+                        <input class="input mono" name="@(prefix)Gateway" value="@extra.GatewayPeerId" list="peer-list" data-peer-input placeholder="Automatico (come la principale)" autocomplete="off" spellcheck="false" />
+                    </label>
+                }
+                else
+                {
+                    <input type="hidden" name="@(prefix)Gateway" value="@extra.GatewayPeerId" />
+                }
+            </div>
+            <partial name="_ConnectionAdvanced" model="@(new ConnectionAdvancedModel(prefix, extra.RdpOptions, extra.WebOptions, extra.DatabaseName, extra.DatabaseKind, Model.RdpDefaults, Model.WebDefaults))" />
+            <div class="conn-panel-actions">
+                <button type="button" class="btn btn-ghost btn-sm danger" data-extra-delete><svg><use href="#i-trash" /></svg>Elimina questa connessione</button>
+            </div>
+        </section>
+    }
+
+    @if (Model.HasConsole)
+    {
+        var row = Model.ConsoleRow;
+        var hudu = Model.HuduConsole;
+        var huduText = hudu is { } h2 ? (h2.Url ?? $"{Format.ProtocolName(h2.Protocol)} {h2.Host}:{h2.Port}") : "nessuna console in Hudu";
+        <section class="conn-panel" role="tabpanel" data-panel="console" data-console-panel hidden>
+            <input type="hidden" name="Console.Id" value="@row?.Id" />
+            <p class="muted small">
+                Suggerita da Hudu: <span class="mono">@huduText</span>. I campi vuoti seguono Hudu; quelli compilati la sostituiscono.
+            </p>
+            <div class="grid grid-3">
+                <label class="field">
+                    <span>Nome</span>
+                    <input class="input" name="Console.Label" value="@(row?.Label == "Console" ? "" : row?.Label)" placeholder="Console" maxlength="40" data-label-input data-label-default="Console" />
+                </label>
+                <label class="field">
+                    <span>Protocollo</span>
+                    <select class="input" name="Console.Protocol" data-protocol data-auto-protocol="@(hudu?.Protocol ?? ConnectionProtocol.Https)">
+                        <option value="">Come in Hudu (@Format.ProtocolName(hudu?.Protocol ?? ConnectionProtocol.Https))</option>
+                        @foreach (var p in protocols)
+                        {
+                            <option value="@p" selected="@(row?.Protocol == p)">@Format.ProtocolName(p)</option>
+                        }
+                    </select>
+                </label>
+                <label class="field">
+                    <span>Porta</span>
+                    <input class="input mono" name="Console.Port" value="@row?.Port" placeholder="@(hudu?.Port.ToString() ?? "predefinita")" inputmode="numeric" autocomplete="off" data-port-input />
+                </label>
+            </div>
+            <label class="field">
+                <span data-for="Http Https">Host o indirizzo completo (anche https://…)</span>
+                <span data-not-for="Http Https">Host o IP</span>
+                <input class="input mono" name="Console.Host" value="@(row?.Url ?? row?.Host)" placeholder="@(hudu?.Url ?? hudu?.Host ?? "es. https://idrac-srv01.cliente.local/")" list="ipam-list" autocomplete="off" spellcheck="false" />
+            </label>
+            <div class="grid grid-2">
+                <label class="field" data-for="Rdp Ssh Telnet Winbox Http Https Oracle">
+                    <span data-for="Rdp Ssh Telnet Winbox">Credenziale (da Hudu, inviata al Launcher)</span>
+                    <span data-for="Http Https">Credenziale proposta per "Accesso" (da Hudu)</span>
+                    <span data-for="Oracle">Credenziale (da Hudu: si mostra solo l'utente, la password no)</span>
+                    <select class="input" name="Console.PasswordId">
+                        <option value="">Nessuna credenziale</option>
+                        @foreach (var p in Model.Passwords)
+                        {
+                            <option value="@p.Id" selected="@(row?.PasswordId == p.Id)">@PasswordLabel(p, asset)</option>
+                        }
+                    </select>
+                </label>
+                @if (Info.RustDeskEnabled)
+                {
+                    <label class="field">
+                        <span>Gateway RustDesk</span>
+                        <input class="input mono" name="Console.Gateway" value="@row?.GatewayPeerId" list="peer-list" data-peer-input placeholder="Automatico (gateway del cliente)" autocomplete="off" spellcheck="false" />
+                    </label>
+                }
+                else
+                {
+                    <input type="hidden" name="Console.Gateway" value="@row?.GatewayPeerId" />
+                }
+            </div>
+            <partial name="_ConnectionAdvanced" model="@(new ConnectionAdvancedModel("Console.", row?.RdpOptions, row?.WebOptions, row?.DatabaseName, row?.DatabaseKind, Model.RdpDefaults, Model.WebDefaults))" />
+            <div class="conn-panel-actions">
+                <label class="check">
+                    <input type="checkbox" name="ConsoleHidden" value="true" checked="@consoleHidden" data-console-hide />
+                    <span>Nascondi la console (es. scheda dismessa ma ancora scritta in Hudu)</span>
+                </label>
+                <button type="button" class="btn btn-ghost btn-sm" data-console-reset title="Svuota i campi: la console torna come in Hudu"><svg><use href="#i-refresh" /></svg>Ripristina da Hudu</button>
+            </div>
+        </section>
+    }
+
+    <template data-extra-template>
+        <section class="conn-panel" role="tabpanel" data-panel="extra-__i__" data-extra-row hidden>
+            <input type="hidden" name="Extras[__i__].Remove" value="false" data-extra-remove />
+            <div class="grid grid-3">
+                <label class="field">
+                    <span>Nome</span>
+                    <input class="input" name="Extras[__i__].Label" placeholder="es. Interfaccia web" maxlength="40" data-label-input />
+                </label>
+                <label class="field">
+                    <span>Protocollo</span>
+                    <select class="input" name="Extras[__i__].Protocol" data-protocol>
+                        @foreach (var p in protocols)
+                        {
+                            <option value="@p" selected="@(p == ConnectionProtocol.Https)">@Format.ProtocolName(p)</option>
+                        }
+                    </select>
+                </label>
+                <label class="field">
+                    <span>Porta</span>
+                    <input class="input mono" name="Extras[__i__].Port" placeholder="predefinita" inputmode="numeric" autocomplete="off" data-port-input />
+                </label>
+            </div>
+            <label class="field">
+                <span data-for="Http Https">Host o indirizzo completo (anche https://…)</span>
+                <span data-not-for="Http Https">Host o IP</span>
+                <input class="input mono" name="Extras[__i__].Host" placeholder="@extraHostHint" list="ipam-list" autocomplete="off" spellcheck="false" />
+            </label>
+            <div class="grid grid-2">
+                <label class="field" data-for="Rdp Ssh Telnet Winbox Http Https Oracle">
+                    <span data-for="Rdp Ssh Telnet Winbox">Credenziale (da Hudu, inviata al Launcher)</span>
+                    <span data-for="Http Https">Credenziale proposta per "Accesso" (da Hudu)</span>
+                    <span data-for="Oracle">Credenziale (da Hudu: si mostra solo l'utente, la password no)</span>
+                    <select class="input" name="Extras[__i__].PasswordId">
+                        <option value="">Nessuna credenziale</option>
+                        @foreach (var p in linked)
+                        {
+                            <option value="@p.Id">@PasswordLabel(p, asset)</option>
+                        }
+                    </select>
+                </label>
+                @if (Info.RustDeskEnabled)
+                {
+                    <label class="field">
+                        <span>Gateway RustDesk</span>
+                        <input class="input mono" name="Extras[__i__].Gateway" list="peer-list" data-peer-input placeholder="Automatico (come la principale)" autocomplete="off" spellcheck="false" />
+                    </label>
+                }
+            </div>
+            <partial name="_ConnectionAdvanced" model="@(new ConnectionAdvancedModel("Extras[__i__].", null, null, null, null, Model.RdpDefaults, Model.WebDefaults))" />
+            <div class="conn-panel-actions">
+                <button type="button" class="btn btn-ghost btn-sm danger" data-extra-delete><svg><use href="#i-trash" /></svg>Elimina questa connessione</button>
+            </div>
+        </section>
+    </template>
+    <datalist id="ipam-list">
+        @foreach (var ip in ipam)
+        {
+            <option value="@ip"></option>
+        }
+    </datalist>
+
+    <fieldset class="card-fieldset">
+        <legend>Asset</legend>
         <div class="grid grid-2">
             <label class="field">
                 <span>Nota per i tecnici</span>
@@ -162,129 +393,6 @@
                 <span>Nascondi questo asset (non collegabile o dismesso)</span>
             </label>
         </div>
-    </fieldset>
-
-    @{
-        var rdpOverrides = Model.RdpOverrides;
-    }
-    <details class="card-fieldset rdp-options" open="@(rdpOverrides.Count > 0)">
-        <summary>
-            <strong>Opzioni Desktop remoto</strong>
-            <span class="muted small">
-                @(rdpOverrides.Count == 0 ? "predefinite per tutti" : $"{rdpOverrides.Count} personalizzate per questo asset")
-            </span>
-        </summary>
-        <p class="muted small">Valgono per le connessioni RDP di questo asset. "Predefinito" segue le impostazioni dell'amministratore.</p>
-        <div class="grid grid-3">
-            @foreach (var option in RdpOptionCatalog.All)
-            {
-                var current = rdpOverrides.GetValueOrDefault(option.Key);
-                var inherited = RdpOptionCatalog.Effective(option.Key, Model.RdpDefaults);
-                <label class="field" title="@option.Hint">
-                    <span>@option.Label</span>
-                    <select class="input @(current is null ? "" : "is-overridden")" name="Rdp[@option.Key]">
-                        <option value="">Predefinito (@option.LabelOf(inherited))</option>
-                        @foreach (var choice in option.Choices)
-                        {
-                            <option value="@choice.Value" selected="@(current == choice.Value)">@choice.Label</option>
-                        }
-                    </select>
-                </label>
-            }
-        </div>
-    </details>
-
-    @{
-        var webOverrides = Model.WebOverrides;
-    }
-    <details class="card-fieldset rdp-options" open="@(webOverrides.Count > 0)">
-        <summary>
-            <strong>Opzioni pagine web</strong>
-            <span class="muted small">
-                @(webOverrides.Count == 0 ? "predefinite per tutti" : $"{webOverrides.Count} personalizzate per questo asset")
-            </span>
-        </summary>
-        <p class="muted small">Valgono per le interfacce web di questo asset (principale, console e connessioni aggiuntive). "Predefinito" segue le impostazioni dell'amministratore.</p>
-        <div class="grid grid-3">
-            @foreach (var option in WebOptionCatalog.All)
-            {
-                var current = webOverrides.GetValueOrDefault(option.Key);
-                var inherited = WebOptionCatalog.Catalog.Effective(option.Key, Model.WebDefaults);
-                <label class="field" title="@option.Hint">
-                    <span>@option.Label</span>
-                    <select class="input @(current is null ? "" : "is-overridden")" name="Web[@option.Key]">
-                        <option value="">Predefinito (@option.LabelOf(inherited))</option>
-                        @foreach (var choice in option.Choices)
-                        {
-                            <option value="@choice.Value" selected="@(current == choice.Value)">@choice.Label</option>
-                        }
-                    </select>
-                </label>
-            }
-        </div>
-    </details>
-
-    <fieldset class="card-fieldset">
-        <legend>Connessioni aggiuntive</legend>
-        <p class="muted small">Ad esempio l'interfaccia web di gestione, una seconda porta SSH o un altro indirizzo dello stesso oggetto. Per le pagine web nel campo host si può scrivere l'indirizzo completo (es. https://idrac-srv01.cliente.local/).</p>
-        <div class="extras @(Info.RustDeskEnabled ? "" : "no-gateway")" data-extras>
-            @for (var i = 0; i < Model.Extras.Count; i++)
-            {
-                var extra = Model.Extras[i];
-                <div class="extra-row" data-extra-row>
-                    <input type="hidden" name="Extras[@i].Id" value="@extra.Id" />
-                    <input type="hidden" name="Extras[@i].Remove" value="false" data-extra-remove />
-                    <input class="input" name="Extras[@i].Label" value="@extra.Label" placeholder="Nome" maxlength="40" aria-label="Nome" />
-                    <select class="input" name="Extras[@i].Protocol" aria-label="Protocollo">
-                        @foreach (var p in protocols)
-                        {
-                            <option value="@p" selected="@(extra.Protocol == p)">@Format.ProtocolName(p)</option>
-                        }
-                    </select>
-                    <input class="input mono" name="Extras[@i].Host" value="@(extra.Url ?? extra.Host)" placeholder="Host o URL (come principale)" aria-label="Host o URL" list="ipam-list" autocomplete="off" title="@(extra.Url ?? extra.Host)" />
-                    <input class="input mono" name="Extras[@i].Port" value="@extra.Port" placeholder="Porta" inputmode="numeric" aria-label="Porta" />
-                    <select class="input" name="Extras[@i].PasswordId" aria-label="Credenziale">
-                        <option value="">Nessuna credenziale</option>
-                        @foreach (var p in Model.Passwords)
-                        {
-                            <option value="@p.Id" selected="@(extra.PasswordId == p.Id)">@PasswordLabel(p, asset)</option>
-                        }
-                    </select>
-                    <input class="input mono" type="@(Info.RustDeskEnabled ? "text" : "hidden")" name="Extras[@i].Gateway" value="@extra.GatewayPeerId" list="peer-list" data-peer-input placeholder="Gateway (auto)" aria-label="Gateway" />
-                    <button type="button" class="btn btn-ghost btn-icon" data-extra-delete title="Rimuovi"><svg><use href="#i-trash" /></svg></button>
-                </div>
-            }
-        </div>
-        <template data-extra-template>
-            <div class="extra-row" data-extra-row>
-                <input type="hidden" name="Extras[__i__].Remove" value="false" data-extra-remove />
-                <input class="input" name="Extras[__i__].Label" placeholder="Nome" maxlength="40" aria-label="Nome" />
-                <select class="input" name="Extras[__i__].Protocol" aria-label="Protocollo">
-                    @foreach (var p in protocols)
-                    {
-                        <option value="@p" selected="@(p == ConnectionProtocol.Https)">@Format.ProtocolName(p)</option>
-                    }
-                </select>
-                <input class="input mono" name="Extras[__i__].Host" placeholder="Host o URL (come principale)" aria-label="Host o URL" list="ipam-list" autocomplete="off" />
-                <input class="input mono" name="Extras[__i__].Port" placeholder="Porta" inputmode="numeric" aria-label="Porta" />
-                <select class="input" name="Extras[__i__].PasswordId" aria-label="Credenziale">
-                    <option value="">Nessuna credenziale</option>
-                    @foreach (var p in linked)
-                    {
-                        <option value="@p.Id">@PasswordLabel(p, asset)</option>
-                    }
-                </select>
-                <input class="input mono" type="@(Info.RustDeskEnabled ? "text" : "hidden")" name="Extras[__i__].Gateway" list="peer-list" data-peer-input placeholder="Gateway (auto)" aria-label="Gateway" />
-                <button type="button" class="btn btn-ghost btn-icon" data-extra-delete title="Rimuovi"><svg><use href="#i-trash" /></svg></button>
-            </div>
-        </template>
-        <datalist id="ipam-list">
-            @foreach (var ip in ipam)
-            {
-                <option value="@ip"></option>
-            }
-        </datalist>
-        <button type="button" class="btn btn-secondary btn-sm" data-extra-add data-next-index="@Model.Extras.Count"><svg><use href="#i-plus" /></svg>Aggiungi connessione</button>
     </fieldset>
 
     <footer class="modal-foot">

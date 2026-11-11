@@ -1,0 +1,74 @@
+@model ConnectionAdvancedModel
+@{
+    var rdp = RdpOptionCatalog.Parse(Model.Rdp);
+    var web = WebOptionCatalog.Catalog.Parse(Model.Web);
+    var kind = Model.DatabaseKind ?? DatabaseKinds.ServiceName;
+}
+@* Le sezioni si mostrano in base al protocollo della scheda (site.js, data-for); senza sezioni utili
+   (SSH, Telnet, WinBox, Altro) le avanzate spariscono del tutto. *@
+<details class="conn-advanced" open="@(rdp.Count + web.Count > 0)" data-advanced data-for="Rdp Http Https Oracle">
+    <summary>
+        <strong>Impostazioni avanzate</strong>
+        <span class="muted small">"Predefinito" segue le impostazioni dell'amministratore</span>
+    </summary>
+
+    <div class="conn-advanced-group" data-for="Rdp">
+        <h4>Desktop remoto</h4>
+        <div class="grid grid-3">
+            @foreach (var option in RdpOptionCatalog.All)
+            {
+                var current = rdp.GetValueOrDefault(option.Key);
+                var inherited = RdpOptionCatalog.Effective(option.Key, Model.RdpDefaults);
+                <label class="field" title="@option.Hint">
+                    <span>@option.Label</span>
+                    <select class="input @(current is null ? "" : "is-overridden")" name="@(Model.Prefix)Rdp[@option.Key]">
+                        <option value="">Predefinito (@option.LabelOf(inherited))</option>
+                        @foreach (var choice in option.Choices)
+                        {
+                            <option value="@choice.Value" selected="@(current == choice.Value)">@choice.Label</option>
+                        }
+                    </select>
+                </label>
+            }
+        </div>
+    </div>
+
+    <div class="conn-advanced-group" data-for="Http Https">
+        <h4>Pagine web</h4>
+        <div class="grid grid-3">
+            @foreach (var option in WebOptionCatalog.All)
+            {
+                var current = web.GetValueOrDefault(option.Key);
+                var inherited = WebOptionCatalog.Catalog.Effective(option.Key, Model.WebDefaults);
+                <label class="field" title="@option.Hint">
+                    <span>@option.Label</span>
+                    <select class="input @(current is null ? "" : "is-overridden")" name="@(Model.Prefix)Web[@option.Key]">
+                        <option value="">Predefinito (@option.LabelOf(inherited))</option>
+                        @foreach (var choice in option.Choices)
+                        {
+                            <option value="@choice.Value" selected="@(current == choice.Value)">@choice.Label</option>
+                        }
+                    </select>
+                </label>
+            }
+        </div>
+    </div>
+
+    <div class="conn-advanced-group" data-for="Oracle">
+        <h4>Database Oracle</h4>
+        <div class="grid grid-2">
+            <label class="field">
+                <span>Nome del database</span>
+                <input class="input mono" name="@(Model.Prefix)DatabaseName" value="@Model.DatabaseName" maxlength="128" placeholder="es. ORCL o orcl.cliente.local" autocomplete="off" spellcheck="false" />
+            </label>
+            <label class="field">
+                <span>Il nome è</span>
+                <select class="input" name="@(Model.Prefix)DatabaseKind">
+                    <option value="@DatabaseKinds.ServiceName" selected="@(kind == DatabaseKinds.ServiceName)">Service name</option>
+                    <option value="@DatabaseKinds.Sid" selected="@(kind == DatabaseKinds.Sid)">SID (database meno recenti)</option>
+                </select>
+            </label>
+        </div>
+        <p class="muted small">Il Launcher aggiunge la voce HUDULAUNCHER_1 (poi _2, _3…) in fondo al tnsnames.ora del tecnico. La password non viene inviata: il tecnico la scrive nel suo programma.</p>
+    </div>
+</details>

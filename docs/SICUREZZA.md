@@ -45,6 +45,13 @@ server (se la licenza lo consente), rotazione periodica, alert sugli accessi API
   riscatto continua a richiedere il token 365 dello stesso utente.
 - **Connessione diretta** (senza RustDesk): stesso biglietto e stessa autenticazione; il Launcher non
   riceve la password di RustDesk, che non gli serve.
+- **WinBox, Oracle e Altro** (dalla 1.5.2; i Launcher precedenti ricevono 426): per WinBox il Launcher
+  riceve la credenziale come per RDP e la passa a `winbox.exe` sulla riga di comando (visibile ai
+  programmi dello stesso utente e agli EDR che registrano le righe di comando: rischio accettato).
+  Per Oracle e Altro la password **non** viene inviata: il Launcher mostra solo utente e nome della
+  credenziale di Hudu. Per Oracle scrive nel `tnsnames.ora` scelto dal tecnico solo un blocco
+  delimitato in fondo al file (alias, `127.0.0.1` o l'host, porta, service name/SID validati), lo
+  toglie alla chiusura e ne tiene una copia prima della prima modifica.
 - **Cache d'emergenza offline**: il tecnico sceglie nel portale fino a N asset (N deciso dall'admin,
   predefinito 10; 0 = funzione spenta). Il Launcher, con biglietto e token 365 come sempre, riceve le
   connessioni dirette con le credenziali e le tiene **solo in memoria** per la durata impostata

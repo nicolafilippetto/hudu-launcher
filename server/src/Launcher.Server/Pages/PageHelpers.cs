@@ -62,6 +62,9 @@ public static class Format
     {
         ConnectionProtocol.Rdp => "i-monitor",
         ConnectionProtocol.Ssh or ConnectionProtocol.Telnet => "i-terminal",
+        ConnectionProtocol.Winbox => "i-router",
+        ConnectionProtocol.Oracle => "i-database",
+        ConnectionProtocol.Tcp => "i-cable",
         _ => "i-globe",
     };
 
@@ -72,6 +75,9 @@ public static class Format
         ConnectionProtocol.Telnet => "Telnet",
         ConnectionProtocol.Http => "HTTP",
         ConnectionProtocol.Https => "HTTPS",
+        ConnectionProtocol.Winbox => "WinBox (MikroTik)",
+        ConnectionProtocol.Oracle => "Database Oracle",
+        ConnectionProtocol.Tcp => "Altro (tunnel TCP)",
         _ => protocol.ToString(),
     };
 

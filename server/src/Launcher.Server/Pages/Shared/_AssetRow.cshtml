@@ -2,6 +2,7 @@
 @{
     var showCompany = ViewData["ShowCompany"] is true;
     var primary = Model.Primary;
+    var others = Model.Connections.Where(c => c.Key != ConnectionResolver.PrimaryKey).ToList();
     var issues = Model.Connections.SelectMany(c => c.Issues.Select(i => c.Key == ConnectionResolver.PrimaryKey ? i : $"{c.Label}: {i}")).Distinct().ToList();
 }
 <article class="asset @(Model.Hidden ? "is-hidden" : "") @(issues.Count > 0 ? "has-issues" : "")" data-asset-id="@Model.Asset.Id">
@@ -64,17 +65,27 @@
 
     <div class="asset-actions">
         <div class="connect-group">
-            @foreach (var connection in Model.Connections)
+            @* Principale arancione; poi la seconda connessione oppure, se sono di più, "Altre connessioni". *@
+            @if (primary is not null)
             {
-                <button type="button" class="btn @(connection.Key == ConnectionResolver.PrimaryKey ? "btn-primary" : "btn-secondary") btn-connect"
-                        data-connect="@Model.Asset.Id" data-key="@connection.Key"
-                        data-gateway="@(connection.CanConnect ? connection.GatewayPeerId : null)"
-                        data-target="@connection.Host:@connection.Port"
-                        title="@Format.ConnectionTitle(connection)"
-                        aria-haspopup="menu"
-                        disabled="@(!connection.CanConnectDirect)">
-                    <svg><use href="#@Format.Icon(connection.Protocol)" /></svg>@connection.Label
+                <partial name="_ConnectButton" model="@(new ConnectButtonModel(Model.Asset.Id, primary, "btn-primary"))" />
+            }
+            @if (others.Count == 1)
+            {
+                <partial name="_ConnectButton" model="@(new ConnectButtonModel(Model.Asset.Id, others[0], "btn-secondary"))" />
+            }
+            else if (others.Count > 1)
+            {
+                <button type="button" class="btn btn-secondary connect-more" data-connect-more aria-haspopup="menu"
+                        title="@string.Join(" · ", others.Select(o => o.Label))">
+                    <svg><use href="#i-layers" /></svg>Altre connessioni<svg class="chevron"><use href="#i-chevron-down" /></svg>
                 </button>
+                <div class="connect-more-list" hidden data-connect-more-list>
+                    @foreach (var connection in others)
+                    {
+                        <partial name="_ConnectButton" model="@(new ConnectButtonModel(Model.Asset.Id, connection, "btn-secondary"))" />
+                    }
+                </div>
             }
         </div>
         <div class="tool-group">

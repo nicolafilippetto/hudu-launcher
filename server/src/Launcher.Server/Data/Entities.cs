@@ -8,6 +8,21 @@ public enum ConnectionProtocol
     Telnet = 3,
     Http = 4,
     Https = 5,
+    /// <summary>MikroTik WinBox: il Launcher apre winbox.exe verso il dispositivo (o il tunnel).</summary>
+    Winbox = 6,
+    /// <summary>Database Oracle: il Launcher apre il tunnel e scrive la voce nel tnsnames.ora del tecnico.</summary>
+    Oracle = 7,
+    /// <summary>Altro servizio TCP: il Launcher apre il tunnel e indica indirizzo e porta da usare.</summary>
+    Tcp = 8,
+}
+
+/// <summary>Come si indica il database Oracle nella voce del tnsnames.ora.</summary>
+public static class DatabaseKinds
+{
+    public const string ServiceName = "service";
+    public const string Sid = "sid";
+
+    public static bool IsValid(string? kind) => kind is null or ServiceName or Sid;
 }
 
 /// <summary>Accesso di emergenza (break-glass): utente locale con password e MFA, sempre amministratore.</summary>
@@ -222,23 +237,50 @@ public sealed class AssetSetting
     public string? WebAddress { get; set; }
     /// <summary>Opzioni delle pagine web che sovrascrivono i predefiniti (JSON chiave → valore).</summary>
     public string? WebOptions { get; set; }
+    /// <summary>Database Oracle: service name o SID (vedi <see cref="DatabaseKind"/>).</summary>
+    public string? DatabaseName { get; set; }
+    /// <summary><see cref="DatabaseKinds"/>: null = service name.</summary>
+    public string? DatabaseKind { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public string? UpdatedBy { get; set; }
 }
 
-/// <summary>Connessioni aggiuntive di un asset (es. interfaccia web, porta SSH alternativa).</summary>
+/// <summary>
+/// Connessioni aggiuntive di un asset (es. interfaccia web, porta SSH alternativa). Con
+/// <see cref="IsConsole"/> la riga modifica (o nasconde) la console suggerita da Hudu: i campi
+/// vuoti continuano a seguire Hudu.
+/// </summary>
 public sealed class ExtraConnection
 {
     public int Id { get; set; }
     public int AssetId { get; set; }
     public required string Label { get; set; }
-    public ConnectionProtocol Protocol { get; set; }
+    /// <summary>null solo per la console: segue lo schema dell'indirizzo in Hudu.</summary>
+    [System.ComponentModel.DataAnnotations.Schema.NotMapped]
+    public ConnectionProtocol? Protocol
+    {
+        get => StoredProtocol == 0 ? null : (ConnectionProtocol)StoredProtocol;
+        set => StoredProtocol = value is { } protocol ? (int)protocol : 0;
+    }
+
+    /// <summary>Colonna "Protocol": 0 = come in Hudu (la colonna resta non nulla, senza ricostruire la tabella).</summary>
+    public int StoredProtocol { get; set; }
     public string? Host { get; set; }
     public int? Port { get; set; }
     /// <summary>Indirizzo completo per le connessioni web; host e porta si ricavano da qui.</summary>
     public string? Url { get; set; }
     public int? PasswordId { get; set; }
     public string? GatewayPeerId { get; set; }
+    /// <summary>Opzioni RDP di questa connessione (JSON chiave → valore).</summary>
+    public string? RdpOptions { get; set; }
+    /// <summary>Opzioni delle pagine web di questa connessione (JSON chiave → valore).</summary>
+    public string? WebOptions { get; set; }
+    public string? DatabaseName { get; set; }
+    public string? DatabaseKind { get; set; }
+    /// <summary>Modifica della console suggerita da Hudu (una sola per asset).</summary>
+    public bool IsConsole { get; set; }
+    /// <summary>Solo per la console: nascosta dal tecnico (es. iDRAC dismesso ma ancora in Hudu).</summary>
+    public bool Hidden { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public string? UpdatedBy { get; set; }
 }

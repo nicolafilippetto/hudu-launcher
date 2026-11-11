@@ -241,11 +241,25 @@ public class LauncherFactory : WebApplicationFactory<Program>
             throw new TaskCanceledException("timeout", new TimeoutException());
     }
 
+    /// <summary>Intestazione solo per i test: imposta l'indirizzo del client della richiesta.</summary>
+    public const string TestClientIpHeader = "X-Test-Client-Ip";
+
     /// <summary>Endpoint solo per i test: entra nel portale come utente 365 senza passare da Entra.</summary>
     private sealed class TestSignInStartupFilter : IStartupFilter
     {
         public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
         {
+            // Solo nei test: un IP del client a scelta, così i limiti per IP di un test non pesano sugli altri.
+            app.Use((http, nextMiddleware) =>
+            {
+                if (http.Request.Headers.TryGetValue(TestClientIpHeader, out var ip))
+                {
+                    http.Connection.RemoteIpAddress = System.Net.IPAddress.Parse(ip.ToString());
+                }
+
+                return nextMiddleware(http);
+            });
+
             // Use e non Map: con Map il cookie avrebbe come percorso /test-signin.
             app.Use(async (http, nextMiddleware) =>
             {
@@ -851,10 +865,106 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
         }
     }
 
-    private async Task<HttpResponseMessage> RedeemWithVersionAsync(string ticket, string? version)
+    [Fact]
+    public async Task Tabbed_editor_saves_oracle_extras_and_hidden_console_and_old_launchers_get_426()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await SignedInClientAsync("tecnico@example.com");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Assets.Add(new CachedAsset { Id = 30, CompanyId = 1, LayoutId = 28, LayoutName = "Virtual Machines", Name = "DB01", PrimaryIp = "10.0.0.30", IpamAddresses = "10.0.0.30", ConsoleAddress = "https://10.0.0.31", SearchText = "db01" });
+            db.Passwords.Add(new CachedPassword { Id = 530, CompanyId = 1, Name = "Oracle DB01", Username = "system", AssetId = 30 });
+            await db.SaveChangesAsync(ct);
+        }
+
+        try
+        {
+            var token = await AntiforgeryTokenAsync(client);
+            async Task<HttpResponseMessage> SaveAsync(Dictionary<string, string> fields)
+            {
+                fields["__RequestVerificationToken"] = token;
+                fields["AssetId"] = "30";
+                using var form = new FormUrlEncodedContent(fields);
+                return await client.PostAsync(new Uri("/?handler=SaveAsset", UriKind.Relative), form, ct);
+            }
+
+            // Altro senza porta: errore, niente salvato.
+            var invalid = await SaveAsync(new Dictionary<string, string> { ["Extras[0].Label"] = "Agente", ["Extras[0].Protocol"] = "Tcp" });
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, invalid.StatusCode);
+            Assert.Contains("indicare la porta", await invalid.Content.ReadAsStringAsync(ct), StringComparison.Ordinal);
+
+            var saved = await SaveAsync(new Dictionary<string, string>
+            {
+                ["Protocol"] = "Oracle",
+                ["DatabaseName"] = "ORCL",
+                ["DatabaseKind"] = "sid",
+                ["PasswordId"] = "530",
+                ["Extras[0].Label"] = "WinBox",
+                ["Extras[0].Protocol"] = "Winbox",
+                ["Extras[1].Label"] = "Agente",
+                ["Extras[1].Protocol"] = "Tcp",
+                ["Extras[1].Port"] = "9000",
+                // Campi nascosti per questi protocolli: non si salvano.
+                ["Extras[1].PasswordId"] = "530",
+                ["Rdp[clipboard]"] = "false",
+                ["Web[certificate]"] = "accept",
+                // Scheda aggiunta e poi eliminata: resta nel modulo, segnata da togliere.
+                ["Extras[2].Remove"] = "true",
+                ["Console.Id"] = "",
+                ["Console.Label"] = "",
+                ["ConsoleHidden"] = "true",
+            });
+            Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+            var row = await saved.Content.ReadAsStringAsync(ct);
+            Assert.Contains("Altre connessioni", row, StringComparison.Ordinal);
+            Assert.DoesNotContain(">Console<", row, StringComparison.Ordinal);
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var setting = await db.AssetSettings.AsNoTracking().SingleAsync(x => x.AssetId == 30, ct);
+                Assert.Equal((ConnectionProtocol.Oracle, "ORCL", DatabaseKinds.Sid), (setting.Protocol!.Value, setting.DatabaseName, setting.DatabaseKind));
+                Assert.Equal(((string?)null, (string?)null), (setting.RdpOptions, setting.WebOptions));
+                var rows = await db.ExtraConnections.AsNoTracking().Where(x => x.AssetId == 30).ToListAsync(ct);
+                Assert.Equal(3, rows.Count);
+                Assert.Single(rows, x => x.IsConsole && x.Hidden);
+                Assert.Single(rows, x => x.Protocol == ConnectionProtocol.Tcp && x.Port == 9000 && x.PasswordId == null);
+            }
+
+            // Il riscatto Oracle porta il database e l'utente, mai la password; i Launcher 1.5.1 ricevono 426.
+            // IP a parte: i riscatti di questo test non consumano il limite per IP degli altri.
+            var old = await RedeemWithVersionAsync(await CreateTicketAsync(client, assetId: 30), "1.5.1", "198.51.100.30");
+            Assert.Equal(HttpStatusCode.UpgradeRequired, old.StatusCode);
+            var redeem = await RedeemWithVersionAsync(await CreateTicketAsync(client, assetId: 30), "1.5.2", "198.51.100.30");
+            Assert.Equal(HttpStatusCode.OK, redeem.StatusCode);
+            var body = await redeem.Content.ReadFromJsonAsync<JsonElement>(ct);
+            Assert.Equal("Oracle", body.GetProperty("protocol").GetString());
+            Assert.Equal(JsonValueKind.Null, body.GetProperty("credential").ValueKind);
+            var database = body.GetProperty("database");
+            Assert.Equal(("ORCL", "sid", "system"), (database.GetProperty("name").GetString(), database.GetProperty("kind").GetString(), database.GetProperty("username").GetString()));
+            Assert.Equal(1521, body.GetProperty("target").GetProperty("port").GetInt32());
+        }
+        finally
+        {
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.ExtraConnections.Where(x => x.AssetId == 30).ExecuteDeleteAsync(ct);
+            await db.AssetSettings.Where(x => x.AssetId == 30).ExecuteDeleteAsync(ct);
+            await db.Passwords.Where(x => x.Id == 530).ExecuteDeleteAsync(ct);
+            await db.Assets.Where(x => x.Id == 30).ExecuteDeleteAsync(ct);
+        }
+    }
+
+    private async Task<HttpResponseMessage> RedeemWithVersionAsync(string ticket, string? version, string? clientIp = null)
     {
         var client = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri("/api/connector/redeem", UriKind.Relative)) { Content = JsonContent.Create(new { ticket }) };
+        if (clientIp is not null)
+        {
+            request.Headers.Add(LauncherFactory.TestClientIpHeader, clientIp);
+        }
+
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", factory.CreateConnectorToken("tecnico@example.com"));
         if (version is not null)
         {

@@ -8,6 +8,7 @@ using Launcher.Server.Inventory;
 using Launcher.Server.Pages;
 using Launcher.Server.Security;
 using Launcher.Server.Settings;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Launcher.Server.Tests;
@@ -350,6 +351,113 @@ public sealed class ConnectionResolverTests
         var extra = Assert.Single(resolved.Connections, c => c.Key == "extra:3");
         Assert.Equal(("10.0.0.10", 5001, "111"), (extra.Host, extra.Port, extra.GatewayPeerId));
     }
+
+    [Fact]
+    public void Console_edit_with_only_options_keeps_following_hudu()
+    {
+        var asset = Asset();
+        asset.ConsoleAddress = "https://idrac.cliente.local/start";
+        var ctx = Context(extras: [new ExtraConnection { Id = 7, AssetId = 100, Label = "Console", IsConsole = true, WebOptions = "{\"certificate\":\"accept\"}" }]);
+
+        var console = Assert.Single(ConnectionResolver.Resolve(asset, ctx).Connections, c => c.Key == ConnectionResolver.ConsoleKey);
+
+        Assert.Equal(ConnectionProtocol.Https, console.Protocol);
+        Assert.Equal(("idrac.cliente.local", 443), (console.Host, console.Port));
+        Assert.Equal("https://idrac.cliente.local/start", console.Url);
+        Assert.Equal("{\"certificate\":\"accept\"}", console.Settings.Web);
+        // La riga della console non diventa anche una connessione aggiuntiva.
+        Assert.DoesNotContain(ConnectionResolver.Resolve(asset, ctx).Connections, c => c.Key == "extra:7");
+    }
+
+    [Fact]
+    public void Console_edit_replaces_hudu_address_and_label()
+    {
+        var asset = Asset();
+        asset.ConsoleAddress = "https://10.0.0.200";
+        var ctx = Context(extras: [new ExtraConnection { Id = 7, AssetId = 100, Label = "iLO", IsConsole = true, Protocol = ConnectionProtocol.Ssh, Host = "10.0.0.201" }]);
+
+        var console = Assert.Single(ConnectionResolver.Resolve(asset, ctx).Connections, c => c.Key == ConnectionResolver.ConsoleKey);
+
+        Assert.Equal(("iLO", ConnectionProtocol.Ssh, "10.0.0.201", 22), (console.Label, console.Protocol, console.Host, console.Port));
+        Assert.Null(console.Url);
+    }
+
+    [Fact]
+    public void Hidden_console_disappears_and_console_needs_an_address()
+    {
+        var asset = Asset();
+        asset.ConsoleAddress = "https://10.0.0.200";
+        var hidden = Context(extras: [new ExtraConnection { Id = 7, AssetId = 100, Label = "Console", IsConsole = true, Hidden = true }]);
+        Assert.DoesNotContain(ConnectionResolver.Resolve(asset, hidden).Connections, c => c.Key == ConnectionResolver.ConsoleKey);
+
+        // Modifica rimasta ma Hudu non ha più la console e la modifica non ha un indirizzo: niente console.
+        asset.ConsoleAddress = null;
+        var orphan = Context(extras: [new ExtraConnection { Id = 7, AssetId = 100, Label = "Console", IsConsole = true, Port = 8443 }]);
+        Assert.DoesNotContain(ConnectionResolver.Resolve(asset, orphan).Connections, c => c.Key == ConnectionResolver.ConsoleKey);
+    }
+
+    [Fact]
+    public void New_protocols_have_defaults_and_report_missing_data()
+    {
+        var ctx = Context(
+            company: new CompanySetting { CompanyId = 1, GatewayPeerId = "111" },
+            extras:
+            [
+                new ExtraConnection { Id = 1, AssetId = 100, Label = "WinBox", Protocol = ConnectionProtocol.Winbox },
+                new ExtraConnection { Id = 2, AssetId = 100, Label = "DB", Protocol = ConnectionProtocol.Oracle, DatabaseName = "ORCL", DatabaseKind = DatabaseKinds.Sid },
+                new ExtraConnection { Id = 3, AssetId = 100, Label = "DB senza nome", Protocol = ConnectionProtocol.Oracle },
+                new ExtraConnection { Id = 4, AssetId = 100, Label = "Agente", Protocol = ConnectionProtocol.Tcp },
+            ]);
+
+        var connections = ConnectionResolver.Resolve(Asset(), ctx).Connections.ToDictionary(c => c.Key);
+
+        Assert.Equal(8291, connections["extra:1"].Port);
+        Assert.True(connections["extra:1"].CanConnect);
+        Assert.Equal((1521, "ORCL", DatabaseKinds.Sid), (connections["extra:2"].Port, connections["extra:2"].Settings.DatabaseName, connections["extra:2"].Settings.DatabaseKind));
+        Assert.Empty(connections["extra:2"].Issues);
+        Assert.Contains("Nome del database Oracle mancante", connections["extra:3"].Issues);
+        // Altro senza porta: non c'è una porta predefinita, quindi non è collegabile.
+        Assert.Contains("Porta mancante", connections["extra:4"].Issues);
+        Assert.False(connections["extra:4"].CanConnectDirect);
+    }
+
+    [Fact]
+    public async Task Upgrade_to_connection_tabs_keeps_existing_options()
+    {
+        // Database della 1.5.1 con un asset che aveva opzioni RDP e web a livello di asset e una connessione aggiuntiva.
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        await using var db = new AppDbContext(options);
+        var migrator = Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>(db);
+        await migrator.MigrateAsync("TicketClaim", TestContext.Current.CancellationToken);
+        await db.Database.ExecuteSqlRawAsync("""
+            INSERT INTO AssetSettings (AssetId, Hidden, RdpOptions, WebOptions, UpdatedAt) VALUES (1, 0, '{{"resize":"fit"}}', '{{"certificate":"accept"}}', 0);
+            INSERT INTO AssetSettings (AssetId, Hidden, UpdatedAt) VALUES (2, 0, 0);
+            INSERT INTO ExtraConnections (AssetId, Label, Protocol, Port, UpdatedAt) VALUES (1, 'Web', 5, 8443, 0);
+            """, TestContext.Current.CancellationToken); // {{ }} = graffe letterali
+
+        await migrator.MigrateAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var rows = await db.ExtraConnections.AsNoTracking().OrderBy(e => e.Id).ToListAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(2, rows.Count);
+        var extra = rows[0];
+        Assert.Equal((ConnectionProtocol.Https, "{\"resize\":\"fit\"}", "{\"certificate\":\"accept\"}", false), (extra.Protocol!.Value, extra.RdpOptions, extra.WebOptions, extra.IsConsole));
+        // La console di Hudu conserva le opzioni web dell'asset e continua a seguire Hudu per indirizzo e protocollo.
+        var console = rows[1];
+        Assert.Equal((1, true, false, (ConnectionProtocol?)null, "{\"certificate\":\"accept\"}"), (console.AssetId, console.IsConsole, console.Hidden, console.Protocol, console.WebOptions));
+        Assert.Null(console.Host);
+    }
+
+    [Theory]
+    [InlineData(null, ConnectionProtocol.Rdp, true)]
+    [InlineData(null, ConnectionProtocol.Winbox, false)]
+    [InlineData("1.5.1", ConnectionProtocol.Oracle, false)]
+    [InlineData("1.5.2-ci.3", ConnectionProtocol.Tcp, true)]
+    [InlineData("1.5.2", ConnectionProtocol.Winbox, true)]
+    [InlineData("1.6.0", ConnectionProtocol.Oracle, true)]
+    public void Old_launchers_do_not_receive_new_protocols(string? version, ConnectionProtocol protocol, bool expected) =>
+        Assert.Equal(expected, ApiEndpoints.LauncherSupports(version, protocol));
 
     [Fact]
     public void Ambiguous_peer_names_are_not_matched()

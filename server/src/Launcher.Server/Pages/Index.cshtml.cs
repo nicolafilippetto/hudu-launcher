@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Launcher.Server.Pages;
 
+/// <summary>Scheda di una connessione aggiuntiva (o della console) nell'editor.</summary>
 public sealed class ExtraForm
 {
     public int? Id { get; set; }
@@ -18,6 +19,10 @@ public sealed class ExtraForm
     public string? PasswordId { get; set; }
     public string? Gateway { get; set; }
     public bool Remove { get; set; }
+    public Dictionary<string, string?> Rdp { get; set; } = [];
+    public Dictionary<string, string?> Web { get; set; } = [];
+    public string? DatabaseName { get; set; }
+    public string? DatabaseKind { get; set; }
 }
 
 public sealed class AssetForm
@@ -36,6 +41,11 @@ public sealed class AssetForm
     /// <summary>"" = FQDN dell'IPAM (predefinito), "ip" = IP.</summary>
     public string? WebAddress { get; set; }
     public Dictionary<string, string?> Web { get; set; } = [];
+    public string? DatabaseName { get; set; }
+    public string? DatabaseKind { get; set; }
+    /// <summary>Scheda della console (null se l'asset non ne ha): i campi vuoti seguono Hudu.</summary>
+    public ExtraForm? Console { get; set; }
+    public bool ConsoleHidden { get; set; }
 }
 
 /// <summary>Modifica in blocco: campo vuoto = invariato.</summary>
@@ -66,9 +76,37 @@ public sealed record EditorViewModel(
     ConnectionProtocol GuessedProtocol,
     IReadOnlyList<string> Errors,
     IReadOnlyDictionary<string, string> RdpDefaults,
-    IReadOnlyDictionary<string, string> RdpOverrides,
     IReadOnlyDictionary<string, string> WebDefaults,
-    IReadOnlyDictionary<string, string> WebOverrides);
+    ExtraConnection? ConsoleRow,
+    (ConnectionProtocol Protocol, string Host, int Port, string? Url)? HuduConsole)
+{
+    public bool HasConsole => HuduConsole is not null || ConsoleRow is not null;
+}
+
+/// <summary>
+/// Impostazioni avanzate di una scheda dell'editor. <see cref="Prefix"/> è il prefisso dei nomi dei
+/// campi: "" per la principale, "Extras[0]." per un'aggiuntiva, "Console." per la console.
+/// </summary>
+public sealed record ConnectionAdvancedModel(
+    string Prefix,
+    string? Rdp,
+    string? Web,
+    string? DatabaseName,
+    string? DatabaseKind,
+    IReadOnlyDictionary<string, string> RdpDefaults,
+    IReadOnlyDictionary<string, string> WebDefaults);
+
+/// <summary>Pulsante di connessione nell'elenco asset.</summary>
+public sealed record ConnectButtonModel(int AssetId, ResolvedConnection Connection, string CssClass);
+
+/// <summary>Connessione aggiuntiva (o console) validata, pronta da salvare.</summary>
+internal sealed record ParsedExtra(
+    ExtraForm Form, string Label, ConnectionProtocol? Protocol, string? Host, int? Port, string? Url, int? PasswordId, string? Gateway,
+    string? Rdp, string? Web, string? DatabaseName, string? DatabaseKind)
+{
+    public bool IsEmptyConsole => Label == "Console" && Protocol is null && Host is null && Port is null && Url is null && PasswordId is null
+        && Gateway is null && Rdp is null && Web is null && DatabaseName is null;
+}
 
 public sealed record HomeViewModel(IReadOnlyList<ResolvedAsset> Favorites, IReadOnlyList<ResolvedAsset> Recent, SyncState? Sync, int CompanyCount,
     LauncherStatus? Launcher = null);
@@ -177,8 +215,18 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         var passwordId = ParsePassword(form.PasswordId, companyPasswords, errors);
         var gateway = ParseGateway(form.Gateway, errors);
         var note = string.IsNullOrWhiteSpace(form.Note) ? null : form.Note.Trim();
-        var rdp = RdpOptionCatalog.Clean(form.Rdp);
-        var web = WebOptionCatalog.Catalog.Clean(form.Web);
+        // Si salvano solo le opzioni del protocollo effettivo (quello scelto o, se automatico, quello dedotto
+        // come mostra l'editor): le sezioni degli altri protocolli sono nascoste e non devono restare attive.
+        var layout = await db.LayoutConfigs.AsNoTracking().FirstOrDefaultAsync(l => l.LayoutId == asset.LayoutId, ct);
+        var effective = protocol ?? ConnectionResolver.GuessProtocol(asset.OperatingSystem, layout, null);
+        var rdp = effective == ConnectionProtocol.Rdp ? RdpOptionCatalog.Clean(form.Rdp) : new Dictionary<string, string>();
+        var web = effective is ConnectionProtocol.Http or ConnectionProtocol.Https ? WebOptionCatalog.Catalog.Clean(form.Web) : new Dictionary<string, string>();
+        if (effective == ConnectionProtocol.Tcp)
+        {
+            // "Altro": la credenziale non si usa e il campo è nascosto.
+            passwordId = null;
+        }
+
         if (note?.Length > 500)
         {
             errors.Add("La nota supera i 500 caratteri.");
@@ -194,51 +242,25 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
             errors.Add("Indirizzo delle pagine web non valido.");
         }
 
-        var extras = new List<(ExtraForm Form, ConnectionProtocol Protocol, string? Host, int? Port, string? Url, int? PasswordId, string? Gateway)>();
+        var (databaseName, databaseKind) = ParseDatabase(protocol, form.DatabaseName, form.DatabaseKind, "Connessione principale", errors);
+        if (protocol == ConnectionProtocol.Tcp && port is null)
+        {
+            errors.Add("Connessione principale: indicare la porta del servizio.");
+        }
+
+        var extras = new List<ParsedExtra>();
         foreach (var extra in form.Extras.Where(e => !e.Remove))
         {
-            var label = extra.Label?.Trim();
-            if (string.IsNullOrEmpty(label))
+            if (ParseExtra(extra, isConsole: false, companyPasswords, errors) is { } parsed)
             {
-                errors.Add("Ogni connessione aggiuntiva deve avere un nome.");
-                continue;
+                extras.Add(parsed);
             }
+        }
 
-            if (label.Length > 40)
-            {
-                errors.Add($"Nome \"{label[..20]}…\" troppo lungo (max 40 caratteri).");
-            }
-
-            var extraProtocol = ParseProtocol(extra.Protocol, label, errors);
-            if (extraProtocol is null)
-            {
-                errors.Add($"Scegliere il protocollo per \"{label}\".");
-                continue;
-            }
-
-            // Nel campo host si può scrivere anche un indirizzo completo: vale per le pagine web.
-            if (extra.Host?.Contains("://", StringComparison.Ordinal) == true)
-            {
-                var (extraUrl, extraUrlError) = WebUrls.Parse(extra.Host);
-                if (extraUrlError is not null)
-                {
-                    errors.Add($"{label}: {extraUrlError}.");
-                    continue;
-                }
-
-                if (extraProtocol is not (ConnectionProtocol.Http or ConnectionProtocol.Https))
-                {
-                    errors.Add($"{label}: un indirizzo completo (URL) vale solo per le connessioni web.");
-                    continue;
-                }
-
-                extras.Add((extra, extraUrl!.Scheme == Uri.UriSchemeHttp ? ConnectionProtocol.Http : ConnectionProtocol.Https, null, null,
-                    extraUrl.AbsoluteUri, ParsePassword(extra.PasswordId, companyPasswords, errors), ParseGateway(extra.Gateway, errors)));
-                continue;
-            }
-
-            extras.Add((extra, extraProtocol.Value, ParseHost(extra.Host, label, errors), ParsePort(extra.Port, label, errors), null,
-                ParsePassword(extra.PasswordId, companyPasswords, errors), ParseGateway(extra.Gateway, errors)));
+        ParsedExtra? console = null;
+        if (form.Console is { } consoleForm && !form.ConsoleHidden)
+        {
+            console = ParseExtra(consoleForm, isConsole: true, companyPasswords, errors);
         }
 
         if (extras.Count > 10)
@@ -256,7 +278,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         var now = DateTimeOffset.UtcNow;
         var setting = await db.AssetSettings.FindAsync([asset.Id], ct);
         var isEmpty = protocol is null && host is null && port is null && passwordId is null && gateway is null && !form.Hidden && note is null
-            && rdp.Count == 0 && webAddress is null && web.Count == 0;
+            && rdp.Count == 0 && webAddress is null && web.Count == 0 && databaseName is null;
         if (isEmpty)
         {
             if (setting is not null)
@@ -284,15 +306,17 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
             setting.WebUrl = null;
             setting.WebAddress = webAddress;
             setting.WebOptions = OptionCatalog.Serialize(web);
+            setting.DatabaseName = databaseName;
+            setting.DatabaseKind = databaseKind;
             setting.UpdatedAt = now;
             setting.UpdatedBy = Email;
         }
 
         var existing = await db.ExtraConnections.Where(e => e.AssetId == asset.Id).ToListAsync(ct);
         var kept = new HashSet<int>();
-        foreach (var (extraForm, extraProtocol, extraHost, extraPort, extraUrl, extraPassword, extraGateway) in extras)
+        foreach (var extra in extras)
         {
-            var row = extraForm.Id is { } id ? existing.FirstOrDefault(e => e.Id == id) : null;
+            var row = extra.Form.Id is { } id ? existing.FirstOrDefault(e => e.Id == id && !e.IsConsole) : null;
             if (row is null)
             {
                 row = new ExtraConnection { AssetId = asset.Id, Label = "" };
@@ -303,15 +327,38 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
                 kept.Add(row.Id);
             }
 
-            row.Label = extraForm.Label!.Trim();
-            row.Protocol = extraProtocol;
-            row.Host = extraHost;
-            row.Port = extraPort;
-            row.Url = extraUrl;
-            row.PasswordId = extraPassword;
-            row.GatewayPeerId = extraGateway;
-            row.UpdatedAt = now;
-            row.UpdatedBy = Email;
+            Apply(row, extra, now);
+        }
+
+        // Console: nascosta, modificata (i campi vuoti seguono Hudu) o di nuovo come in Hudu (nessuna riga).
+        var consoleRow = existing.FirstOrDefault(e => e.IsConsole);
+        if (form.Console is not null && (form.ConsoleHidden || console is { IsEmptyConsole: false }))
+        {
+            if (consoleRow is null)
+            {
+                consoleRow = new ExtraConnection { AssetId = asset.Id, Label = "Console", IsConsole = true };
+                db.ExtraConnections.Add(consoleRow);
+            }
+            else
+            {
+                kept.Add(consoleRow.Id);
+            }
+
+            consoleRow.Hidden = form.ConsoleHidden;
+            if (console is not null)
+            {
+                Apply(consoleRow, console, now);
+            }
+            else
+            {
+                consoleRow.UpdatedAt = now;
+                consoleRow.UpdatedBy = Email;
+            }
+        }
+        else if (form.Console is null && consoleRow is not null)
+        {
+            // Scheda non inviata (console sparita da Hudu): la modifica resta, se Hudu la riproponesse.
+            kept.Add(consoleRow.Id);
         }
 
         db.ExtraConnections.RemoveRange(existing.Where(e => !kept.Contains(e.Id)));
@@ -320,6 +367,8 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         var company = await db.Companies.AsNoTracking().Where(c => c.Id == asset.CompanyId).Select(c => c.Name).FirstOrDefaultAsync(ct);
         await audit.WriteAsync(new AuditEntry("asset.update", Email, CompanyName: company, AssetId: asset.Id, AssetName: asset.Name,
             Details: Summarize(protocol, host, port, passwordId, gateway, form.Hidden, extras.Count)
+                     + (form.Console is null ? "" : form.ConsoleHidden ? "; console nascosta" : console is { IsEmptyConsole: false } ? "; console modificata" : "")
+                     + (databaseName is null ? "" : $"; database {databaseName}")
                      + (rdp.Count > 0 ? "; RDP: " + RdpOptionCatalog.Describe(rdp) : "")
                      + (webAddress is null ? "" : "; pagine web su IP")
                      + (web.Count > 0 ? "; Web: " + WebOptionCatalog.Catalog.Describe(web) : "")), HttpContext, ct);
@@ -458,7 +507,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
 
             setting.UpdatedAt = now;
             setting.UpdatedBy = Email;
-            if (setting is { Protocol: null, Host: null, Port: null, PasswordId: null, GatewayPeerId: null, Hidden: false, Note: null, RdpOptions: null, WebUrl: null, WebAddress: null, WebOptions: null })
+            if (setting is { Protocol: null, Host: null, Port: null, PasswordId: null, GatewayPeerId: null, Hidden: false, Note: null, RdpOptions: null, WebUrl: null, WebAddress: null, WebOptions: null, DatabaseName: null })
             {
                 db.AssetSettings.Remove(setting);
             }
@@ -586,17 +635,137 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
 
         // Nel menu: le password collegate in Hudu, più quelle già scelte ma non più collegate (segnalate),
         // così non spariscono in silenzio al primo salvataggio.
-        var extras = await db.ExtraConnections.AsNoTracking().Where(e => e.AssetId == assetId).OrderBy(e => e.Label).ToListAsync(ct);
+        var rows = await db.ExtraConnections.AsNoTracking().Where(e => e.AssetId == assetId).OrderBy(e => e.Label).ToListAsync(ct);
+        var extras = rows.Where(e => !e.IsConsole).ToList();
+        var consoleRow = rows.FirstOrDefault(e => e.IsConsole);
         var layout = await db.LayoutConfigs.AsNoTracking().FirstOrDefaultAsync(l => l.LayoutId == resolved.Asset.LayoutId, ct);
         var guessed = ConnectionResolver.GuessProtocol(resolved.Asset.OperatingSystem, layout, null);
         var linked = await inventory.GetLinkedPasswordsAsync(resolved.Asset, ct);
-        var chosen = new[] { resolved.Setting?.PasswordId }.Concat(extras.Select(e => e.PasswordId)).OfType<int>().ToHashSet();
+        var chosen = new[] { resolved.Setting?.PasswordId }.Concat(rows.Select(e => e.PasswordId)).OfType<int>().ToHashSet();
         var passwords = linked
             .Concat((await inventory.GetCompanyPasswordsAsync(resolved.Asset.CompanyId, ct)).Where(p => chosen.Contains(p.Id) && linked.All(l => l.Id != p.Id)))
             .ToList();
-        return new EditorViewModel(resolved, passwords, extras, guessed, errors,
-            settings.RdpDefaults, RdpOptionCatalog.Parse(resolved.Setting?.RdpOptions),
-            settings.WebDefaults, WebOptionCatalog.Catalog.Parse(resolved.Setting?.WebOptions));
+        return new EditorViewModel(resolved, passwords, extras, guessed, errors, settings.RdpDefaults, settings.WebDefaults,
+            consoleRow, ConnectionResolver.HuduConsole(resolved.Asset));
+    }
+
+    /// <summary>Valida la scheda di una connessione aggiuntiva o della console; null se va scartata.</summary>
+    private static ParsedExtra? ParseExtra(ExtraForm extra, bool isConsole, List<int> companyPasswords, List<string> errors)
+    {
+        var label = extra.Label?.Trim();
+        if (string.IsNullOrEmpty(label))
+        {
+            if (!isConsole)
+            {
+                errors.Add("Ogni connessione aggiuntiva deve avere un nome.");
+                return null;
+            }
+
+            label = "Console";
+        }
+
+        if (label.Length > 40)
+        {
+            errors.Add($"Nome \"{label[..20]}…\" troppo lungo (max 40 caratteri).");
+        }
+
+        // Console: protocollo vuoto = quello dell'indirizzo in Hudu.
+        var protocol = ParseProtocol(extra.Protocol, label, errors);
+        if (protocol is null && !isConsole)
+        {
+            errors.Add($"Scegliere il protocollo per \"{label}\".");
+            return null;
+        }
+
+        string? host = null;
+        int? port = null;
+        string? url = null;
+        // Nel campo host si può scrivere anche un indirizzo completo: vale per le pagine web.
+        if (extra.Host?.Contains("://", StringComparison.Ordinal) == true)
+        {
+            var (parsedUrl, urlError) = WebUrls.Parse(extra.Host);
+            if (urlError is not null)
+            {
+                errors.Add($"{label}: {urlError}.");
+                return null;
+            }
+
+            if (protocol is not (null or ConnectionProtocol.Http or ConnectionProtocol.Https))
+            {
+                errors.Add($"{label}: un indirizzo completo (URL) vale solo per le connessioni web.");
+                return null;
+            }
+
+            url = parsedUrl!.AbsoluteUri;
+            protocol = parsedUrl.Scheme == Uri.UriSchemeHttp ? ConnectionProtocol.Http : ConnectionProtocol.Https;
+        }
+        else
+        {
+            host = ParseHost(extra.Host, label, errors);
+            port = ParsePort(extra.Port, label, errors);
+        }
+
+        if (protocol == ConnectionProtocol.Tcp && port is null)
+        {
+            errors.Add($"{label}: indicare la porta del servizio.");
+        }
+
+        var (databaseName, databaseKind) = ParseDatabase(protocol, extra.DatabaseName, extra.DatabaseKind, label, errors);
+        var effective = protocol ?? ConnectionProtocol.Https;
+        // Si salvano solo le opzioni del tipo di connessione scelto: le altre sezioni sono nascoste.
+        var rdp = effective == ConnectionProtocol.Rdp ? RdpOptionCatalog.Serialize(RdpOptionCatalog.Clean(extra.Rdp)) : null;
+        var web = effective is ConnectionProtocol.Http or ConnectionProtocol.Https ? OptionCatalog.Serialize(WebOptionCatalog.Catalog.Clean(extra.Web)) : null;
+        var passwordId = effective == ConnectionProtocol.Tcp ? null : ParsePassword(extra.PasswordId, companyPasswords, errors);
+        return new ParsedExtra(extra, label, protocol, host, port, url, passwordId,
+            ParseGateway(extra.Gateway, errors), rdp, web, databaseName, databaseKind);
+    }
+
+    /// <summary>Service name o SID: obbligatorio per Oracle, ignorato per gli altri protocolli.</summary>
+    private static (string? Name, string? Kind) ParseDatabase(ConnectionProtocol? protocol, string? name, string? kind, string field, List<string> errors)
+    {
+        if (protocol != ConnectionProtocol.Oracle)
+        {
+            return (null, null);
+        }
+
+        var trimmed = name?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            errors.Add($"{field}: indicare il nome del database Oracle (service name o SID).");
+            return (null, null);
+        }
+
+        if (trimmed.Length > 128 || !trimmed.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '.' or '$' or '#' or '-'))
+        {
+            errors.Add($"{field}: nome del database non valido (lettere, numeri e _ . $ # -).");
+            return (null, null);
+        }
+
+        var cleanKind = string.IsNullOrEmpty(kind) ? DatabaseKinds.ServiceName : kind;
+        if (!DatabaseKinds.IsValid(cleanKind))
+        {
+            errors.Add($"{field}: scegliere service name o SID.");
+            return (null, null);
+        }
+
+        return (trimmed, cleanKind);
+    }
+
+    private void Apply(ExtraConnection row, ParsedExtra extra, DateTimeOffset now)
+    {
+        row.Label = extra.Label;
+        row.Protocol = extra.Protocol;
+        row.Host = extra.Host;
+        row.Port = extra.Port;
+        row.Url = extra.Url;
+        row.PasswordId = extra.PasswordId;
+        row.GatewayPeerId = extra.Gateway;
+        row.RdpOptions = extra.Rdp;
+        row.WebOptions = extra.Web;
+        row.DatabaseName = extra.DatabaseName;
+        row.DatabaseKind = extra.DatabaseKind;
+        row.UpdatedAt = now;
+        row.UpdatedBy = Email;
     }
 
     private static ConnectionProtocol? ParseProtocol(string? value, string field, List<string> errors)

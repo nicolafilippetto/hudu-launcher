@@ -653,3 +653,102 @@ public sealed class UpdateTests
         Assert.False(UpdateSignature.Verify(feed, signature, "non-base64!"));
     }
 }
+
+public sealed class TnsNamesTests
+{
+    private static readonly TnsEntry First = new(TnsNames.Alias(1), "127.0.0.1", 50123, "ORCL", IsSid: false);
+    private static readonly TnsEntry Second = new(TnsNames.Alias(2), "10.0.0.5", 1521, "LEGACY", IsSid: true);
+
+    private const string Existing = "PROD =\r\n  (DESCRIPTION =\r\n    (ADDRESS = (PROTOCOL = TCP)(HOST = db01)(PORT = 1521))\r\n    (CONNECT_DATA = (SERVICE_NAME = prod))\r\n  )\r\n";
+
+    [Fact]
+    public void Appends_the_launcher_block_at_the_end_keeping_the_file()
+    {
+        var updated = TnsNames.Apply(Existing, [First, Second]);
+
+        Assert.StartsWith(Existing, updated, StringComparison.Ordinal);
+        Assert.Contains("HUDULAUNCHER_1 =\r\n", updated, StringComparison.Ordinal);
+        Assert.Contains("(HOST = 127.0.0.1)(PORT = 50123)", updated, StringComparison.Ordinal);
+        Assert.Contains("(SERVICE_NAME = ORCL)", updated, StringComparison.Ordinal);
+        Assert.Contains("(SID = LEGACY)", updated, StringComparison.Ordinal);
+        Assert.EndsWith(TnsNames.EndMarker + "\r\n", updated, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n\n\n", updated.Replace("\r\n", "\n", StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.Equal(["HUDULAUNCHER_1", "HUDULAUNCHER_2"], TnsNames.ManagedAliases(updated));
+    }
+
+    [Fact]
+    public void Rewrites_the_block_and_removes_it_without_touching_the_rest()
+    {
+        var withTwo = TnsNames.Apply(Existing, [First, Second]);
+        var withOne = TnsNames.Apply(withTwo, [Second]);
+        Assert.Equal(["HUDULAUNCHER_2"], TnsNames.ManagedAliases(withOne));
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(withOne, ">>> HuduLauncher"));
+
+        Assert.Equal(Existing, TnsNames.Apply(withOne, []));
+    }
+
+    [Fact]
+    public void Keeps_unix_line_endings_and_text_after_the_block()
+    {
+        var unix = "A =\n  (DESCRIPTION = (ADDRESS = (PROTOCOL = TCP)(HOST = a)(PORT = 1)))\n";
+        var withBlock = TnsNames.Apply(unix, [First]);
+        Assert.DoesNotContain("\r\n", withBlock, StringComparison.Ordinal);
+
+        // Una voce aggiunta a mano dopo il blocco resta al suo posto.
+        var edited = withBlock + "\nB =\n  (DESCRIPTION = (ADDRESS = (PROTOCOL = TCP)(HOST = b)(PORT = 2)))\n";
+        var cleaned = TnsNames.Apply(edited, []);
+        Assert.StartsWith(unix, cleaned, StringComparison.Ordinal);
+        Assert.Contains("B =", cleaned, StringComparison.Ordinal);
+        Assert.DoesNotContain("HUDULAUNCHER", cleaned, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Works_on_an_empty_file() =>
+        Assert.StartsWith(TnsNames.BeginMarker + "\r\n", TnsNames.Apply("", [First]), StringComparison.Ordinal);
+
+    [Theory]
+    [InlineData("ORCL)(HOST=evil")]
+    [InlineData("ORCL\r\nEVIL =")]
+    [InlineData("")]
+    public void Refuses_names_that_would_inject_tns_syntax(string name) =>
+        Assert.Throws<ArgumentException>(() => TnsNames.Render(First with { DatabaseName = name }));
+}
+
+public sealed class WinboxCommandTests
+{
+    [Fact]
+    public void Tunnel_uses_local_port_user_and_password() =>
+        Assert.Equal(["127.0.0.1:50211", "admin", "P@ss word"],
+            WinboxCommand.Arguments(SessionEndpoint.ForTunnel(50211), new CredentialInfo("admin", "P@ss word")));
+
+    [Fact]
+    public void Default_port_is_omitted_and_missing_credential_opens_login() =>
+        Assert.Equal(["192.168.88.1"], WinboxCommand.Arguments(SessionEndpoint.ForTarget(new TargetInfo("192.168.88.1", 8291)), null));
+}
+
+public sealed class NewProtocolParsingTests
+{
+    [Fact]
+    public async Task Oracle_response_carries_the_database_and_no_password()
+    {
+        var json = """
+            {"protocol":"Oracle","name":"DB01","company":"Cliente","label":"Oracle",
+             "gateway":{"id":"100200300","password":"x"},"target":{"host":"10.0.0.20","port":1521},
+             "credential":null,"hostKeyAlias":"launcher-20-primary","warning":null,
+             "database":{"name":"ORCL","kind":"sid","username":"system","credentialName":"Oracle DB01"}}
+            """;
+        var client = new PortalClient(new HttpClient(new StubHandler(json)), new Uri("https://portal.test/"));
+
+        var info = await client.RedeemAsync("ticket", "token", TestContext.Current.CancellationToken);
+
+        Assert.Equal(ConnectionProtocol.Oracle, info.Protocol);
+        Assert.Null(info.Credential);
+        Assert.Equal(("ORCL", true, "system"), (info.Database!.Name, info.Database.IsSid, info.Database.Username));
+    }
+
+    private sealed class StubHandler(string body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") });
+    }
+}

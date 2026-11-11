@@ -14,18 +14,28 @@ public sealed record ResolvedConnection(
     string? PasswordName,
     string? Username,
     IReadOnlyList<string> Issues,
-    string? Url = null)
+    string? Url = null,
+    SavedOptions? Options = null)
 {
     public bool IsWeb => Protocol is ConnectionProtocol.Http or ConnectionProtocol.Https;
+
+    /// <summary>Opzioni della connessione: RDP e pagine web (JSON salvati), database Oracle.</summary>
+    public SavedOptions Settings => Options ?? SavedOptions.None;
 
     /// <summary>Pagina da aprire: l'URL indicato o, in mancanza, schema, host e porta di destinazione.</summary>
     public string? WebUrl => !IsWeb || Host is null ? null : Url ?? Connections.WebUrls.Default(Protocol == ConnectionProtocol.Https, Host, Port);
 
     /// <summary>Collegabile tramite il jump host RustDesk.</summary>
-    public bool CanConnect => Host is not null && GatewayPeerId is not null;
+    public bool CanConnect => CanConnectDirect && GatewayPeerId is not null;
 
-    /// <summary>Collegabile direttamente (tecnico dal cliente o in VPN): basta l'indirizzo.</summary>
-    public bool CanConnectDirect => Host is not null;
+    /// <summary>Collegabile direttamente (tecnico dal cliente o in VPN): bastano indirizzo e porta.</summary>
+    public bool CanConnectDirect => Host is not null && Port > 0;
+}
+
+/// <summary>Opzioni salvate per una singola connessione.</summary>
+public sealed record SavedOptions(string? Rdp, string? Web, string? DatabaseName, string? DatabaseKind)
+{
+    public static readonly SavedOptions None = new(null, null, null, null);
 }
 
 public sealed record ResolvedAsset(
@@ -81,6 +91,8 @@ public static class ConnectionResolver
         ConnectionProtocol.Telnet => 23,
         ConnectionProtocol.Http => 80,
         ConnectionProtocol.Https => 443,
+        ConnectionProtocol.Winbox => 8291,
+        ConnectionProtocol.Oracle => 1521,
         _ => 0,
     };
 
@@ -91,6 +103,9 @@ public static class ConnectionResolver
         ConnectionProtocol.Telnet => "Telnet",
         ConnectionProtocol.Http => "Web",
         ConnectionProtocol.Https => "Web",
+        ConnectionProtocol.Winbox => "WinBox",
+        ConnectionProtocol.Oracle => "Oracle",
+        ConnectionProtocol.Tcp => "TCP",
         _ => protocol.ToString(),
     };
 
@@ -196,25 +211,31 @@ public static class ConnectionResolver
 
         var (passwordId, passwordIssue) = ResolvePassword(setting?.PasswordId, asset, ctx);
         connections.Add(Build(PrimaryKey, Label(protocol), protocol, host, port, gateway, gatewaySource, passwordId, passwordIssue, ctx, hostIssue,
-            webUrl?.AbsoluteUri));
+            webUrl?.AbsoluteUri, new SavedOptions(setting?.RdpOptions, setting?.WebOptions, setting?.DatabaseName, setting?.DatabaseKind)));
 
-        // --- Console fuori banda (iDRAC/iLO/IPMI) dal campo di Hudu ---
-        if (HostParser.Parse(asset.ConsoleAddress) is { } console)
+        // --- Console fuori banda (iDRAC/iLO/IPMI): suggerita dal campo di Hudu, modificabile dai tecnici ---
+        var extrasOfAsset = ctx.Extras[asset.Id].ToList();
+        var consoleRow = extrasOfAsset.FirstOrDefault(e => e.IsConsole);
+        if (consoleRow?.Hidden != true && ResolveConsole(asset, consoleRow) is { } console)
         {
-            var consoleProtocol = console.Scheme == "http" ? ConnectionProtocol.Http : ConnectionProtocol.Https;
-            var consoleGateway = companyGateway ?? gateway;
-            // Se in Hudu c'è un indirizzo completo (con percorso), la pagina si apre proprio lì.
-            var consoleUrl = console.Scheme is null ? null : Connections.WebUrls.Parse(asset.ConsoleAddress!.Trim().Split([' ', ',', ';', '\n', '\t'])[0]).Url;
-            connections.Add(Build(ConsoleKey, "Console", consoleProtocol, console.Host, console.Port ?? DefaultPort(consoleProtocol),
-                consoleGateway, companyGateway is not null ? companyGatewaySource : gatewaySource, null, null, ctx, url: consoleUrl?.AbsoluteUri));
+            var (consoleGateway, consoleSource) = !ctx.RustDeskEnabled ? (null, null) : consoleRow?.GatewayPeerId is { } manualConsoleGateway
+                ? (manualConsoleGateway, "manuale")
+                : (companyGateway ?? gateway, companyGateway is not null ? companyGatewaySource : gatewaySource);
+            var (consolePasswordId, consolePasswordIssue) = consoleRow?.PasswordId is not null
+                ? ResolvePassword(consoleRow.PasswordId, asset, ctx)
+                : (null, (string?)null);
+            connections.Add(Build(ConsoleKey, string.IsNullOrWhiteSpace(consoleRow?.Label) ? "Console" : consoleRow.Label, console.Protocol, console.Host,
+                console.Port, consoleGateway, consoleSource, consolePasswordId, consolePasswordIssue, ctx, url: console.Url,
+                options: Options(consoleRow)));
         }
 
         // --- Connessioni aggiuntive definite dai tecnici ---
-        foreach (var extra in ctx.Extras[asset.Id].OrderBy(e => e.Label, StringComparer.OrdinalIgnoreCase))
+        foreach (var extra in extrasOfAsset.Where(e => !e.IsConsole).OrderBy(e => e.Label, StringComparer.OrdinalIgnoreCase))
         {
             var extraUrl = Connections.WebUrls.Parse(extra.Url).Url;
             var extraHost = extraUrl?.Host.Trim('[', ']') ?? extra.Host ?? ipHost;
-            if (extraUrl is null && extra.Host is null && useFqdn && IsWebProtocol(extra.Protocol) && FqdnUrl(asset, ipHost) is { } extraFqdn)
+            var protocolOfExtra = extra.Protocol ?? ConnectionProtocol.Https;
+            if (extraUrl is null && extra.Host is null && useFqdn && IsWebProtocol(protocolOfExtra) && FqdnUrl(asset, ipHost) is { } extraFqdn)
             {
                 // Pagina web sullo stesso indirizzo dell'asset: anche qui l'FQDN dell'IPAM.
                 if (extraFqdn.Url is { } extraFqdnUrl && (extra.Port is null || extra.Port == extraFqdnUrl.Port))
@@ -232,16 +253,69 @@ public static class ConnectionResolver
                 ? ResolvePassword(extra.PasswordId, asset, ctx)
                 : (null, (string?)null);
             var (extraProtocol, extraPort) = extraUrl is null
-                ? (extra.Protocol, extra.Port ?? DefaultPort(extra.Protocol))
+                ? (protocolOfExtra, extra.Port ?? DefaultPort(protocolOfExtra))
                 : (WebProtocol(extraUrl), extraUrl.Port);
             connections.Add(Build(ExtraPrefix + extra.Id, extra.Label, extraProtocol, extraHost, extraPort,
-                extraGateway, extraSource, extraPasswordId, extraPasswordIssue, ctx, url: extraUrl?.AbsoluteUri));
+                extraGateway, extraSource, extraPasswordId, extraPasswordIssue, ctx, url: extraUrl?.AbsoluteUri, options: Options(extra)));
         }
 
         return new ResolvedAsset(asset, companyName, setting, connections, ctx.Favorites.Contains(asset.Id));
     }
 
     private static bool IsWebProtocol(ConnectionProtocol protocol) => protocol is ConnectionProtocol.Http or ConnectionProtocol.Https;
+
+    private static SavedOptions Options(ExtraConnection? row) =>
+        row is null ? SavedOptions.None : new SavedOptions(row.RdpOptions, row.WebOptions, row.DatabaseName, row.DatabaseKind);
+
+    /// <summary>Console suggerita dal campo di Hudu (null se il campo è vuoto o non valido).</summary>
+    public static (ConnectionProtocol Protocol, string Host, int Port, string? Url)? HuduConsole(CachedAsset asset)
+    {
+        if (HostParser.Parse(asset.ConsoleAddress) is not { } console)
+        {
+            return null;
+        }
+
+        var protocol = console.Scheme == "http" ? ConnectionProtocol.Http : ConnectionProtocol.Https;
+        // Se in Hudu c'è un indirizzo completo (con percorso), la pagina si apre proprio lì.
+        var url = console.Scheme is null ? null : Connections.WebUrls.Parse(asset.ConsoleAddress!.Trim().Split([' ', ',', ';', '\n', '\t'])[0]).Url;
+        return (protocol, console.Host, console.Port ?? DefaultPort(protocol), url?.AbsoluteUri);
+    }
+
+    /// <summary>
+    /// Console effettiva: i campi scritti dal tecnico prevalgono, quelli vuoti seguono Hudu. Senza
+    /// indirizzo né in Hudu né nella modifica non c'è console.
+    /// </summary>
+    public static (ConnectionProtocol Protocol, string Host, int Port, string? Url)? ResolveConsole(CachedAsset asset, ExtraConnection? row)
+    {
+        var hudu = HuduConsole(asset);
+        if (row is null)
+        {
+            return hudu;
+        }
+
+        if (Connections.WebUrls.Parse(row.Url).Url is { } rowUrl)
+        {
+            return (WebProtocol(rowUrl), rowUrl.Host.Trim('[', ']'), rowUrl.Port, rowUrl.AbsoluteUri);
+        }
+
+        if (row.Host is { } rowHost)
+        {
+            var protocol = row.Protocol ?? hudu?.Protocol ?? ConnectionProtocol.Https;
+            return (protocol, rowHost, row.Port ?? DefaultPort(protocol), null);
+        }
+
+        if (hudu is not { } suggested)
+        {
+            return null;
+        }
+
+        // Stesso indirizzo di Hudu: protocollo e porta si possono cambiare; l'URL completo di Hudu vale
+        // solo se non sono stati toccati.
+        var effective = row.Protocol ?? suggested.Protocol;
+        var unchanged = effective == suggested.Protocol && (row.Port is null || row.Port == suggested.Port);
+        return (effective, suggested.Host, row.Port ?? (effective == suggested.Protocol ? suggested.Port : DefaultPort(effective)),
+            unchanged ? suggested.Url : null);
+    }
 
     /// <summary>FQDN dell'IPAM per l'IP della connessione: un indirizzo completo (Url) o solo il nome host.</summary>
     private static (Uri? Url, string Host)? FqdnUrl(CachedAsset asset, string? ip)
@@ -264,7 +338,7 @@ public static class ConnectionResolver
     private static ResolvedConnection Build(
         string key, string label, ConnectionProtocol protocol, string? host, int port,
         string? gateway, string? gatewaySource, int? passwordId, string? passwordIssue, ResolutionContext ctx, string? hostIssue = null,
-        string? url = null)
+        string? url = null, SavedOptions? options = null)
     {
         var issues = new List<string>();
         if (host is null)
@@ -274,6 +348,16 @@ public static class ConnectionResolver
         else if (hostIssue is not null)
         {
             issues.Add(hostIssue);
+        }
+
+        if (port <= 0)
+        {
+            issues.Add("Porta mancante");
+        }
+
+        if (protocol == ConnectionProtocol.Oracle && string.IsNullOrWhiteSpace(options?.DatabaseName))
+        {
+            issues.Add("Nome del database Oracle mancante");
         }
 
         if (!ctx.RustDeskEnabled)
@@ -299,12 +383,13 @@ public static class ConnectionResolver
         {
             issues.Add(passwordIssue);
         }
-        else if (password is null && protocol is ConnectionProtocol.Rdp or ConnectionProtocol.Ssh or ConnectionProtocol.Telnet && key == PrimaryKey)
+        else if (password is null && protocol is ConnectionProtocol.Rdp or ConnectionProtocol.Ssh or ConnectionProtocol.Telnet or ConnectionProtocol.Winbox && key == PrimaryKey)
         {
             issues.Add("Nessuna credenziale associata");
         }
 
-        return new ResolvedConnection(key, label, protocol, host, port, gateway, gatewaySource, password?.Id, password?.Name, password?.Username, issues, url);
+        return new ResolvedConnection(key, label, protocol, host, port, gateway, gatewaySource, password?.Id, password?.Name, password?.Username, issues, url,
+            options);
     }
 
     /// <summary>

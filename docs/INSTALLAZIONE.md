@@ -351,6 +351,9 @@ finita nell'altro profilo).
 (voce *Run* dell'utente, nessun servizio di sistema né diritto amministrativo) e resta nell'area di
 notifica. Da lì:
 
+- poco dopo l'avvio carica e rilascia, senza mostrare finestre, i componenti lenti al primo uso
+  (WebView2 del terminale e delle pagine web, controllo di Desktop remoto, SSH), così anche la prima
+  scheda si apre subito;
 - prepara subito l'accesso Microsoft 365 e lo rinnova ogni 20 minuti, così la prima connessione
   non aspetta il broker di Windows, nemmeno dopo ore di inattività. Senza rete il rinnovo non si
   tenta e riparte appena la rete torna; un rinnovo che non risponde si abbandona dopo 60 secondi,
@@ -395,6 +398,8 @@ Chiave `HKCU\Software\Policies\HuduLauncher` (o `HKLM\...` per tutto il PC):
 |---|---|---|
 | `PortalUrl` | Stringa | Indirizzo del portale, se non inserito in compilazione |
 | `RustDeskPath` | Stringa | Percorso del client RustDesk, se non è trovato da solo (link `rustdesk://` registrato, `C:\Program Files\RustDesk` o una cartella con "rustdesk" nel nome). Ha la precedenza sul percorso impostato nel portale |
+| `WinboxPath` | Stringa | Percorso di `winbox.exe` per le connessioni MikroTik. Se manca, il Launcher lo chiede al tecnico alla prima connessione WinBox (e si cambia dalle impostazioni) |
+| `TnsNamesPath` | Stringa | `tnsnames.ora` in cui il Launcher aggiunge le voci `HUDULAUNCHER_n` per le connessioni Oracle. Deve essere modificabile dall'utente (non dentro `C:\Program Files`). Se manca, si chiede alla prima connessione Oracle |
 | `AutoStart` | Stringa | `1`: modalità in background sempre attiva (avvio all'accesso a Windows, accesso 365 e aggiornamenti preparati in anticipo); `0`: mai, il Launcher si apre solo dai link e si chiude con la finestra. Se manca, è attiva e il tecnico può spegnerla nelle impostazioni del Launcher |
 
 ### Niente richiesta "Aprire hudulauncher?" nel browser

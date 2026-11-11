@@ -60,6 +60,9 @@ public partial class MainWindow : Window
         _tray = new TrayIcon(BringToFront, ExitFromTray);
         _ = CheckForUpdatesAsync(required: false);
         _ = _workflow.WarmUpAsync(Handle);
+        _workflow.CleanupStaleEntries();
+        // Dopo l'avvio, a Launcher inattivo: WebView2, Desktop remoto e SSH caricati e rilasciati, senza finestre.
+        _ = Prewarm.RunAsync(Handle, () => !_exiting && Tabs.Items.Count == 0);
         _maintenance.Start();
         System.Net.NetworkInformation.NetworkChange.NetworkAvailabilityChanged += OnNetworkAvailabilityChanged;
         if (background)
