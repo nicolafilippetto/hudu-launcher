@@ -8,6 +8,7 @@ using Launcher.Server.Inventory;
 using Launcher.Server.Pages;
 using Launcher.Server.Security;
 using Launcher.Server.Settings;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Launcher.Server.Tests;
 
@@ -384,6 +385,42 @@ public sealed class SecurityTests
         viaTrusted.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("10.0.10.2");
         viaTrusted.Request.Headers["X-Original-For"] = "172.18.0.5:51234";
         Assert.True(NetworkAllowList.IsAllowed("10.0.10.0/24", viaTrusted));
+    }
+
+    [Theory]
+    [InlineData("172.18.0.5", null)]
+    [InlineData(null, "172.18.0.0/16")]
+    public void Local_login_is_refused_when_the_trusted_proxy_does_not_send_the_client(string? proxy, string? network)
+    {
+        var services = new ServiceCollection();
+        services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(o =>
+        {
+            o.KnownProxies.Clear();
+            o.KnownIPNetworks.Clear();
+            if (proxy is not null)
+            {
+                o.KnownProxies.Add(IPAddress.Parse(proxy));
+            }
+
+            if (network is not null)
+            {
+                o.KnownIPNetworks.Add(IPNetwork.Parse(network));
+            }
+        });
+        using var provider = services.BuildServiceProvider();
+
+        // Il WAF fidato non invia X-Forwarded-For: l'indirizzo visto è il suo, privato, anche per chi arriva da internet.
+        var withoutClient = new Microsoft.AspNetCore.Http.DefaultHttpContext { RequestServices = provider };
+        withoutClient.Connection.RemoteIpAddress = IPAddress.Parse("::ffff:172.18.0.5");
+        Assert.True(NetworkAllowList.IsTrustedProxyWithoutClient(withoutClient));
+        Assert.False(NetworkAllowList.IsAllowed("10.0.0.0/8,172.16.0.0/12,192.168.0.0/16", withoutClient));
+
+        // Con X-Forwarded-For elaborato l'indirizzo è quello del client: ammesso se interno.
+        var withClient = new Microsoft.AspNetCore.Http.DefaultHttpContext { RequestServices = provider };
+        withClient.Connection.RemoteIpAddress = IPAddress.Parse("10.0.10.2");
+        withClient.Request.Headers["X-Original-For"] = "172.18.0.5:51234";
+        Assert.False(NetworkAllowList.IsTrustedProxyWithoutClient(withClient));
+        Assert.True(NetworkAllowList.IsAllowed("10.0.0.0/8,172.16.0.0/12,192.168.0.0/16", withClient));
     }
 
     [Fact]

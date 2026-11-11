@@ -37,6 +37,12 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
     /// senza finestre, così la connessione non aspetta il caricamento del broker di Windows e il token
     /// resta fresco anche dopo ore di inattività.
     /// </summary>
+    /// <remarks>
+    /// Va chiamato dal thread della finestra. Un solo rinnovo alla volta: se il broker di Windows non
+    /// risponde (rete con portale captive, proxy bloccato) si smette di aspettare dopo
+    /// <see cref="WarmUpTimeout"/> e i rinnovi successivi si saltano finché quello appeso non finisce,
+    /// invece di accumularsi. Senza rete il rinnovo periodico non si tenta nemmeno.
+    /// </remarks>
     public async Task WarmUpAsync(IntPtr window, bool periodic = false)
     {
         if (PortalClient.TryNormalizePortalUrl(ConnectorSettings.PortalUrl) is not { } url || url.Scheme != Uri.UriSchemeHttps)
@@ -44,15 +50,43 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
             return;
         }
 
+        if (_warmUp is { IsCompleted: false })
+        {
+            Log.Info("Accesso 365: rinnovo saltato, il precedente è ancora in corso");
+            return;
+        }
+
+        if (periodic && !System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable())
+        {
+            return;
+        }
+
+        var what = periodic ? "rinnovato" : "preparato all'avvio";
+        using var timeout = new CancellationTokenSource(WarmUpTimeout);
+        var warmUp = _warmUp = WarmUpCoreAsync(url, window, periodic, timeout.Token);
         try
         {
-            _config ??= await new PortalClient(Http, url).GetConfigAsync(CancellationToken.None);
-            await auth.WarmUpAsync(_config, window, periodic, CancellationToken.None);
+            await warmUp.WaitAsync(timeout.Token);
         }
-        catch (Exception ex) when (ex is PortalException or HttpRequestException or TaskCanceledException or Microsoft.Identity.Client.MsalException)
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
         {
-            Log.Info("Accesso 365 non preparato all'avvio: " + ex.Message);
+            Log.Info($"Accesso 365 non {what}: nessuna risposta entro {WarmUpTimeout.TotalSeconds:0} s");
         }
+        catch (Exception ex) when (ex is PortalException or HttpRequestException or OperationCanceledException or Microsoft.Identity.Client.MsalException)
+        {
+            Log.Info($"Accesso 365 non {what}: " + ex.Message);
+        }
+    }
+
+    /// <summary>Tempo massimo di attesa per preparare o rinnovare l'accesso 365 in background.</summary>
+    public static readonly TimeSpan WarmUpTimeout = TimeSpan.FromSeconds(60);
+
+    private Task? _warmUp;
+
+    private async Task WarmUpCoreAsync(Uri url, IntPtr window, bool periodic, CancellationToken ct)
+    {
+        _config ??= await new PortalClient(Http, url).GetConfigAsync(ct);
+        await auth.WarmUpAsync(_config, window, periodic, ct);
     }
 
     /// <param name="confirmPortal">Chiede all'utente se usare il portale indicato dal link (primo avvio).</param>

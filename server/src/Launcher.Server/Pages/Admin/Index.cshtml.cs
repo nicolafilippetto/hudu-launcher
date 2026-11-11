@@ -35,6 +35,12 @@ public sealed class IndexModel(AppDbContext db, SettingsService settings, SyncSe
                 $"Le richieste arrivano da un proxy ({HttpContext.Connection.RemoteIpAddress}) che non è in Launcher__TrustedProxies: " +
                 "il portale non vede l'IP reale dei client, quindi limiti per IP e accesso locale non funzionano correttamente.", null));
         }
+        else if (NetworkAllowList.IsTrustedProxyWithoutClient(HttpContext))
+        {
+            Checklist.Add(new ChecklistItem(false, "Il proxy non invia X-Forwarded-For",
+                $"Le richieste arrivano dal proxy fidato ({HttpContext.Connection.RemoteIpAddress}) senza l'indirizzo del client: " +
+                "l'accesso locale è rifiutato e i limiti per IP valgono per tutti insieme. Configurare il proxy perché invii X-Forwarded-For.", null));
+        }
 
         if (options.AllowHttp)
         {
