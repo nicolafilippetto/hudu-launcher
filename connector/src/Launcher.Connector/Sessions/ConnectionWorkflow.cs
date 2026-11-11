@@ -12,6 +12,7 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
 {
     private static readonly HttpClient Http = CreateHttp();
     private readonly KnownHosts _knownHosts = new(ConnectorSettings.KnownHostsFile);
+    private readonly OracleTnsNames _tns = new();
     private ConnectorConfig? _config;
 
     /// <summary>Il portale chiede una versione più recente del Launcher (versione minima impostata dagli admin).</summary>
@@ -227,6 +228,8 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
     {
         tab.SetConnection(info);
         Log.Info($"Connessione {info.Protocol} a {info.Name} ({info.Company}) {info.Route}");
+        // WinBox e Oracle: prima di aprire il tunnel si chiede, se serve, dov'è winbox.exe o quale tnsnames.ora usare.
+        ExternalSessionView.Prepare(info, System.Windows.Application.Current.MainWindow);
         SessionEndpoint endpoint;
         if (info.Gateway is { } gateway)
         {
@@ -249,11 +252,21 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
             ConnectionProtocol.Rdp => new RdpSessionView(info, endpoint, tunnels),
             ConnectionProtocol.Ssh => new TerminalSessionView(info, endpoint, TerminalKind.Ssh, _knownHosts),
             ConnectionProtocol.Telnet => new TerminalSessionView(info, endpoint, TerminalKind.Telnet, _knownHosts),
+            ConnectionProtocol.Winbox or ConnectionProtocol.Oracle or ConnectionProtocol.Tcp => new ExternalSessionView(info, endpoint, _tns),
             _ when info.WebOrDefault.External => new WebSessionView(info, endpoint),
             _ => new BrowserSessionView(info, endpoint, _knownHosts, webLogin),
         };
-        tab.ShowSession(view);
-        await view.StartAsync();
+        if (view is ExternalSessionView)
+        {
+            // Programma del tecnico: si prepara prima di mostrare la scheda, così un errore resta visibile.
+            await view.StartAsync();
+            tab.ShowSession(view);
+        }
+        else
+        {
+            tab.ShowSession(view);
+            await view.StartAsync();
+        }
 
         if (info.Warning is not null)
         {
@@ -294,5 +307,12 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
         return request.Portal;
     }
 
-    public void Shutdown() => tunnels.CleanupOnExit();
+    public void Shutdown()
+    {
+        tunnels.CleanupOnExit();
+        _tns.Cleanup();
+    }
+
+    /// <summary>All'avvio: toglie dal tnsnames.ora le voci rimaste da una chiusura improvvisa.</summary>
+    public void CleanupStaleEntries() => _tns.Cleanup();
 }

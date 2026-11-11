@@ -114,6 +114,36 @@ public static class ConnectorSettings
     /// <summary>Percorso del client RustDesk, se non è in una posizione standard.</summary>
     public static string? RustDeskPath => Read("RustDeskPath");
 
+    /// <summary>winbox.exe di MikroTik: criterio dell'amministratore o scelta del tecnico alla prima connessione.</summary>
+    public static string? WinboxPath => Read("WinboxPath");
+
+    public static bool WinboxPathFromPolicy => ReadFrom("WinboxPath", policyOnly: true) is not null;
+
+    public static void SaveWinboxPath(string? path) => SaveUserValue("WinboxPath", path);
+
+    /// <summary>tnsnames.ora del tecnico in cui il Launcher aggiunge le voci HUDULAUNCHER_n.</summary>
+    public static string? TnsNamesPath => Read("TnsNamesPath");
+
+    public static bool TnsNamesPathFromPolicy => ReadFrom("TnsNamesPath", policyOnly: true) is not null;
+
+    public static void SaveTnsNamesPath(string? path) => SaveUserValue("TnsNamesPath", path);
+
+    /// <summary>Copia del tnsnames.ora prima della prima modifica del Launcher (per sicurezza).</summary>
+    public static string TnsNamesBackupFile => Path.Combine(DataDirectory, "tnsnames.backup.ora");
+
+    private static void SaveUserValue(string name, string? value)
+    {
+        using var key = Registry.CurrentUser.CreateSubKey(UserKey);
+        if (string.IsNullOrEmpty(value))
+        {
+            key.DeleteValue(name, throwOnMissingValue: false);
+        }
+        else
+        {
+            key.SetValue(name, value, RegistryValueKind.String);
+        }
+    }
+
     private static string? DefaultPortalUrl =>
         typeof(ConnectorSettings).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
             .FirstOrDefault(a => a.Key == "DefaultPortalUrl")?.Value is { Length: > 0 } value ? value : null;

@@ -96,6 +96,21 @@ public enum ConnectionProtocol
     Telnet,
     Http,
     Https,
+    /// <summary>MikroTik WinBox, aperto da riga di comando verso il dispositivo (o il tunnel).</summary>
+    Winbox,
+    /// <summary>Database Oracle: tunnel più voce nel tnsnames.ora del tecnico.</summary>
+    Oracle,
+    /// <summary>Altro servizio TCP: tunnel e indicazioni per collegare il programma del tecnico.</summary>
+    Tcp,
+}
+
+/// <summary>
+/// Database Oracle: service name o SID (<see cref="Kind"/> "service" o "sid"), più utente e nome
+/// della credenziale di Hudu da mostrare. La password non arriva: il tecnico la scrive nel suo programma.
+/// </summary>
+public sealed record DatabaseInfo(string Name, string Kind, string? Username = null, string? CredentialName = null)
+{
+    public bool IsSid => string.Equals(Kind, "sid", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -116,7 +131,8 @@ public sealed record ConnectionInfo(
     TerminalOptions? Terminal = null,
     string? HuduUrl = null,
     WebOptions? Web = null,
-    WebLoginInfo? WebLogin = null)
+    WebLoginInfo? WebLogin = null,
+    DatabaseInfo? Database = null)
 {
     public bool IsDirect => Gateway is null;
 

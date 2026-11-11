@@ -60,6 +60,7 @@ public partial class MainWindow : Window
         _tray = new TrayIcon(BringToFront, ExitFromTray);
         _ = CheckForUpdatesAsync(required: false);
         _ = _workflow.WarmUpAsync(Handle);
+        _workflow.CleanupStaleEntries();
         _maintenance.Start();
         System.Net.NetworkInformation.NetworkChange.NetworkAvailabilityChanged += OnNetworkAvailabilityChanged;
         if (background)
