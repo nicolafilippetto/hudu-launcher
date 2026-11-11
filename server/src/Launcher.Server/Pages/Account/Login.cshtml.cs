@@ -28,7 +28,7 @@ public sealed class LoginModel(SettingsService settings, SetupState setup) : Lau
         }
 
         ReturnUrl = SafeReturnUrl(returnUrl);
-        LocalAvailable = NetworkAllowList.Contains(settings.Portal.LocalLoginNetworks, HttpContext.Connection.RemoteIpAddress);
+        LocalAvailable = NetworkAllowList.IsAllowed(settings.Portal.LocalLoginNetworks, HttpContext);
         Message = (error ?? status) switch
         {
             "pending" => "Richiesta di accesso registrata. Un amministratore deve approvarla: dopo potrai entrare con Microsoft 365.",

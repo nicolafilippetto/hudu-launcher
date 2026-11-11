@@ -84,8 +84,9 @@ server (se la licenza lo consente), rotazione periodica, alert sugli accessi API
 - Limiti per IP: login, MFA e Setup 10 ogni 5 minuti; connessioni e riscatti 30 ogni 5 minuti;
   aggiornamento da Hudu una volta al minuto per cliente. Blocco dell'account dopo 5 errori
   (password o MFA). Messaggi di errore che non rivelano se un utente esiste.
-- Accesso di emergenza rifiutato se il proxy davanti al portale non è riconosciuto (IP reale non
-  verificabile).
+- Accesso di emergenza rifiutato se il proxy davanti al portale non è riconosciuto, o se il proxy
+  fidato non invia `X-Forwarded-For` (in entrambi i casi l'IP reale non è verificabile e l'indirizzo
+  privato del proxy farebbe sembrare interna una richiesta da internet). La dashboard admin lo segnala.
 - Upload solo di immagini raster riconosciute dal contenuto (niente SVG), richieste massimo 2 MB.
 - Container non root, filesystem in sola lettura, nessuna capability, nessuna shell.
 

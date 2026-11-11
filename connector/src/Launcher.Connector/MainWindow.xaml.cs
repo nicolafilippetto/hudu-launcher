@@ -61,9 +61,22 @@ public partial class MainWindow : Window
         _ = CheckForUpdatesAsync(required: false);
         _ = _workflow.WarmUpAsync(Handle);
         _maintenance.Start();
+        System.Net.NetworkInformation.NetworkChange.NetworkAvailabilityChanged += OnNetworkAvailabilityChanged;
         if (background)
         {
             Log.Info("Launcher pronto in background (icona nell'area di notifica)");
+        }
+    }
+
+    /// <summary>
+    /// Rete tornata disponibile (per esempio Wi-Fi connesso dopo l'accesso a Windows): l'accesso 365 si
+    /// prepara subito, senza aspettare il prossimo rinnovo periodico.
+    /// </summary>
+    private void OnNetworkAvailabilityChanged(object? sender, System.Net.NetworkInformation.NetworkAvailabilityEventArgs e)
+    {
+        if (e.IsAvailable && !_exiting)
+        {
+            Dispatcher.BeginInvoke(() => _ = _workflow.WarmUpAsync(Handle, periodic: true));
         }
     }
 
@@ -576,6 +589,7 @@ public partial class MainWindow : Window
     {
         _exiting = true;
         _maintenance.Stop();
+        System.Net.NetworkInformation.NetworkChange.NetworkAvailabilityChanged -= OnNetworkAvailabilityChanged;
         Hide();
         await ShutdownAsync(open);
         _tray?.Dispose();

@@ -422,9 +422,33 @@ public static class NetworkAllowList
     public static bool HasUntrustedProxy(HttpContext http) =>
         http.Request.Headers.ContainsKey("X-Forwarded-For") && !http.Request.Headers.ContainsKey("X-Original-For");
 
-    /// <summary>Indirizzo del client ammesso per l'accesso locale (mai tramite un proxy non riconosciuto).</summary>
+    /// <summary>
+    /// true se la richiesta arriva da un proxy fidato (Launcher__TrustedProxies) che non ha indicato il
+    /// client in X-Forwarded-For: l'indirizzo visto resta quello del proxy, di solito privato (rete Docker,
+    /// DMZ), e farebbe sembrare interna qualunque richiesta da internet.
+    /// </summary>
+    public static bool IsTrustedProxyWithoutClient(HttpContext http)
+    {
+        var address = Normalize(http.Connection.RemoteIpAddress);
+        var options = http.RequestServices?.GetService<IOptions<ForwardedHeadersOptions>>()?.Value;
+        if (address is null || options is null)
+        {
+            return false;
+        }
+
+        return options.KnownProxies.Any(p => Normalize(p)!.Equals(address))
+            || options.KnownIPNetworks.Any(n => n.Contains(address));
+    }
+
+    /// <summary>
+    /// Indirizzo del client ammesso per l'accesso locale: mai tramite un proxy non riconosciuto, né quando
+    /// il proxy fidato non dice chi è il client.
+    /// </summary>
     public static bool IsAllowed(string networks, HttpContext http) =>
-        !HasUntrustedProxy(http) && Contains(networks, http.Connection.RemoteIpAddress);
+        !HasUntrustedProxy(http) && !IsTrustedProxyWithoutClient(http) && Contains(networks, http.Connection.RemoteIpAddress);
+
+    private static IPAddress? Normalize(IPAddress? address) =>
+        address is { IsIPv4MappedToIPv6: true } ? address.MapToIPv4() : address;
 
     public static bool Contains(string networks, IPAddress? address)
     {

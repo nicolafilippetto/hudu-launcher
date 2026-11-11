@@ -352,7 +352,9 @@ finita nell'altro profilo).
 notifica. Da lì:
 
 - prepara subito l'accesso Microsoft 365 e lo rinnova ogni 20 minuti, così la prima connessione
-  non aspetta il broker di Windows, nemmeno dopo ore di inattività;
+  non aspetta il broker di Windows, nemmeno dopo ore di inattività. Senza rete il rinnovo non si
+  tenta e riparte appena la rete torna; un rinnovo che non risponde si abbandona dopo 60 secondi,
+  senza accumularsi;
 - controlla gli aggiornamenti all'avvio e ogni 4 ore e, quando è nascosto e senza connessioni
   aperte, li installa in silenzio e riparte in background;
 - chiudendo la finestra (X) il Launcher si nasconde e resta pronto; per uscire del tutto si usa
