@@ -10,6 +10,13 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    ignore:
+      - dependency-name: "Microsoft.AspNetCore.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.EntityFrameworkCore*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.*"
+        update-types: ["version-update:semver-major"]
     groups:
       dotnet:
         patterns: ["Microsoft.*", "System.*"]
@@ -27,6 +34,11 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    # Si resta sulla versione LTS di .NET: solo correzioni e versioni minori. Il passaggio a una
+    # nuova versione principale è una migrazione (progetti, global.json, immagini) da fare a mano.
+    ignore:
+      - dependency-name: "dotnet/*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
