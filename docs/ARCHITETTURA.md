@@ -55,7 +55,7 @@ un tunnel RustDesk. Nessuna credenziale da digitare, nessun segreto salvato sul 
 | Componente | Tecnologia | Responsabilità | Segreti che conosce |
 |---|---|---|---|
 | Server | ASP.NET Core, Docker | Portale web, API, cache, biglietti, audit, rate limit | Chiave API Hudu, token API RustDesk, password RustDesk |
-| Connettore | C# / WPF .NET 10, installer per utente (Velopack) via Intune | Gestore `hudulauncher://`, tunnel, RDP integrato | Nessuno a riposo; una credenziale in memoria durante la sessione |
+| Connettore | C# / WPF .NET 11, installer per utente (Velopack) via Intune | Gestore `hudulauncher://`, tunnel, RDP integrato | Nessuno a riposo; una credenziale in memoria durante la sessione |
 | WAF / proxy inverso | Esistente | Unico ingresso pubblico, certificato, IPS | — |
 | Entra ID | Servizio Microsoft | Login 365 del portale (OIDC) e del connettore (WAM), Accesso condizionale, gruppi assegnati all'app | — |
 | RustDesk Pro | Esistente | Trasporto cifrato verso i clienti, autorizzazione dei dispositivi | — |

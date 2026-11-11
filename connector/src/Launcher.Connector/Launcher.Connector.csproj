@@ -4,7 +4,7 @@
     <OutputType>WinExe</OutputType>
     <!-- Senza versione di Windows 10 nel framework: il Launcher non usa le API WinRT, e la versione
          "windows10.0.x" aggiungeva Microsoft.Windows.SDK.NET.dll (54 MB) e WinRT.Runtime.dll. -->
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net11.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>HuduLauncher</AssemblyName>

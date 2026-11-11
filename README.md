@@ -116,8 +116,8 @@ La guida completa (chiavi API, reverse proxy, firewall, distribuzione con Intune
 
 | Cartella | Cosa contiene |
 |---|---|
-| [`server/`](server) | Portale web e API (ASP.NET Core 10, SQLite), Dockerfile, `docker-compose.yml`, test |
-| [`connector/`](connector) | Launcher per Windows (WPF .NET 10), installer Velopack, test |
+| [`server/`](server) | Portale web e API (ASP.NET Core 11, SQLite), Dockerfile, `docker-compose.yml`, test |
+| [`connector/`](connector) | Launcher per Windows (WPF .NET 11), installer Velopack, test |
 | [`docs/`](docs) | Installazione, Microsoft 365 (Entra ID), architettura, sicurezza |
 
 ## Sviluppo

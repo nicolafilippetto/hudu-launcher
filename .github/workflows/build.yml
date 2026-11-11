@@ -120,6 +120,9 @@ jobs:
       # installazione qualunque dei due si usi (con il predefinito "Either" l'MSI di Intune andava in
       # Program Files, separato dall'installazione dell'exe).
       - name: Installer per utente e MSI (Velopack)
+        env:
+          # vpk 1.2.161 è compilato fino a .NET 10: senza quel runtime sul runner gira sul .NET 11.
+          DOTNET_ROLL_FORWARD: Major
         run: |
           dotnet tool install --global vpk --version 1.2.161
           vpk pack `
@@ -220,6 +223,29 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      # Prova d'avvio: costruire l'immagine non basta (per esempio un runtime .NET diverso da
+      # quello del progetto la costruisce lo stesso, ma il portale non parte).
+      - name: Immagine di prova
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: server
+          load: true
+          tags: launcher-server:smoke
+          cache-from: type=gha
+
+      - name: Il portale parte nel container
+        run: |
+          docker run -d --name smoke -p 8080:8080 \
+            -e Launcher__MasterKey="$(openssl rand -base64 32)" launcher-server:smoke
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/healthz; then
+              echo; echo "Portale avviato"; docker rm -f smoke > /dev/null; exit 0
+            fi
+            sleep 2
+          done
+          docker logs smoke
+          exit 1
 
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
