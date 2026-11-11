@@ -34,3 +34,8 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    # init, analyze e upload-sarif di CodeQL vanno aggiornati insieme: con versioni diverse
+    # l'analisi fallisce ("configuration error").
+    groups:
+      codeql:
+        patterns: ["github/codeql-action*"]
