@@ -9,11 +9,14 @@ namespace Launcher.Connector;
 public partial class App : Application
 {
     private readonly LaunchRequest? _initialRequest;
+    private readonly bool _startMinimized;
     private readonly CancellationTokenSource _shutdown = new();
 
-    public App(LaunchRequest? initialRequest)
+    /// <param name="startMinimized">Avvio all'accesso a Windows: la finestra parte ridotta a icona.</param>
+    public App(LaunchRequest? initialRequest, bool startMinimized = false)
     {
         _initialRequest = initialRequest;
+        _startMinimized = startMinimized && initialRequest is null;
     }
 
     protected override void OnStartup(StartupEventArgs e)
@@ -25,6 +28,11 @@ public partial class App : Application
         var workflow = new ConnectionWorkflow(new RustDeskTunnels(), new EntraAuth(), new OfflineCache(TimeProvider.System));
         var window = new MainWindow(workflow);
         MainWindow = window;
+        if (_startMinimized)
+        {
+            window.WindowState = WindowState.Minimized;
+        }
+
         window.Show();
 
         if (_initialRequest is not null)

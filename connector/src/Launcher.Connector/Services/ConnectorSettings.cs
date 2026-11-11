@@ -81,6 +81,14 @@ public static class ConnectorSettings
         }
     }
 
+    /// <summary>Criterio dell'amministratore per l'avvio all'accesso a Windows: true, false o null (sceglie il tecnico).</summary>
+    public static bool? AutoStartPolicy => ReadFrom("AutoStart", policyOnly: true) switch
+    {
+        "1" => true,
+        "0" => false,
+        _ => null,
+    };
+
     /// <summary>Percorso del client RustDesk, se non è in una posizione standard.</summary>
     public static string? RustDeskPath => Read("RustDeskPath");
 

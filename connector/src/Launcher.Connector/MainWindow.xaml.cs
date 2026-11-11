@@ -46,6 +46,7 @@ public partial class MainWindow : Window
                 }
 
                 _ = CheckForUpdatesAsync(required: false);
+                _ = _workflow.WarmUpAsync(Handle);
             });
         };
     }

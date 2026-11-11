@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Launcher.Connector.Core;
 using Microsoft.Identity.Client;
 using Microsoft.Identity.Client.Broker;
@@ -10,6 +11,7 @@ namespace Launcher.Connector.Services;
 /// </summary>
 public sealed class EntraAuth
 {
+    private readonly Lock _gate = new();
     private IPublicClientApplication? _app;
     private string? _appKey;
 
@@ -18,17 +20,14 @@ public sealed class EntraAuth
         var app = GetApp(config, window);
         string[] scopes = [config.Scope!];
 
-        try
+        // Il primo accesso del giorno carica il broker di Windows e può richiedere diversi secondi:
+        // fuori dal thread della finestra, che altrimenti restava bloccata.
+        if (await TrySilentAsync(app, scopes, ct) is { } silent)
         {
-            var account = (await app.GetAccountsAsync()).FirstOrDefault() ?? PublicClientApplication.OperatingSystemAccount;
-            var silent = await app.AcquireTokenSilent(scopes, account).ExecuteAsync(ct);
-            return silent.AccessToken;
-        }
-        catch (MsalUiRequiredException)
-        {
-            Log.Info("Accesso 365 interattivo richiesto");
+            return silent;
         }
 
+        Log.Info("Accesso 365 interattivo richiesto");
         var interactive = await app.AcquireTokenInteractive(scopes)
             .WithParentActivityOrWindow(window)
             .WithPrompt(Prompt.SelectAccount)
@@ -36,21 +35,52 @@ public sealed class EntraAuth
         return interactive.AccessToken;
     }
 
+    /// <summary>
+    /// Prepara l'accesso all'avvio del Launcher: carica il broker e ottiene un token senza mai mostrare
+    /// finestre, così la prima connessione non aspetta. Se serve l'interazione, si rimanda alla connessione.
+    /// </summary>
+    public async Task WarmUpAsync(ConnectorConfig config, IntPtr window, CancellationToken ct)
+    {
+        var watch = Stopwatch.StartNew();
+        var ready = await TrySilentAsync(GetApp(config, window), [config.Scope!], ct) is not null;
+        Log.Info($"Accesso 365 preparato all'avvio in {watch.ElapsedMilliseconds} ms" + (ready ? "" : " (alla prima connessione servirà l'accesso interattivo)"));
+    }
+
+    private static async Task<string?> TrySilentAsync(IPublicClientApplication app, string[] scopes, CancellationToken ct)
+    {
+        try
+        {
+            return await Task.Run(async () =>
+            {
+                var account = (await app.GetAccountsAsync().ConfigureAwait(false)).FirstOrDefault() ?? PublicClientApplication.OperatingSystemAccount;
+                var result = await app.AcquireTokenSilent(scopes, account).ExecuteAsync(ct).ConfigureAwait(false);
+                return result.AccessToken;
+            }, ct);
+        }
+        catch (MsalUiRequiredException)
+        {
+            return null;
+        }
+    }
+
     private IPublicClientApplication GetApp(ConnectorConfig config, IntPtr window)
     {
-        var key = $"{config.TenantId}|{config.ClientId}";
-        if (_app is not null && _appKey == key)
+        lock (_gate)
         {
+            var key = $"{config.TenantId}|{config.ClientId}";
+            if (_app is not null && _appKey == key)
+            {
+                return _app;
+            }
+
+            _app = PublicClientApplicationBuilder.Create(config.ClientId)
+                .WithAuthority(AzureCloudInstance.AzurePublic, config.TenantId)
+                .WithDefaultRedirectUri()
+                .WithParentActivityOrWindow(() => window)
+                .WithBroker(new BrokerOptions(BrokerOptions.OperatingSystems.Windows) { Title = "Hudu Launcher" })
+                .Build();
+            _appKey = key;
             return _app;
         }
-
-        _app = PublicClientApplicationBuilder.Create(config.ClientId)
-            .WithAuthority(AzureCloudInstance.AzurePublic, config.TenantId)
-            .WithDefaultRedirectUri()
-            .WithParentActivityOrWindow(() => window)
-            .WithBroker(new BrokerOptions(BrokerOptions.OperatingSystems.Windows) { Title = "Hudu Launcher" })
-            .Build();
-        _appKey = key;
-        return _app;
     }
 }

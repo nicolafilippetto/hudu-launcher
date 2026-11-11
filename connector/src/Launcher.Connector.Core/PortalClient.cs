@@ -8,8 +8,10 @@ namespace Launcher.Connector.Core;
 
 public sealed record ConnectorConfig(string? TenantId, string? ClientId, string? Scope, string PortalName);
 
-/// <summary>Jump host RustDesk; ClientPath = client indicato dall'admin del portale (facoltativo).</summary>
-/// <summary>Jump host RustDesk; Name = nome nella rubrica RustDesk (per i messaggi), se il portale lo conosce.</summary>
+/// <summary>
+/// Jump host RustDesk; ClientPath = client indicato dall'admin del portale (facoltativo);
+/// Name = nome nella rubrica RustDesk (per i messaggi), se il portale lo conosce.
+/// </summary>
 public sealed record GatewayInfo(string Id, string? Password, string? ClientPath = null, string? Name = null);
 
 public sealed record TargetInfo(string Host, int Port);

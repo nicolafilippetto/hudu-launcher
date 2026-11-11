@@ -72,8 +72,10 @@ public sealed class RustDeskTunnels
 
             // RustDesk legge le regole dal file del dispositivo nella cartella del client avviato; se il
             // file non c'è ancora (dispositivo mai usato da questo PC) lo crea il Launcher lì.
+            var opening = Stopwatch.StartNew();
             var peerFile = PeerFilePath(exe, peerId);
             var knownPeer = File.Exists(peerFile);
+            LogClientVersion(exe);
             list.Add(rule);
             _passwords[peerId] = password;
             WritePeerFile(exe, peerId, list);
@@ -97,6 +99,7 @@ public sealed class RustDeskTunnels
                 // finestra di tunnel. Si apre una connessione classica, che fa creare il file a RustDesk
                 // nella sua cartella, la si chiude e si riaprono i tunnel con le regole in quel file.
                 Log.Warn($"Porta {rule.LocalPort} non aperta in {FirstWait.TotalSeconds}s: connessione RustDesk per preparare {peerId}, poi riapro i tunnel");
+                LogDiagnostics(exe, peerId, rule);
                 progress?.Report("RustDesk non ha aperto il tunnel: preparo il jump host con una connessione RustDesk…");
                 ClosePortForwardWindows(exe);
                 var prepared = await PreparePeerAsync(exe, peerId, password, peerName, knownPeer ? null : peerFile, ct);
@@ -108,6 +111,7 @@ public sealed class RustDeskTunnels
                 await RestartAllAsync(exe, ct);
                 if (!await WaitListeningAsync(rule.LocalPort, RetryWait, ct))
                 {
+                    LogDiagnostics(exe, peerId, rule);
                     list.Remove(rule);
                     WritePeerFile(exe, peerId, list);
                     ClosePortForwardWindows(exe);
@@ -120,6 +124,7 @@ public sealed class RustDeskTunnels
                 }
             }
 
+            Log.Info($"Tunnel aperto: 127.0.0.1:{rule.LocalPort} via {peerId} in {opening.Elapsed.TotalSeconds:0.0} s");
             MinimizePortForwardWindows(exe);
             return new Tunnel(this, peerId, rule);
         }
@@ -194,6 +199,56 @@ public sealed class RustDeskTunnels
         }
 
         Restarted?.Invoke();
+    }
+
+    private static string? _loggedClientVersion;
+
+    /// <summary>Versione del client RustDesk usato (una volta per avvio del Launcher), per il registro.</summary>
+    private static void LogClientVersion(string exe)
+    {
+        if (_loggedClientVersion == exe)
+        {
+            return;
+        }
+
+        _loggedClientVersion = exe;
+        try
+        {
+            var info = FileVersionInfo.GetVersionInfo(exe);
+            Log.Info($"Client RustDesk: {Path.GetFileName(exe)} versione {info.ProductVersion ?? info.FileVersion ?? "sconosciuta"}");
+        }
+        catch (FileNotFoundException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Stato di RustDesk quando il tunnel non si apre, per capire il perché dal registro: processi e
+    /// finestre aperte, e se la regola del tunnel è ancora nel file del dispositivo (RustDesk potrebbe
+    /// averlo riscritto con la sua copia in memoria). Nessun segreto: solo titoli e la riga port_forwards.
+    /// </summary>
+    private static void LogDiagnostics(string exe, string peerId, TunnelRule rule)
+    {
+        try
+        {
+            var processes = Native.ProcessIds(Path.GetFileNameWithoutExtension(exe));
+            var titles = Native.WindowTitles(processes);
+            Log.Info($"Diagnostica RustDesk: {processes.Count} processi, finestre: {(titles.Count == 0 ? "nessuna" : string.Join(" | ", titles))}");
+            var path = PeerFilePath(exe, peerId);
+            if (!File.Exists(path))
+            {
+                Log.Info($"Diagnostica RustDesk: file del dispositivo assente ({path})");
+                return;
+            }
+
+            var toml = File.ReadAllText(path);
+            Log.Info($"Diagnostica RustDesk: regola {(PeerConfigFile.Contains(toml, rule) ? "presente" : "NON presente")} nel file " +
+                     $"(modificato {File.GetLastWriteTime(path):HH:mm:ss}): {PeerConfigFile.ReadPortForwards(toml) ?? "nessuna riga port_forwards"}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            Log.Warn("Diagnostica RustDesk non riuscita: " + ex.Message);
+        }
     }
 
     /// <summary>

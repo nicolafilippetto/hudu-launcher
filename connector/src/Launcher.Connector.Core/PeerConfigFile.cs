@@ -40,6 +40,15 @@ public static partial class PeerConfigFile
             : (toml.Length == 0 ? "" : toml.TrimEnd() + newline) + line + newline;
     }
 
+    /// <summary>La riga port_forwards del file (per il registro), o null se manca.</summary>
+    public static string? ReadPortForwards(string toml) =>
+        PortForwardsPattern().Match(toml) is { Success: true } match ? match.Value.ReplaceLineEndings(" ") : null;
+
+    /// <summary>true se la regola è presente nel file (stessa porta locale, host e porta remota).</summary>
+    public static bool Contains(string toml, TunnelRule rule) =>
+        ReadPortForwards(toml) is { } line
+        && line.Contains(string.Create(CultureInfo.InvariantCulture, $"[{rule.LocalPort}, \"{rule.RemoteHost}\", {rule.RemotePort}]"), StringComparison.Ordinal);
+
     public static void Validate(TunnelRule rule)
     {
         if (rule.LocalPort is <= 0 or > 65535 || rule.RemotePort is <= 0 or > 65535)

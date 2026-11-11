@@ -48,7 +48,11 @@ public static class Program
                 .SetAppUserModelId("")
                 .OnFirstRun(_ => ProtocolRegistration.Register())
                 .OnAfterUpdateFastCallback(_ => ProtocolRegistration.Register())
-                .OnBeforeUninstallFastCallback(_ => ProtocolRegistration.Unregister())
+                .OnBeforeUninstallFastCallback(_ =>
+                {
+                    ProtocolRegistration.Unregister();
+                    AutoStart.Set(false);
+                })
                 .Run();
             Log.Info($"Avvio da Velopack (installazione o aggiornamento): {watch.ElapsedMilliseconds} ms");
         }
@@ -60,8 +64,10 @@ public static class Program
 
         WebViewOverrides.Clear();
         ProtocolRegistration.Register();
-        Log.Info($"Avvio del processo: {startup} prima del codice del Launcher");
-        var app = new App(request);
+        AutoStart.Refresh();
+        var minimized = args.Contains(AutoStart.MinimizedArgument, StringComparer.OrdinalIgnoreCase);
+        Log.Info($"Avvio del processo: {startup} prima del codice del Launcher" + (minimized ? " (avvio all'accesso a Windows)" : ""));
+        var app = new App(request, minimized);
         app.InitializeComponent();
         return app.Run();
     }

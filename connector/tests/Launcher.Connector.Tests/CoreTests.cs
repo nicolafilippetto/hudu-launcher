@@ -137,6 +137,18 @@ public sealed class PeerConfigFileTests
     }
 
     [Fact]
+    public void Reads_back_the_tunnel_rule_for_diagnostics()
+    {
+        var rule = new TunnelRule(51234, "192.168.1.10", 3389);
+        var written = PeerConfigFile.SetPortForwards(RealFile, [rule]);
+        Assert.True(PeerConfigFile.Contains(written, rule));
+        Assert.False(PeerConfigFile.Contains(written, rule with { LocalPort = 51235 }));
+        Assert.False(PeerConfigFile.Contains(RealFile, rule));
+        Assert.Equal("port_forwards = [[51234, \"192.168.1.10\", 3389]]", PeerConfigFile.ReadPortForwards(written));
+        Assert.Null(PeerConfigFile.ReadPortForwards("password = []\n"));
+    }
+
+    [Fact]
     public void Creates_content_for_empty_file() =>
         Assert.Equal("port_forwards = [[1, \"h\", 2]]\n", PeerConfigFile.SetPortForwards("", [new TunnelRule(1, "h", 2)]));
 

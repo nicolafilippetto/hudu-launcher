@@ -113,6 +113,28 @@ internal static partial class Native
         return result;
     }
 
+    /// <summary>Titoli di tutte le finestre principali dei processi indicati (per il registro), con "[nascosta]" per quelle non visibili.</summary>
+    public static List<string> WindowTitles(IReadOnlySet<int> processIds)
+    {
+        var result = new List<string>();
+        EnumWindows((hwnd, _) =>
+        {
+            GetWindowThreadProcessId(hwnd, out var pid);
+            if (processIds.Contains((int)pid))
+            {
+                var buffer = new char[512];
+                var length = GetWindowText(hwnd, buffer, buffer.Length);
+                if (length > 0)
+                {
+                    result.Add(new string(buffer, 0, length) + (IsWindowVisible(hwnd) ? "" : " [nascosta]"));
+                }
+            }
+
+            return true;
+        }, IntPtr.Zero);
+        return result;
+    }
+
     public static void Minimize(IntPtr hwnd) => ShowWindow(hwnd, SwShowMinNoActive);
 
     public static void Close(IntPtr hwnd) => PostMessage(hwnd, WmClose, IntPtr.Zero, IntPtr.Zero);

@@ -374,6 +374,7 @@ Chiave `HKCU\Software\Policies\HuduLauncher` (o `HKLM\...` per tutto il PC):
 |---|---|---|
 | `PortalUrl` | Stringa | Indirizzo del portale, se non inserito in compilazione |
 | `RustDeskPath` | Stringa | Percorso del client RustDesk, se non è trovato da solo (link `rustdesk://` registrato, `C:\Program Files\RustDesk` o una cartella con "rustdesk" nel nome). Ha la precedenza sul percorso impostato nel portale |
+| `AutoStart` | Stringa | `1`: il Launcher si avvia all'accesso a Windows, ridotto a icona (la prima connessione della giornata non aspetta il caricamento dell'app e dell'accesso 365); `0`: mai. Se manca, lo sceglie il tecnico nelle impostazioni del Launcher |
 
 ### Niente richiesta "Aprire hudulauncher?" nel browser
 

@@ -32,6 +32,28 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
 
     public OfflineCache Offline => offline;
 
+    /// <summary>
+    /// All'avvio: configurazione del portale e accesso 365 preparati in background, senza finestre, così
+    /// la prima connessione non aspetta il caricamento del broker di Windows.
+    /// </summary>
+    public async Task WarmUpAsync(IntPtr window)
+    {
+        if (PortalClient.TryNormalizePortalUrl(ConnectorSettings.PortalUrl) is not { } url || url.Scheme != Uri.UriSchemeHttps)
+        {
+            return;
+        }
+
+        try
+        {
+            _config ??= await new PortalClient(Http, url).GetConfigAsync(CancellationToken.None);
+            await auth.WarmUpAsync(_config, window, CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is PortalException or HttpRequestException or TaskCanceledException or Microsoft.Identity.Client.MsalException)
+        {
+            Log.Info("Accesso 365 non preparato all'avvio: " + ex.Message);
+        }
+    }
+
     /// <param name="confirmPortal">Chiede all'utente se usare il portale indicato dal link (primo avvio).</param>
     public async Task RunAsync(LaunchRequest request, SessionTab tab, IntPtr window, Func<Uri, bool> confirmPortal)
     {
