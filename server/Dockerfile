@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- Compilazione -----------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/sdk:10.0.403-resolute AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.404-resolute AS build
 WORKDIR /src
 # Solo le librerie native dell'architettura dell'immagine: senza, la pubblicazione includeva SQLite
 # per circa 25 piattaforme (~34 MB). TARGETARCH lo imposta Docker (amd64 o arm64).
