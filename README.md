@@ -44,6 +44,10 @@ Ogni connessione, e ogni credenziale consegnata, finisce nel registro accessi de
   visualizzazione; nel terminale copia e incolla, zoom e salvataggio dell'output.
 - **SSH e Telnet** in un terminale con evidenziazione configurabile (errori, interfacce, IP, MAC,
   prompt degli apparati di rete) e verifica delle chiavi host.
+- **WinBox (MikroTik)** aperto dal Launcher verso il dispositivo, con utente e password di Hudu.
+- **Database Oracle**: il Launcher apre il tunnel e aggiunge la voce `HUDULAUNCHER_1` (poi `_2`…) in
+  fondo al `tnsnames.ora` del tecnico, da scegliere nel proprio programma; la voce sparisce alla
+  chiusura. **Altro**: qualsiasi servizio TCP, con indirizzo e porta da usare nel proprio programma.
 - **Interfacce web** di firewall, NAS, iDRAC/iLO, vCenter aperte in una scheda del Launcher con il
   loro indirizzo vero (IP o FQDN, anche interno) attraverso il tunnel, oppure nel browser
   predefinito; opzioni per tutti e per singolo asset (certificati, finestre, download, accesso).
@@ -56,6 +60,9 @@ Ogni connessione, e ogni credenziale consegnata, finisce nel registro accessi de
   l'FQDN dell'IPAM diventa l'indirizzo delle pagine web.
 - **Credenziali solo da Hudu**: si sceglie tra le password assegnate all'asset o collegate come
   *related*; i collegamenti si correggono in Hudu, non nel portale.
+- **Editor a schede** per asset: connessione principale, connessioni aggiuntive e console suggerita da
+  Hudu (modificabile, nascondibile, ripristinabile), ciascuna con le sue impostazioni avanzate.
+  Nell'elenco il pulsante principale e, accanto, la seconda connessione o "Altre connessioni".
 - **Modifiche in blocco** su più asset (gateway, credenziale, protocollo, visibilità).
 - **Cache d'emergenza**: fino a N connessioni preparate in anticipo, tenute solo in memoria per un
   tempo limitato, utilizzabili anche senza internet.
@@ -63,6 +70,9 @@ Ogni connessione, e ogni credenziale consegnata, finisce nel registro accessi de
   dell'app con certificato e accessi di emergenza locali con MFA.
 - **Launcher distribuito dal portale**: MSI per utente (anche per Intune) incluso nell'immagine Docker,
   aggiornamenti automatici firmati, versione e ultimo uso per utente, versione minima obbligatoria.
+- **Avvio rapido**: in background il Launcher tiene pronto l'accesso Microsoft 365 e, poco dopo
+  l'avvio, carica e rilascia i componenti lenti al primo uso (WebView2, Desktop remoto, SSH), senza
+  mostrare nulla.
 - Tema chiaro e scuro, interfaccia in italiano.
 
 ## Sicurezza in breve
