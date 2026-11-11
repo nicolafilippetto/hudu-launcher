@@ -28,7 +28,7 @@ RUN dotnet publish src/Launcher.Server/Launcher.Server.csproj \
 # ---- Esecuzione -------------------------------------------------------------
 # Immagine "chiseled": niente shell, niente package manager, utente non root (app, uid 1654).
 # La variante "extra" include ICU e fusi orari (date in Europe/Rome, ricerca senza accenti).
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.14-resolute-chiseled-extra AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:11.0.0-resolute-chiseled-extra AS runtime
 WORKDIR /app
 
 COPY --from=build /app ./
