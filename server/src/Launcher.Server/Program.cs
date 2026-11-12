@@ -65,7 +65,9 @@ builder.Services.AddSingleton<IConfigureOptions<KeyManagementOptions>>(sp =>
     new ConfigureOptions<KeyManagementOptions>(o => o.XmlEncryptor = new MasterKeyXmlEncryptor(sp.GetRequiredService<MasterKey>())));
 
 // --- Database ---
-var connectionString = $"Data Source={Path.Combine(launcherOptions.DataDirectory, "launcher.db")};Cache=Shared;Pooling=True";
+// Niente Cache=Shared: con la cache condivisa SQLite blocca le letture finché una transazione di scrittura
+// (es. la sincronizzazione con Hudu) non finisce. Con WAL e connessioni separate si leggono i dati precedenti.
+var connectionString = $"Data Source={Path.Combine(launcherOptions.DataDirectory, "launcher.db")};Pooling=True";
 builder.Services.AddDbContextFactory<AppDbContext>(o => o.UseSqlite(connectionString));
 builder.Services.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<AppDbContext>>().CreateDbContext());
 
@@ -106,7 +108,10 @@ builder.Services.AddScoped<Launcher.Server.Pages.Account.LocalSignIn>();
 // La chiave di Hudu non si può limitare alla sola lettura: il blocco è nel client HTTP.
 builder.Services.AddTransient<ReadOnlyHandler>();
 builder.Services.AddHttpClient(HuduClient.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(60))
+    // Niente redirect automatici: .NET toglie solo Authorization, x-api-key andrebbe al nuovo indirizzo.
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
     .AddHttpMessageHandler<ReadOnlyHandler>();
+builder.Services.AddSingleton<AuditThrottle>();
 builder.Services.AddHttpClient(RustDeskClient.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(15));
 
 // --- Autenticazione ---
@@ -196,7 +201,9 @@ builder.Services.AddRateLimiter(o =>
         });
 
     o.AddPolicy(RateLimitPolicies.Connect, http => Window(http, 30, TimeSpan.FromMinutes(5)));
-    o.AddPolicy(RateLimitPolicies.Redeem, http => Window(http, 30, TimeSpan.FromMinutes(5)));
+    // Riscatti: per IP, ma più tecnici possono uscire dallo stesso NAT d'ufficio. I biglietti sono da 256 bit
+    // e monouso: il limite protegge il server, non serve contro i tentativi.
+    o.AddPolicy(RateLimitPolicies.Redeem, http => Window(http, 120, TimeSpan.FromMinutes(5)));
     o.AddPolicy(RateLimitPolicies.WebLogin, http => Window(http, 30, TimeSpan.FromMinutes(5)));
     o.AddPolicy(RateLimitPolicies.Claim, http => Window(http, 30, TimeSpan.FromMinutes(5)));
     // Solo i tentativi (POST) contano: aprire le pagine di login non consuma il limite.
@@ -208,9 +215,17 @@ builder.Services.AddRateLimiter(o =>
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     o.OnRejected = async (context, ct) =>
     {
-        var audit = context.HttpContext.RequestServices.GetRequiredService<AuditService>();
-        await audit.WriteAsync(new AuditEntry("ratelimit", context.HttpContext.User.FindFirstValue(ClaimTypes.Email), Success: false,
-            Details: context.HttpContext.Request.Path), context.HttpContext, ct);
+        // Una riga per indirizzo e percorso ogni 5 minuti, con il conteggio delle altre respinte.
+        var throttle = context.HttpContext.RequestServices.GetRequiredService<AuditThrottle>();
+        var key = $"{context.HttpContext.Connection.RemoteIpAddress}|{context.HttpContext.Request.Path}";
+        if (throttle.ShouldWrite(key, out var suppressed))
+        {
+            var audit = context.HttpContext.RequestServices.GetRequiredService<AuditService>();
+            await audit.WriteAsync(new AuditEntry("ratelimit", context.HttpContext.User.FindFirstValue(ClaimTypes.Email), Success: false,
+                Details: context.HttpContext.Request.Path + (suppressed > 0 ? $" (altre {suppressed} respinte nei 5 minuti precedenti)" : "")),
+                context.HttpContext, ct);
+        }
+
         context.HttpContext.Response.ContentType = "application/problem+json";
         await context.HttpContext.Response.WriteAsync("{\"title\":\"Troppe richieste: attendere qualche minuto.\",\"status\":429}", ct);
     };
@@ -283,6 +298,15 @@ if (setupToken is not null)
 }
 
 // --- Pipeline HTTP ---
+// Le intestazioni X-Original-* le scrive il middleware dei proxy fidati: quelle inviate dal client (o da un
+// proxy non fidato) si scartano, altrimenti un indirizzo esterno potrebbe sembrare interno.
+app.Use((http, next) =>
+{
+    http.Request.Headers.Remove("X-Original-For");
+    http.Request.Headers.Remove("X-Original-Proto");
+    http.Request.Headers.Remove("X-Original-Host");
+    return next(http);
+});
 app.UseForwardedHeaders();
 app.UseMiddleware<SecurityHeadersMiddleware>();
 if (launcherOptions.AllowHttp)

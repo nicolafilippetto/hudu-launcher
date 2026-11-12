@@ -25,8 +25,28 @@ public partial class App : Application
         DispatcherUnhandledException += OnUnhandledException;
         Log.Info($"Avvio, versione {ConnectorSettings.Version}");
 
+        // Link successivi dal browser, ricevuti dall'istanza già aperta. Si ascolta subito, prima di creare
+        // la finestra: i messaggi arrivati durante l'avvio si consegnano appena l'avvio finisce.
+        MainWindow? window = null;
+        _ = SingleInstance.ListenAsync(message => Dispatcher.BeginInvoke(() =>
+        {
+            if (window is null)
+            {
+                return;
+            }
+
+            if (LaunchRequest.Parse(message) is { } request)
+            {
+                window.Open(request);
+            }
+            else
+            {
+                window.BringToFront();
+            }
+        }), _shutdown.Token);
+
         var workflow = new ConnectionWorkflow(new RustDeskTunnels(), new EntraAuth(), new OfflineCache(TimeProvider.System));
-        var window = new MainWindow(workflow);
+        window = new MainWindow(workflow);
         MainWindow = window;
         // La finestra nascosta non chiude l'app: si esce solo da Esci (icona) o chiudendo senza background.
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -43,18 +63,6 @@ public partial class App : Application
             window.Open(_initialRequest);
         }
 
-        // Link successivi dal browser, ricevuti dall'istanza già aperta.
-        _ = SingleInstance.ListenAsync(message => Dispatcher.BeginInvoke(() =>
-        {
-            if (LaunchRequest.Parse(message) is { } request)
-            {
-                window.Open(request);
-            }
-            else
-            {
-                window.BringToFront();
-            }
-        }), _shutdown.Token);
 
         // Pulizia dei registri vecchi, senza rallentare l'avvio.
         _ = Task.Run(Log.Cleanup);

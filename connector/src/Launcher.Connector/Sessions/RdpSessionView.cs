@@ -652,9 +652,10 @@ public sealed class RdpSessionView : ISessionView
     internal static bool EndedByUser(int reason, int extendedReason) =>
         reason is 1 or 2 || (reason == 3 && extendedReason is 2 or 11 or 12);
 
-    private void OnTunnelsRestarted() => _root.Dispatcher.BeginInvoke(() =>
+    private void OnTunnelsRestarted(IReadOnlyCollection<string> peers) => _root.Dispatcher.BeginInvoke(() =>
     {
-        if (!_closing)
+        // Solo le sessioni che passano dal jump host riavviato.
+        if (!_closing && _info.Gateway is { } gateway && peers.Contains(gateway.Id))
         {
             SetStatus("Tunnel riaperto, riconnessione automatica…");
         }

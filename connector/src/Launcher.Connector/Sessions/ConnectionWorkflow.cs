@@ -14,6 +14,8 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
     private readonly KnownHosts _knownHosts = new(ConnectorSettings.KnownHostsFile);
     private readonly OracleTnsNames _tns = new();
     private ConnectorConfig? _config;
+    /// <summary>Portale da cui viene <see cref="_config"/>: cambiando portale la configurazione 365 si rilegge.</summary>
+    private Uri? _configPortal;
 
     /// <summary>Il portale chiede una versione più recente del Launcher (versione minima impostata dagli admin).</summary>
     public event Action? UpdateRequired;
@@ -84,10 +86,19 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
 
     private Task? _warmUp;
 
-    private async Task WarmUpCoreAsync(Uri url, IntPtr window, bool periodic, CancellationToken ct)
+    private async Task WarmUpCoreAsync(Uri url, IntPtr window, bool periodic, CancellationToken ct) =>
+        await auth.WarmUpAsync(await ConfigForAsync(new PortalClient(Http, url), ct), window, periodic, ct);
+
+    /// <summary>Configurazione 365 del portale in uso; se il portale è cambiato si rilegge.</summary>
+    private async Task<ConnectorConfig> ConfigForAsync(PortalClient portal, CancellationToken ct)
     {
-        _config ??= await new PortalClient(Http, url).GetConfigAsync(ct);
-        await auth.WarmUpAsync(_config, window, periodic, ct);
+        if (_config is null || _configPortal != portal.Portal)
+        {
+            _config = await portal.GetConfigAsync(ct);
+            _configPortal = portal.Portal;
+        }
+
+        return _config;
     }
 
     /// <param name="confirmPortal">Chiede all'utente se usare il portale indicato dal link (primo avvio).</param>
@@ -109,14 +120,38 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
         {
             // scheda chiusa durante la connessione
         }
-        catch (Exception ex) when (IsExpected(ex))
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            // Tutti gli errori, anche quelli imprevisti (risposta HTML dal WAF, programma che non parte,
+            // terminale che non si carica): nel registro e visibili nella scheda.
             Log.Error("Connessione non riuscita", ex);
-            tab.Progress.Fail(ex.Message);
+            ShowFailure(tab, IsExpected(ex) ? ex.Message : "Errore imprevisto: " + ex.Message);
+            if (ex is PortalException)
+            {
+                // Al prossimo tentativo si rilegge anche la configurazione 365 del portale.
+                _config = null;
+            }
+
             if (ex is PortalException { UpdateRequired: true })
             {
                 UpdateRequired?.Invoke();
             }
+        }
+    }
+
+    /// <summary>
+    /// Errore visibile: nel pannello di avanzamento o, se la sessione è già mostrata (RDP, pagine web),
+    /// come avviso nella scheda, dove il pannello non si vede più.
+    /// </summary>
+    private static void ShowFailure(SessionTab tab, string message)
+    {
+        if (tab.HasSession)
+        {
+            tab.Dispatcher.Invoke(() => tab.ShowWarning("Connessione non riuscita: " + message));
+        }
+        else
+        {
+            tab.Progress.Fail(message);
         }
     }
 
@@ -146,10 +181,10 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
         catch (OperationCanceledException)
         {
         }
-        catch (Exception ex) when (IsExpected(ex))
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Log.Error("Connessione offline non riuscita", ex);
-            tab.Progress.Fail(ex.Message);
+            ShowFailure(tab, IsExpected(ex) ? ex.Message : "Errore imprevisto: " + ex.Message);
         }
     }
 
@@ -179,10 +214,10 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
         // che al primo uso del giorno può richiedere più dei secondi normali di validità.
         await portal.ClaimAsync(request.Ticket, ct);
         step(null);
-        _config ??= await portal.GetConfigAsync(ct);
+        var config = await ConfigForAsync(portal, ct);
         try
         {
-            return (portal, await auth.GetTokenAsync(_config, window, ct));
+            return (portal, await auth.GetTokenAsync(config, window, ct));
         }
         catch (Microsoft.Identity.Client.MsalException ex)
         {
@@ -209,8 +244,7 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
             {
                 try
                 {
-                    _config ??= await portal.GetConfigAsync(ct);
-                    token = await auth.GetTokenAsync(_config, window, ct);
+                    token = await auth.GetTokenAsync(await ConfigForAsync(portal, ct), window, ct);
                 }
                 catch (Microsoft.Identity.Client.MsalException ex)
                 {
@@ -250,8 +284,8 @@ public sealed class ConnectionWorkflow(RustDeskTunnels tunnels, EntraAuth auth, 
         ISessionView view = info.Protocol switch
         {
             ConnectionProtocol.Rdp => new RdpSessionView(info, endpoint, tunnels),
-            ConnectionProtocol.Ssh => new TerminalSessionView(info, endpoint, TerminalKind.Ssh, _knownHosts),
-            ConnectionProtocol.Telnet => new TerminalSessionView(info, endpoint, TerminalKind.Telnet, _knownHosts),
+            ConnectionProtocol.Ssh => new TerminalSessionView(info, endpoint, TerminalKind.Ssh, _knownHosts, tunnels),
+            ConnectionProtocol.Telnet => new TerminalSessionView(info, endpoint, TerminalKind.Telnet, _knownHosts, tunnels),
             ConnectionProtocol.Winbox or ConnectionProtocol.Oracle or ConnectionProtocol.Tcp => new ExternalSessionView(info, endpoint, _tns),
             _ when info.WebOrDefault.External => new WebSessionView(info, endpoint),
             _ => new BrowserSessionView(info, endpoint, _knownHosts, webLogin),

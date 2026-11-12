@@ -116,6 +116,50 @@ public sealed class ConnectionResolverTests
     }
 
     [Fact]
+    public void Credentials_only_go_to_addresses_that_come_from_hudu()
+    {
+        var asset = Asset();
+        asset.IpamFqdns = "10.0.0.10 srv01.cliente.local";
+        asset.ConsoleAddress = "https://idrac-srv01.cliente.local";
+        var ctx = Context(
+            passwords: [new CachedPassword { Id = 5, CompanyId = 1, Name = "admin", Username = "root", AssetId = 100 }],
+            company: new CompanySetting { CompanyId = 1, GatewayPeerId = "111" },
+            extras:
+            [
+                new ExtraConnection { Id = 1, AssetId = 100, Label = "Ok", Protocol = ConnectionProtocol.Ssh, Host = "srv01.cliente.local", PasswordId = 5 },
+                new ExtraConnection { Id = 2, AssetId = 100, Label = "Fuori", Protocol = ConnectionProtocol.Ssh, Host = "203.0.113.66", PasswordId = 5 },
+                new ExtraConnection { Id = 3, AssetId = 100, Label = "Stesso IP", Protocol = ConnectionProtocol.Ssh, PasswordId = 5 },
+            ]);
+
+        var connections = ConnectionResolver.Resolve(asset, ctx).Connections.ToDictionary(c => c.Key);
+
+        Assert.True(connections["extra:1"].HostFromHudu);
+        Assert.True(connections["extra:3"].HostFromHudu);
+        Assert.True(connections[ConnectionResolver.ConsoleKey].HostFromHudu);
+        var outside = connections["extra:2"];
+        Assert.False(outside.HostFromHudu);
+        Assert.Contains(outside.Issues, i => i.Contains("la credenziale non viene inviata", StringComparison.Ordinal));
+        Assert.True(outside.CanConnect);
+    }
+
+    [Fact]
+    public void Port_chosen_by_the_technician_wins_over_the_full_address_in_the_ipam()
+    {
+        var asset = Asset(os: null);
+        asset.IpamFqdns = "10.0.0.10 https://fw.cliente.local:4443/login";
+        var chosen = Context(setting: new AssetSetting { AssetId = 100, Protocol = ConnectionProtocol.Https, Port = 8443 });
+        var free = Context(setting: new AssetSetting { AssetId = 100, Protocol = ConnectionProtocol.Https });
+
+        var withPort = ConnectionResolver.Resolve(asset, chosen).Primary!;
+        Assert.Equal(("fw.cliente.local", 8443, ConnectionProtocol.Https), (withPort.Host, withPort.Port, withPort.Protocol));
+        Assert.Null(withPort.Url);
+
+        // Senza scelta, l'indirizzo completo di Hudu decide porta e percorso, come prima.
+        var fromHudu = ConnectionResolver.Resolve(asset, free).Primary!;
+        Assert.Equal((4443, "https://fw.cliente.local:4443/login"), (fromHudu.Port, fromHudu.Url));
+    }
+
+    [Fact]
     public void Gateway_is_no_longer_guessed_from_the_address_book_name()
     {
         // Dispositivo RustDesk con lo stesso nome dell'asset: dalla 1.5.3 non diventa il gateway.
@@ -568,6 +612,54 @@ public sealed class ConnectionResolverTests
 
 public sealed class SecurityTests
 {
+    private sealed class Clock(DateTimeOffset now) : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = now;
+
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    [Fact]
+    public void Session_renewal_never_moves_the_absolute_expiry()
+    {
+        var login = new DateTimeOffset(2026, 11, 12, 8, 0, 0, TimeSpan.Zero);
+        var properties = new Microsoft.AspNetCore.Authentication.AuthenticationProperties { IssuedUtc = login, ExpiresUtc = login.AddHours(10) };
+
+        // Ricontrollo dopo 9 ore: il rinnovo resta valido ma la scadenza non si sposta.
+        var later = login.AddHours(9);
+        Assert.True(SessionExpiry.CapRenewal(properties, later));
+        Assert.Equal((later, login.AddHours(10)), (properties.IssuedUtc!.Value, properties.ExpiresUtc!.Value));
+        // Il gestore dei cookie rinnova con "adesso + (scadenza - emissione)": di nuovo le 18 del login.
+        var renewedAt = later.AddMinutes(30);
+        Assert.Equal(login.AddHours(10), renewedAt + (properties.ExpiresUtc.Value - properties.IssuedUtc.Value) - TimeSpan.FromMinutes(30));
+        // Anche se il cookie fosse stato riemesso con una scadenza più lunga, vale quella salvata al primo rinnovo.
+        properties.ExpiresUtc = login.AddHours(30);
+        Assert.True(SessionExpiry.CapRenewal(properties, login.AddHours(9.5)));
+        Assert.Equal(login.AddHours(10), properties.ExpiresUtc!.Value);
+
+        Assert.False(SessionExpiry.CapRenewal(properties, login.AddHours(10).AddSeconds(1)));
+    }
+
+    [Fact]
+    public void Rate_limit_rejections_write_one_audit_row_per_window()
+    {
+        var clock = new Clock(new DateTimeOffset(2026, 11, 12, 8, 0, 0, TimeSpan.Zero));
+        var throttle = new Launcher.Server.Audit.AuditThrottle(clock);
+
+        Assert.True(throttle.ShouldWrite("203.0.113.5|/api/connector/redeem", out var first));
+        Assert.Equal(0, first);
+        for (var i = 0; i < 500; i++)
+        {
+            Assert.False(throttle.ShouldWrite("203.0.113.5|/api/connector/redeem", out _));
+        }
+
+        // Altro indirizzo: riga sua. Finestra successiva: una riga con il conteggio delle respinte non scritte.
+        Assert.True(throttle.ShouldWrite("198.51.100.7|/api/connector/redeem", out _));
+        clock.Now += Launcher.Server.Audit.AuditThrottle.Window;
+        Assert.True(throttle.ShouldWrite("203.0.113.5|/api/connector/redeem", out var suppressed));
+        Assert.Equal(500, suppressed);
+    }
+
     [Fact]
     public void Local_login_is_refused_through_an_unrecognized_proxy()
     {

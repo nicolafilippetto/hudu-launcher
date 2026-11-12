@@ -48,8 +48,11 @@ public sealed class RustDeskTunnels
     private readonly Dictionary<string, string?> _passwords = new(StringComparer.Ordinal);
     private readonly HashSet<string> _touchedPeers = new(StringComparer.Ordinal);
 
-    /// <summary>Scatta quando i tunnel vengono riaperti: le sessioni aperte possono riconnettersi.</summary>
-    public event Action? Restarted;
+    /// <summary>
+    /// Scatta quando i tunnel di alcuni jump host (ID RustDesk) vengono riaperti: le sessioni che passano
+    /// da lì devono riconnettersi.
+    /// </summary>
+    public event Action<IReadOnlyCollection<string>>? Restarted;
 
     /// <param name="peerName">Nome del jump host nella rubrica RustDesk, per i messaggi al tecnico.</param>
     public async Task<Tunnel> OpenAsync(string peerId, string? password, string? peerName, string remoteHost, int remotePort,
@@ -78,60 +81,97 @@ public sealed class RustDeskTunnels
             LogClientVersion(exe);
             list.Add(rule);
             _passwords[peerId] = password;
-            WritePeerFile(exe, peerId, list);
-            Log.Info($"Tunnel richiesto: 127.0.0.1:{rule.LocalPort} → {remoteHost}:{remotePort} via {peerId} " +
-                     $"(file del dispositivo {(knownPeer ? "esistente" : "NON presente, creato ora")}: {peerFile})");
-
-            if (alreadyOpen)
+            try
             {
-                progress?.Report("Riapertura del tunnel RustDesk con la nuova regola…");
-                await RestartAllAsync(exe, ct);
-            }
-            else
-            {
-                Launch(exe, peerId, password);
-            }
-
-            if (!await WaitListeningAsync(rule.LocalPort, FirstWait, ct))
-            {
-                // RustDesk non ha letto le regole: di solito non ha ancora un file valido per questo
-                // dispositivo su questo PC (lo crea alla prima connessione), oppure era già aperta una
-                // finestra di tunnel. Si apre una connessione classica, che fa creare il file a RustDesk
-                // nella sua cartella, la si chiude e si riaprono i tunnel con le regole in quel file.
-                Log.Warn($"Porta {rule.LocalPort} non aperta in {FirstWait.TotalSeconds}s: connessione RustDesk per preparare {peerId}, poi riapro i tunnel");
-                LogDiagnostics(exe, peerId, rule);
-                progress?.Report("RustDesk non ha aperto il tunnel: preparo il jump host con una connessione RustDesk…");
-                ClosePortForwardWindows(exe);
-                var prepared = await PreparePeerAsync(exe, peerId, password, peerName, knownPeer ? null : peerFile, ct);
-                Log.Info(prepared is null
-                    ? $"Nessun file del dispositivo creato da RustDesk per {peerId} entro {PrepareWait.TotalSeconds}s"
-                    : $"File del dispositivo scritto da RustDesk: {prepared}");
                 WritePeerFile(exe, peerId, list);
-                progress?.Report("Riapertura del tunnel RustDesk…");
-                await RestartAllAsync(exe, ct);
-                if (!await WaitListeningAsync(rule.LocalPort, RetryWait, ct))
-                {
-                    LogDiagnostics(exe, peerId, rule);
-                    list.Remove(rule);
-                    WritePeerFile(exe, peerId, list);
-                    ClosePortForwardWindows(exe);
-                    var label = string.IsNullOrWhiteSpace(peerName) ? peerId : $"{peerName} ({peerId})";
-                    Log.Warn($"Tunnel non aperto: regole scritte in {PeerFilePath(exe, peerId)} per {Path.GetFileName(exe)}");
-                    throw new RustDeskException(
-                        $"Il tunnel verso il jump host {label} non si apre. Apri RustDesk, cerca \"{peerName ?? peerId}\" nella rubrica, " +
-                        "collegati una volta (controllo remoto), chiudi la sessione e rilancia la connessione dal portale. " +
-                        "Se ancora non va, aggiorna RustDesk sul jump host.");
-                }
-            }
+                Log.Info($"Tunnel richiesto: 127.0.0.1:{rule.LocalPort} → {remoteHost}:{remotePort} via {peerId} " +
+                         $"(file del dispositivo {(knownPeer ? "esistente" : "NON presente, creato ora")}: {peerFile})");
 
-            Log.Info($"Tunnel aperto: 127.0.0.1:{rule.LocalPort} via {peerId} in {opening.Elapsed.TotalSeconds:0.0} s");
-            MinimizePortForwardWindows(exe);
-            return new Tunnel(this, peerId, rule);
+                if (alreadyOpen)
+                {
+                    progress?.Report("Riapertura del tunnel RustDesk con la nuova regola…");
+                    await RestartPeerAsync(exe, peerId, ct);
+                }
+                else
+                {
+                    Launch(exe, peerId, password);
+                }
+
+                if (!await WaitListeningAsync(rule.LocalPort, FirstWait, ct))
+                {
+                    // RustDesk non ha letto le regole: di solito non ha ancora un file valido per questo
+                    // dispositivo su questo PC (lo crea alla prima connessione), oppure era già aperta una
+                    // finestra di tunnel. Si apre una connessione classica, che fa creare il file a RustDesk
+                    // nella sua cartella, la si chiude e si riaprono i tunnel con le regole in quel file.
+                    Log.Warn($"Porta {rule.LocalPort} non aperta in {FirstWait.TotalSeconds}s: connessione RustDesk per preparare {peerId}, poi riapro i tunnel");
+                    LogDiagnostics(exe, peerId, rule);
+                    progress?.Report("RustDesk non ha aperto il tunnel: preparo il jump host con una connessione RustDesk…");
+                    ClosePeerWindows(exe, peerId);
+                    var prepared = await PreparePeerAsync(exe, peerId, password, peerName, knownPeer ? null : peerFile, ct);
+                    Log.Info(prepared is null
+                        ? $"Nessun file del dispositivo creato da RustDesk per {peerId} entro {PrepareWait.TotalSeconds}s"
+                        : $"File del dispositivo scritto da RustDesk: {prepared}");
+                    WritePeerFile(exe, peerId, list);
+                    progress?.Report("Riapertura del tunnel RustDesk…");
+                    await RestartPeerAsync(exe, peerId, ct);
+                    if (!await WaitListeningAsync(rule.LocalPort, RetryWait, ct))
+                    {
+                        LogDiagnostics(exe, peerId, rule);
+                        var label = string.IsNullOrWhiteSpace(peerName) ? peerId : $"{peerName} ({peerId})";
+                        Log.Warn($"Tunnel non aperto: regole scritte in {PeerFilePath(exe, peerId)} per {Path.GetFileName(exe)}");
+                        throw new RustDeskException(
+                            $"Il tunnel verso il jump host {label} non si apre. Apri RustDesk, cerca \"{peerName ?? peerId}\" nella rubrica, " +
+                            "collegati una volta (controllo remoto), chiudi la sessione e rilancia la connessione dal portale. " +
+                            "Se ancora non va, aggiorna RustDesk sul jump host.");
+                    }
+                }
+
+                Log.Info($"Tunnel aperto: 127.0.0.1:{rule.LocalPort} via {peerId} in {opening.Elapsed.TotalSeconds:0.0} s");
+                MinimizePortForwardWindows(exe);
+                return new Tunnel(this, peerId, rule);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                // Tunnel non aperto, connessione annullata (scheda chiusa) o errore: la regola non deve
+                // restare né in memoria né nel file del dispositivo, altrimenti ogni connessione successiva
+                // su questo jump host riavvierebbe i tunnel e la finestra di RustDesk resterebbe aperta.
+                await AbandonRuleAsync(exe, peerId, list, rule);
+                throw;
+            }
         }
         finally
         {
             _gate.Release();
         }
+    }
+
+    /// <summary>Toglie la regola di un tunnel non aperto e chiude o riallinea le finestre di RustDesk.</summary>
+    private async Task AbandonRuleAsync(string exe, string peerId, List<TunnelRule> list, TunnelRule rule)
+    {
+        if (!list.Remove(rule))
+        {
+            return;
+        }
+
+        try
+        {
+            WritePeerFile(exe, peerId, list);
+            if (_rules.Values.All(r => r.Count == 0))
+            {
+                ClosePortForwardWindows(exe);
+            }
+            else if (list.Count == 0)
+            {
+                // Altri jump host restano aperti: si chiude solo questo (e si riaprono gli altri, se cadono).
+                await RestartPeerAsync(exe, peerId, CancellationToken.None);
+            }
+        }
+        catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            Log.Warn($"Regola del tunnel verso {peerId} non tolta dal file: {cleanup.Message}");
+        }
+
+        Log.Info($"Tunnel non aperto: regola della porta {rule.LocalPort} via {peerId} tolta");
     }
 
     internal async Task CloseAsync(Tunnel tunnel)
@@ -182,24 +222,63 @@ public sealed class RustDeskTunnels
         }
     }
 
-    private async Task RestartAllAsync(string exe, CancellationToken ct)
+    /// <summary>
+    /// Riapre i tunnel di un jump host perché RustDesk rilegga le regole. Si chiudono solo le sue finestre
+    /// (tutte, se il titolo non contiene l'ID); poi si controlla quali tunnel degli altri jump host sono
+    /// caduti (RustDesk può tenerne più d'uno nella stessa finestra a schede) e si riaprono solo quelli.
+    /// </summary>
+    private async Task RestartPeerAsync(string exe, string peerId, CancellationToken ct)
     {
-        ClosePortForwardWindows(exe);
+        var windows = ClosePeerWindows(exe, peerId);
         var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (FindPortForwardWindows(exe).Count > 0 && DateTime.UtcNow < deadline)
+        while (FindPortForwardWindows(exe).Intersect(windows).Any() && DateTime.UtcNow < deadline)
         {
             await Task.Delay(200, ct);
         }
 
         await Task.Delay(500, ct);
-        foreach (var (peer, rules) in _rules.Where(r => r.Value.Count > 0))
+        var restarted = new List<string>();
+        if (_rules.TryGetValue(peerId, out var own) && own.Count > 0)
         {
-            Launch(exe, peer, _passwords.GetValueOrDefault(peer));
-            await Task.Delay(800, ct);
+            Launch(exe, peerId, _passwords.GetValueOrDefault(peerId));
+            restarted.Add(peerId);
         }
 
-        Restarted?.Invoke();
+        foreach (var (peer, rules) in _rules.Where(r => r.Key != peerId && r.Value.Count > 0))
+        {
+            if (rules.All(r => IsListening(r.LocalPort)))
+            {
+                continue;
+            }
+
+            await Task.Delay(800, ct);
+            Launch(exe, peer, _passwords.GetValueOrDefault(peer));
+            restarted.Add(peer);
+        }
+
+        if (restarted.Count > 0)
+        {
+            Log.Info("Tunnel riaperti per " + string.Join(", ", restarted));
+            Restarted?.Invoke(restarted);
+        }
     }
+
+    /// <summary>Chiude le finestre di tunnel di un jump host (tutte, se dal titolo non si riconosce l'ID).</summary>
+    private static List<IntPtr> ClosePeerWindows(string exe, string peerId)
+    {
+        var all = FindPortForwardWindows(exe);
+        var own = Native.FindWindows(Native.ProcessIds(Path.GetFileNameWithoutExtension(exe)), peerId).Intersect(all).ToList();
+        var windows = own.Count > 0 ? own : all;
+        foreach (var hwnd in windows)
+        {
+            Native.Close(hwnd);
+        }
+
+        return windows;
+    }
+
+    private static bool IsListening(int port) =>
+        IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().Any(l => l.Port == port && IPAddress.IsLoopback(l.Address));
 
     private static string? _loggedClientVersion;
 
@@ -281,12 +360,13 @@ public sealed class RustDeskTunnels
         await Task.Delay(1500, ct);
         var processes = Native.ProcessIds(Path.GetFileNameWithoutExtension(exe));
         var tunnels = FindPortForwardWindows(exe);
-        var sessions = new[] { peerId, peerName }
-            .Where(text => !string.IsNullOrWhiteSpace(text))
-            .SelectMany(text => Native.FindWindows(processes, text!))
-            .Distinct()
-            .Where(hwnd => !tunnels.Contains(hwnd))
-            .ToList();
+        // Prima per ID; per nome solo se l'ID non compare nei titoli e il nome non è così corto da
+        // coincidere con quello di altre sessioni aperte.
+        var sessions = Native.FindWindows(processes, peerId).Where(hwnd => !tunnels.Contains(hwnd)).ToList();
+        if (sessions.Count == 0 && peerName is { Length: >= 5 })
+        {
+            sessions = [.. Native.FindWindows(processes, peerName).Where(hwnd => !tunnels.Contains(hwnd))];
+        }
         foreach (var hwnd in sessions)
         {
             Native.Close(hwnd);

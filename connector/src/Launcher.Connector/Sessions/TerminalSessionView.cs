@@ -34,15 +34,57 @@ public sealed class TerminalSessionView : ISessionView
     private SessionState _state = SessionState.Connecting;
     private string _statusText = "Connessione in corso…";
 
-    public TerminalSessionView(ConnectionInfo info, SessionEndpoint endpoint, TerminalKind kind, KnownHosts knownHosts)
+    private readonly RustDeskTunnels? _tunnels;
+
+    public TerminalSessionView(ConnectionInfo info, SessionEndpoint endpoint, TerminalKind kind, KnownHosts knownHosts, RustDeskTunnels? tunnels = null)
     {
         _info = info;
         _endpoint = endpoint;
         _kind = kind;
         _knownHosts = knownHosts;
+        _tunnels = tunnels;
         _root.Children.Add(_web);
         Commands = BuildCommands();
+        if (_tunnels is not null)
+        {
+            _tunnels.Restarted += OnTunnelsRestarted;
+        }
     }
+
+    /// <summary>
+    /// Il tunnel del jump host è stato riaperto (per un'altra connessione): il collegamento che passava da
+    /// lì è caduto. Appena la porta locale torna in ascolto il terminale si ricollega da solo.
+    /// </summary>
+    private void OnTunnelsRestarted(IReadOnlyCollection<string> peers) => _root.Dispatcher.BeginInvoke(async () =>
+    {
+        if (_info.Gateway is not { } gateway || !peers.Contains(gateway.Id) || _cts.IsCancellationRequested)
+        {
+            return;
+        }
+
+        SetStatus("Tunnel riaperto, riconnessione automatica…", SessionState.Connecting);
+        var deadline = DateTime.UtcNow.AddSeconds(40);
+        try
+        {
+            while (DateTime.UtcNow < deadline && !IsListening(_endpoint.Port))
+            {
+                await Task.Delay(500, _cts.Token);
+            }
+
+            await ConnectAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            // scheda chiusa nel frattempo
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    });
+
+    private static bool IsListening(int port) =>
+        System.Net.NetworkInformation.IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners()
+            .Any(l => l.Port == port && System.Net.IPAddress.IsLoopback(l.Address));
 
     public UIElement View => _root;
 
@@ -193,6 +235,13 @@ public sealed class TerminalSessionView : ISessionView
             WriteLine("\u001b[31m" + ex.Message + "\u001b[0m");
             SetStatus(ex.Message.TrimEnd('.'), SessionState.Failed);
         }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Qualsiasi altro errore (SSH, rete, shell): resta visibile nel terminale e nel registro.
+            Log.Error($"Connessione {Protocol} non riuscita", ex);
+            WriteLine("\u001b[31mConnessione non riuscita: " + ex.Message + "\u001b[0m");
+            SetStatus("Connessione non riuscita", SessionState.Failed);
+        }
         finally
         {
             _connecting = false;
@@ -249,11 +298,11 @@ public sealed class TerminalSessionView : ISessionView
                 _ready.TrySetResult((root.GetProperty("cols").GetInt32(), root.GetProperty("rows").GetInt32()));
                 break;
             case "input":
-                _backend?.Send(root.GetProperty("data").GetString() ?? "");
+                SafeWrite(backend => backend.Send(root.GetProperty("data").GetString() ?? ""));
                 break;
             case "resize":
                 _size = (root.GetProperty("cols").GetInt32(), root.GetProperty("rows").GetInt32());
-                _backend?.Resize(_size.Cols, _size.Rows);
+                SafeWrite(backend => backend.Resize(_size.Cols, _size.Rows));
                 break;
             case "copy":
                 ClipboardHelper.Copy(root.GetProperty("text").GetString() ?? "");
@@ -294,6 +343,29 @@ public sealed class TerminalSessionView : ISessionView
         }
     }
 
+    /// <summary>Scrittura sul collegamento: se è caduto nel frattempo lo si dice, senza far cadere il Launcher.</summary>
+    private void SafeWrite(Action<ITerminalBackend> write)
+    {
+        if (_backend is not { } backend)
+        {
+            return;
+        }
+
+        try
+        {
+            write(backend);
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException
+            or System.Net.Sockets.SocketException or Renci.SshNet.Common.SshException)
+        {
+            if (_backend == backend && _state != SessionState.Disconnected)
+            {
+                WriteLine("\r\n\u001b[33mCollegamento interrotto: " + ex.Message + ". Riconnetti per riaprirlo.\u001b[0m");
+                SetStatus("Collegamento interrotto", SessionState.Disconnected);
+            }
+        }
+    }
+
     private void WriteLine(string text) => PostJson(new { type = "text", data = text + "\r\n" });
 
     private void PostJson(object message) => _web.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(message));
@@ -306,6 +378,11 @@ public sealed class TerminalSessionView : ISessionView
 
     public ValueTask DisposeAsync()
     {
+        if (_tunnels is not null)
+        {
+            _tunnels.Restarted -= OnTunnelsRestarted;
+        }
+
         _cts.Cancel();
         _backend?.Dispose();
         _backend = null;

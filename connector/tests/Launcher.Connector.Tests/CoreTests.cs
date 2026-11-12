@@ -194,6 +194,19 @@ public sealed class TelnetFilterTests
     [Fact]
     public void Escapes_outgoing_255() =>
         Assert.Equal([1, TelnetFilter.Iac, TelnetFilter.Iac, 2], TelnetFilter.Escape([1, TelnetFilter.Iac, 2]));
+
+    [Fact]
+    public void Accepts_window_size_negotiation_and_sends_the_size()
+    {
+        var filter = new TelnetFilter { WindowSize = (132, 43) };
+        var (_, reply) = filter.Process([TelnetFilter.Iac, TelnetFilter.Do, TelnetFilter.OptionWindowSize]);
+
+        Assert.True(filter.WindowSizeEnabled);
+        Assert.Equal([TelnetFilter.Iac, TelnetFilter.Will, 31, TelnetFilter.Iac, TelnetFilter.Sb, 31, 0, 132, 0, 43, TelnetFilter.Iac, TelnetFilter.Se], reply);
+        // 255 colonne: il byte 255 va raddoppiato anche nella sottonegoziazione.
+        Assert.Equal([TelnetFilter.Iac, TelnetFilter.Sb, 31, 0, TelnetFilter.Iac, TelnetFilter.Iac, 0, 24, TelnetFilter.Iac, TelnetFilter.Se],
+            TelnetFilter.WindowSizeMessage(255, 24));
+    }
 }
 
 public sealed class KnownHostsTests
@@ -700,6 +713,27 @@ public sealed class TnsNamesTests
         Assert.StartsWith(unix, cleaned, StringComparison.Ordinal);
         Assert.Contains("B =", cleaned, StringComparison.Ordinal);
         Assert.DoesNotContain("HUDULAUNCHER", cleaned, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Removing_the_block_restores_the_file_byte_for_byte()
+    {
+        foreach (var original in new[] { Existing, Existing + "\r\n", "A = (x)\n\n\n", "" })
+        {
+            Assert.Equal(original, TnsNames.Apply(TnsNames.Apply(original, [First, Second]), []));
+        }
+
+        // Senza a capo finale: resta solo l'a capo aggiunto prima del blocco.
+        Assert.Equal("A = (x)\r\n", TnsNames.Apply(TnsNames.Apply("A = (x)", [First]), []));
+    }
+
+    [Fact]
+    public void Removes_blocks_written_by_previous_versions_with_their_blank_line()
+    {
+        var legacy = Existing + "\r\n# >>> HuduLauncher: voci gestite dal Launcher, si aggiornano da sole (non modificare)\r\n"
+                     + TnsNames.Render(First) + TnsNames.EndMarker + "\r\n";
+        Assert.Equal(["HUDULAUNCHER_1"], TnsNames.ManagedAliases(legacy));
+        Assert.Equal(Existing, TnsNames.Apply(legacy, []));
     }
 
     [Fact]

@@ -345,7 +345,7 @@ public static class ApiEndpoints
         }
 
         var (response, credentialNote) = await BuildConnectionAsync(asset, connection, ticket.Direct, settings, hudu, inventory, logger, ct);
-        if (response.Web is { Login: not "off" })
+        if (response.Web is { Login: not "off" } && connection.HostFromHudu)
         {
             // Pagina web: solo nome e utente delle credenziali candidate, più l'autorizzazione per chiedere
             // la password di quella che il tecnico sceglierà. Nessuna password in questa risposta.
@@ -424,6 +424,12 @@ public static class ApiEndpoints
 
         var asset = await inventory.GetAssetAsync(grant.AssetId, grant.Email, ct);
         var connection = asset?.Connections.FirstOrDefault(c => c.Key == grant.ConnectionKey);
+        if (connection is { HostFromHudu: false })
+        {
+            return await RejectAsync("Indirizzo della connessione non presente in Hudu",
+                Results.Problem("Accesso con le credenziali di Hudu non disponibile per questo indirizzo.", statusCode: StatusCodes.Status409Conflict));
+        }
+
         if (asset is null || connection?.WebUrl is not { } webUrl)
         {
             return await RejectAsync("Asset o connessione non più disponibili",
@@ -586,7 +592,8 @@ public static class ApiEndpoints
         string? warning = null;
         // Le interfacce web si aprono nel browser: utente e password si prendono da Hudu, non dal Launcher.
         // Database e servizi TCP generici: la password la scrive il tecnico nel suo programma, non si invia.
-        var sendsPassword = connection.Protocol is not (ConnectionProtocol.Http or ConnectionProtocol.Https or ConnectionProtocol.Oracle or ConnectionProtocol.Tcp);
+        var sendsPassword = connection.HostFromHudu
+            && connection.Protocol is not (ConnectionProtocol.Http or ConnectionProtocol.Https or ConnectionProtocol.Oracle or ConnectionProtocol.Tcp);
         if (sendsPassword && connection.PasswordId is { } credentialId)
         {
             try

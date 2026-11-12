@@ -55,6 +55,8 @@ public sealed class EnrollMfaModel(LocalSignIn signIn, UserManager<IdentityUser>
         var code = LocalSignIn.NormalizeCode(Code);
         if (code.Length != 6 || !await users.VerifyTwoFactorTokenAsync(user, users.Options.Tokens.AuthenticatorTokenProvider, code))
         {
+            // Come nella pagina MFA: i codici sbagliati contano per il blocco dell'account.
+            await users.AccessFailedAsync(user);
             Error = "Codice non valido: controlla che l'ora del telefono sia corretta e riprova.";
             await LoadKeyAsync(user, reset: false);
             return Page();

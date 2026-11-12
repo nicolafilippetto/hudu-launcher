@@ -256,6 +256,11 @@ public class LauncherFactory : WebApplicationFactory<Program>
                 {
                     http.Connection.RemoteIpAddress = System.Net.IPAddress.Parse(ip.ToString());
                 }
+                else
+                {
+                    // Il server di test non ha un indirizzo del client: come una richiesta dalla macchina stessa.
+                    http.Connection.RemoteIpAddress ??= System.Net.IPAddress.Loopback;
+                }
 
                 return nextMiddleware(http);
             });
@@ -988,6 +993,25 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
             Assert.DoesNotContain("Nessun gateway RustDesk", row, StringComparison.Ordinal);
 
             // Anche chiedendo il jump host, il biglietto è per la connessione diretta.
+            // Modifica in blocco "credenziale automatica": annulla anche il "Nessuna" scelto prima.
+            using (var bulk = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["__RequestVerificationToken"] = token,
+                ["AssetIds"] = "40",
+                ["PasswordId"] = "auto",
+            }))
+            {
+                var bulkResponse = await client.PostAsync(new Uri("/?handler=Bulk", UriKind.Relative), bulk, ct);
+                Assert.Equal(HttpStatusCode.OK, bulkResponse.StatusCode);
+            }
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var setting = await scope.ServiceProvider.GetRequiredService<AppDbContext>().AssetSettings.AsNoTracking().SingleAsync(x => x.AssetId == 40, ct);
+                Assert.False(setting.NoPassword);
+                Assert.True(setting.NoGateway);
+            }
+
             // Le altre connessioni restano con il menu jump host / diretta (attributo a "false", non vuoto).
             var companyPage = await client.GetStringAsync(new Uri("/?c=1", UriKind.Relative), ct);
             Assert.Matches("data-connect=\"10\"[^>]*data-direct-only=\"false\"", companyPage.Replace("\n", " ", StringComparison.Ordinal).Replace("\r", " ", StringComparison.Ordinal));
@@ -1024,6 +1048,58 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
             await db.CompanySettings.Where(x => x.CompanyId == 40).ExecuteDeleteAsync(ct);
             await db.Assets.Where(x => x.Id == 40 || x.Id == 41).ExecuteDeleteAsync(ct);
             await db.Companies.Where(x => x.Id == 40).ExecuteDeleteAsync(ct);
+        }
+    }
+
+    [Fact]
+    public async Task Extra_connections_accept_only_hudu_addresses_and_address_book_gateways()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await SignedInClientAsync("tecnico@example.com");
+        var token = await AntiforgeryTokenAsync(client);
+        async Task<string> SaveAsync(Dictionary<string, string> fields)
+        {
+            fields["__RequestVerificationToken"] = token;
+            fields["AssetId"] = "10";
+            using var form = new FormUrlEncodedContent(fields);
+            var response = await client.PostAsync(new Uri("/?handler=SaveAsset", UriKind.Relative), form, ct);
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+            return await response.Content.ReadAsStringAsync(ct);
+        }
+
+        // Host fuori da Hudu: la password dell'asset non deve poter finire su un server qualsiasi.
+        var host = await SaveAsync(new Dictionary<string, string> { ["Extras[0].Label"] = "Esca", ["Extras[0].Protocol"] = "Ssh", ["Extras[0].Host"] = "203.0.113.66", ["Extras[0].PasswordId"] = "501" });
+        Assert.Contains("non è tra quelli", host, StringComparison.Ordinal);
+        var url = await SaveAsync(new Dictionary<string, string> { ["Extras[0].Label"] = "Esca", ["Extras[0].Protocol"] = "Https", ["Extras[0].Host"] = "https://evil.example.net/login" });
+        Assert.Contains("non è tra quelli", url, StringComparison.Ordinal);
+        var gateway = await SaveAsync(new Dictionary<string, string> { ["Gateway"] = "999888777" });
+        Assert.Contains("non è nella rubrica RustDesk", gateway, StringComparison.Ordinal);
+
+        // Connessione già salvata prima della regola: si collega, ma senza password.
+        int id;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var legacy = new ExtraConnection { AssetId = 10, Label = "Vecchia", Protocol = ConnectionProtocol.Ssh, Host = "203.0.113.66", PasswordId = 501 };
+            db.ExtraConnections.Add(legacy);
+            await db.SaveChangesAsync(ct);
+            id = legacy.Id;
+        }
+
+        try
+        {
+            var connect = await PostApiAsync(client, "/api/connect", new { assetId = 10, key = "extra:" + id });
+            Assert.Equal(HttpStatusCode.OK, connect.StatusCode);
+            var link = new Uri((await connect.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("url").GetString()!);
+            var redeem = await RedeemWithVersionAsync(System.Web.HttpUtility.ParseQueryString(link.Query)["ticket"]!, "1.5.6", "198.51.100.10");
+            Assert.Equal(HttpStatusCode.OK, redeem.StatusCode);
+            var body = await redeem.Content.ReadFromJsonAsync<JsonElement>(ct);
+            Assert.Equal(JsonValueKind.Null, body.GetProperty("credential").ValueKind);
+        }
+        finally
+        {
+            using var scope = factory.Services.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<AppDbContext>().ExtraConnections.Where(x => x.Id == id).ExecuteDeleteAsync(ct);
         }
     }
 

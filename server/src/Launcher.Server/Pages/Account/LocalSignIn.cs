@@ -10,8 +10,16 @@ namespace Launcher.Server.Pages.Account;
 /// <summary>Passaggi comuni del login locale: utente in attesa di MFA e accesso finale.</summary>
 public sealed class LocalSignIn(UserManager<IdentityUser> users, SettingsService settings, AuditService audit)
 {
+    /// <summary>Accesso di emergenza consentito da questa rete (anche ai passi MFA, non solo alla password).</summary>
+    public bool NetworkAllowed(HttpContext http) => NetworkAllowList.IsAllowed(settings.Portal.LocalLoginNetworks, http);
+
     public async Task<IdentityUser?> GetPendingUserAsync(HttpContext http)
     {
+        if (!NetworkAllowed(http))
+        {
+            return null;
+        }
+
         var result = await http.AuthenticateAsync(AuthSchemes.MfaPending);
         var userId = result.Principal?.FindFirstValue(LocalLoginModel.PendingUserClaim);
         if (userId is null)
@@ -27,6 +35,7 @@ public sealed class LocalSignIn(UserManager<IdentityUser> users, SettingsService
     {
         await http.SignOutAsync(AuthSchemes.MfaPending);
         var principal = PortalPrincipalFactory.Create(user.Email!, user.Email, LauncherClaims.MethodLocal, isAdmin: true);
+        ((ClaimsIdentity)principal.Identity!).AddClaim(new Claim(LauncherClaims.SecurityStamp, await users.GetSecurityStampAsync(user)));
         await http.SignInAsync(AuthSchemes.Portal, principal, new AuthenticationProperties
         {
             IsPersistent = false,

@@ -192,6 +192,7 @@
             <input class="input mono" name="clientPath" value="@Model.RustDesk.ClientPath" placeholder="Automatico: link rustdesk:// registrato, C:\Program Files\RustDesk o una cartella con &quot;rustdesk&quot; nel nome" autocomplete="off" spellcheck="false" />
             <small class="muted">Per i client personalizzati di RustDesk Server Pro. Il Launcher lo usa solo se il file esiste dentro Programmi; un criterio Intune (RustDeskPath) ha la precedenza.</small>
         </label>
+        <label class="check span-all"><input type="checkbox" name="clearToken" value="true" /><span>Cancella il token API salvato</span></label>
         <label class="check span-all"><input type="checkbox" name="clearPassword" value="true" /><span>Cancella la password di connessione salvata</span></label>
         <div class="actions span-all">
             <button class="btn btn-primary" type="submit">Salva</button>

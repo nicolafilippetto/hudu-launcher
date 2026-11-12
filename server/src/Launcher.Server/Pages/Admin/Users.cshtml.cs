@@ -30,7 +30,21 @@ public sealed class UsersModel(AppDbContext db, AuditService audit) : LauncherPa
     public bool IsSelf(PortalUser user) =>
         user.ObjectId == User.FindFirstValue(LauncherClaims.ObjectId) && user.TenantId == User.FindFirstValue(LauncherClaims.TenantId);
 
-    public Task<IActionResult> OnPostApproveAsync(int id, bool admin, CancellationToken ct) =>
+    public async Task<IActionResult> OnPostApproveAsync(int id, bool admin, CancellationToken ct)
+    {
+        // Biglietti, preferiti e registro sono per email: due utenti approvati con la stessa email (es. account
+        // ricreato in Entra) sarebbero intercambiabili. Prima si blocca o si rimuove quello vecchio.
+        var candidate = await db.PortalUsers.AsNoTracking().FirstOrDefaultAsync(u => u.Id == id, ct);
+        if (candidate is not null && await db.PortalUsers.AnyAsync(u => u.Id != id && u.Status == PortalUserStatus.Approved && u.Email == candidate.Email, ct))
+        {
+            FlashError = $"Esiste già un utente approvato con l'email {candidate.Email} (probabilmente l'account precedente): bloccalo o rimuovilo prima di approvare questo.";
+            return RedirectToPage();
+        }
+
+        return await ApproveAsync(id, admin, ct);
+    }
+
+    private Task<IActionResult> ApproveAsync(int id, bool admin, CancellationToken ct) =>
         ChangeAsync(id, "user.approve", admin ? "approvato come amministratore" : "approvato", user =>
         {
             user.Status = PortalUserStatus.Approved;

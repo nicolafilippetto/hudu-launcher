@@ -222,11 +222,19 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         var noPassword = form.PasswordId == NoneValue;
         var passwordId = noPassword ? null : ParsePassword(form.PasswordId, companyPasswords, errors);
         var gateway = form.NoGateway ? null : ParseGateway(form.Gateway, errors);
+        // Host e gateway scritti a mano: solo indirizzi di Hudu per l'asset e dispositivi della rubrica RustDesk.
+        // Un valore già salvato resta accettato, per poter salvare gli altri campi.
+        var huduHosts = ConnectionResolver.HuduHosts(asset);
+        var peerIds = (await inventory.GetPeersAsync(ct)).Select(p => p.Id).ToHashSet(StringComparer.Ordinal);
+        var savedRows = await db.ExtraConnections.AsNoTracking().Where(e => e.AssetId == asset.Id).ToListAsync(ct);
+        var savedGateway = await db.AssetSettings.AsNoTracking().Where(s => s.AssetId == asset.Id).Select(s => s.GatewayPeerId).FirstOrDefaultAsync(ct);
+        CheckGateway(gateway, savedGateway, peerIds, "Connessione principale", errors);
+        var rules = new ExtraRules(huduHosts, peerIds, savedRows);
         var note = string.IsNullOrWhiteSpace(form.Note) ? null : form.Note.Trim();
         // Si salvano solo le opzioni del protocollo effettivo (quello scelto o, se automatico, quello dedotto
         // come mostra l'editor): le sezioni degli altri protocolli sono nascoste e non devono restare attive.
         var layout = await db.LayoutConfigs.AsNoTracking().FirstOrDefaultAsync(l => l.LayoutId == asset.LayoutId, ct);
-        var effective = protocol ?? ConnectionResolver.GuessProtocol(asset.OperatingSystem, layout, null);
+        var effective = protocol ?? ConnectionResolver.GuessProtocol(asset.OperatingSystem, layout, await OwnPeerAsync(asset, ct));
         var rdp = effective == ConnectionProtocol.Rdp ? RdpOptionCatalog.Clean(form.Rdp) : new Dictionary<string, string>();
         var web = effective is ConnectionProtocol.Http or ConnectionProtocol.Https ? WebOptionCatalog.Catalog.Clean(form.Web) : new Dictionary<string, string>();
         if (effective == ConnectionProtocol.Tcp)
@@ -260,7 +268,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         var extras = new List<ParsedExtra>();
         foreach (var extra in form.Extras.Where(e => !e.Remove))
         {
-            if (ParseExtra(extra, isConsole: false, companyPasswords, errors) is { } parsed)
+            if (ParseExtra(extra, isConsole: false, companyPasswords, errors, rules) is { } parsed)
             {
                 extras.Add(parsed);
             }
@@ -269,7 +277,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         ParsedExtra? console = null;
         if (form.Console is { } consoleForm && !form.ConsoleHidden)
         {
-            console = ParseExtra(consoleForm, isConsole: true, companyPasswords, errors);
+            console = ParseExtra(consoleForm, isConsole: true, companyPasswords, errors, rules);
         }
 
         if (extras.Count > 10)
@@ -378,6 +386,8 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         var company = await db.Companies.AsNoTracking().Where(c => c.Id == asset.CompanyId).Select(c => c.Name).FirstOrDefaultAsync(ct);
         await audit.WriteAsync(new AuditEntry("asset.update", Email, CompanyName: company, AssetId: asset.Id, AssetName: asset.Name,
             Details: Summarize(protocol, host, port, passwordId, gateway, form.Hidden, extras.Count)
+                     + (extras.Count > 0 ? "; aggiuntive: " + string.Join(", ", extras.Select(Describe)) : "")
+                     + (console is { IsEmptyConsole: false } ? "; console: " + Describe(console) : "")
                      + (form.Console is null ? "" : form.ConsoleHidden ? "; console nascosta" : console is { IsEmptyConsole: false } ? "; console modificata" : "")
                      + (databaseName is null ? "" : $"; database {databaseName}")
                      + (rdp.Count > 0 ? "; RDP: " + RdpOptionCatalog.Describe(rdp) : "")
@@ -415,6 +425,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         if (gatewayMode == "set")
         {
             gateway = ParseGateway(form.Gateway, errors);
+            CheckGateway(gateway, null, (await inventory.GetPeersAsync(ct)).Select(p => p.Id).ToHashSet(StringComparer.Ordinal), "Gateway", errors);
             if (gateway is null && errors.Count == 0)
             {
                 errors.Add("Indicare il gateway RustDesk.");
@@ -508,7 +519,9 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
 
             if (passwordMode.Length > 0)
             {
+                // Credenziale scelta o automatica: annulla anche un "Nessuna" impostato prima.
                 setting.PasswordId = passwordId;
+                setting.NoPassword = false;
             }
 
             if (protocolMode.Length > 0)
@@ -601,6 +614,9 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
 
         var errors = new List<string>();
         var peerId = noRustDesk ? null : ParseGateway(gateway, errors);
+        var companyPeers = (await inventory.GetPeersAsync(ct)).Select(p => p.Id).ToHashSet(StringComparer.Ordinal);
+        var savedCompanyGateway = await db.CompanySettings.AsNoTracking().Where(s => s.CompanyId == companyId).Select(s => s.GatewayPeerId).FirstOrDefaultAsync(ct);
+        CheckGateway(peerId, savedCompanyGateway, companyPeers, "Gateway del cliente", errors);
         if (errors.Count > 0)
         {
             FlashError = errors[0];
@@ -658,7 +674,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         var extras = rows.Where(e => !e.IsConsole).ToList();
         var consoleRow = rows.FirstOrDefault(e => e.IsConsole);
         var layout = await db.LayoutConfigs.AsNoTracking().FirstOrDefaultAsync(l => l.LayoutId == resolved.Asset.LayoutId, ct);
-        var guessed = ConnectionResolver.GuessProtocol(resolved.Asset.OperatingSystem, layout, null);
+        var guessed = ConnectionResolver.GuessProtocol(resolved.Asset.OperatingSystem, layout, await OwnPeerAsync(resolved.Asset, ct));
         var linked = await inventory.GetLinkedPasswordsAsync(resolved.Asset, ct);
         var chosen = new[] { resolved.Setting?.PasswordId }.Concat(rows.Select(e => e.PasswordId)).OfType<int>().ToHashSet();
         var passwords = linked
@@ -668,8 +684,17 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
             consoleRow, ConnectionResolver.HuduConsole(resolved.Asset));
     }
 
+    /// <summary>
+    /// Dispositivo RustDesk con lo stesso nome dell'asset: serve solo a dedurre il protocollo come fa il
+    /// risolutore (l'editor deve mostrare lo stesso "Automatico" che poi si usa).
+    /// </summary>
+    private async Task<CachedPeer?> OwnPeerAsync(CachedAsset asset, CancellationToken ct) =>
+        settings.RustDesk.Enabled
+            ? ConnectionResolver.FindOwnPeer(asset, ConnectionResolver.IndexPeersByName(await inventory.GetPeersAsync(ct)))
+            : null;
+
     /// <summary>Valida la scheda di una connessione aggiuntiva o della console; null se va scartata.</summary>
-    private static ParsedExtra? ParseExtra(ExtraForm extra, bool isConsole, List<int> companyPasswords, List<string> errors)
+    private static ParsedExtra? ParseExtra(ExtraForm extra, bool isConsole, List<int> companyPasswords, List<string> errors, ExtraRules rules)
     {
         var label = extra.Label?.Trim();
         if (string.IsNullOrEmpty(label))
@@ -729,6 +754,19 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
             errors.Add($"{label}: indicare la porta del servizio.");
         }
 
+        // Solo indirizzi di Hudu per l'asset (o quello già salvato su questa connessione).
+        var saved = rules.Saved.FirstOrDefault(r => isConsole ? r.IsConsole : r.Id == extra.Id && !r.IsConsole);
+        var chosenHost = url is not null ? new Uri(url).Host.Trim('[', ']') : host;
+        var savedHost = saved?.Url is { } savedUrl && Uri.TryCreate(savedUrl, UriKind.Absolute, out var savedUri) ? savedUri.Host.Trim('[', ']') : saved?.Host;
+        if (chosenHost is not null && !rules.HuduHosts.Contains(chosenHost)
+            && !string.Equals(chosenHost, savedHost, StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add($"{label}: l'indirizzo {chosenHost} non è tra quelli dell'asset in Hudu. Caricalo nell'IPAM di Hudu (collegato all'asset) e premi \"Aggiorna da Hudu\".");
+            return null;
+        }
+
+        var gatewayId = extra.NoGateway ? null : ParseGateway(extra.Gateway, errors);
+        CheckGateway(gatewayId, saved?.GatewayPeerId, rules.PeerIds, label, errors);
         var (databaseName, databaseKind) = ParseDatabase(protocol, extra.DatabaseName, extra.DatabaseKind, label, errors);
         var effective = protocol ?? ConnectionProtocol.Https;
         // Si salvano solo le opzioni del tipo di connessione scelto: le altre sezioni sono nascoste.
@@ -736,8 +774,29 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         var web = effective is ConnectionProtocol.Http or ConnectionProtocol.Https ? OptionCatalog.Serialize(WebOptionCatalog.Catalog.Clean(extra.Web)) : null;
         var passwordId = effective == ConnectionProtocol.Tcp ? null : ParsePassword(extra.PasswordId, companyPasswords, errors);
         return new ParsedExtra(extra, label, protocol, host, port, url, passwordId,
-            extra.NoGateway ? null : ParseGateway(extra.Gateway, errors), rdp, web, databaseName, databaseKind, extra.NoGateway);
+            gatewayId, rdp, web, databaseName, databaseKind, extra.NoGateway);
     }
+
+    /// <summary>
+    /// Gateway scritto a mano: deve essere un dispositivo della rubrica RustDesk (se la rubrica è letta),
+    /// altrimenti un jump host qualsiasi riceverebbe il traffico (e le password) della connessione.
+    /// </summary>
+    private static void CheckGateway(string? gateway, string? saved, IReadOnlySet<string> peerIds, string field, List<string> errors)
+    {
+        if (gateway is not null && peerIds.Count > 0 && !peerIds.Contains(gateway) && !string.Equals(gateway, saved, StringComparison.Ordinal))
+        {
+            errors.Add($"{field}: il gateway {gateway} non è nella rubrica RustDesk.");
+        }
+    }
+
+    /// <summary>Regole per host e gateway delle connessioni aggiuntive e della console.</summary>
+    private sealed record ExtraRules(IReadOnlySet<string> HuduHosts, IReadOnlySet<string> PeerIds, IReadOnlyList<ExtraConnection> Saved);
+
+    /// <summary>Connessione per il registro: nome, protocollo, indirizzo e credenziale.</summary>
+    private static string Describe(ParsedExtra extra) =>
+        $"{extra.Label} ({extra.Protocol?.ToString() ?? "come in Hudu"} {extra.Url ?? (extra.Host ?? "IP della principale") + (extra.Port is { } p ? ":" + p : "")}"
+        + (extra.PasswordId is { } id ? $", credenziale #{id}" : "")
+        + (extra.NoGateway ? ", senza gateway" : extra.Gateway is { } g ? $", gateway {g}" : "") + ")";
 
     /// <summary>Service name o SID: obbligatorio per Oracle, ignorato per gli altri protocolli.</summary>
     private static (string? Name, string? Kind) ParseDatabase(ConnectionProtocol? protocol, string? name, string? kind, string field, List<string> errors)
