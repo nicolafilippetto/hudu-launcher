@@ -486,7 +486,7 @@ form.inline { display: inline-flex; margin: 0; }
 .conn-tab.is-muted span { text-decoration: line-through; }
 .conn-tab-add { color: var(--primary); }
 .conn-panel { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--border); border-top: 0; border-radius: 0 0 var(--radius) var(--radius); }
-.conn-panel[hidden] { display: none; }
+.conn-panel[hidden], .conn-panel.is-removed { display: none; }
 .conn-panel-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
 .conn-panel-actions .check { padding-bottom: 0; }
 .check-inline { font-size: 13px; color: var(--muted); }

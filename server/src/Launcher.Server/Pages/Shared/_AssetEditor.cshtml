@@ -185,7 +185,7 @@
                 <div class="field">
                     <label class="field">
                         <span>Gateway RustDesk</span>
-                        <input class="input mono" name="Gateway" list="peer-list" data-peer-input value="@setting?.GatewayPeerId" placeholder="@autoGateway" autocomplete="off" spellcheck="false" disabled="@(setting?.NoGateway == true)" />
+                        <input class="input mono" name="Gateway" list="peer-list" data-peer-input value="@setting?.GatewayPeerId" placeholder="@autoGateway" spellcheck="false" disabled="@(setting?.NoGateway == true)" />
                     </label>
                     <label class="check check-inline">
                         <input type="checkbox" name="NoGateway" value="true" checked="@(setting?.NoGateway == true)" data-no-gateway />
@@ -231,7 +231,7 @@
             <label class="field">
                 <span data-for="Http Https">Host o indirizzo completo (anche https://…)</span>
                 <span data-not-for="Http Https">Host o IP</span>
-                <input class="input mono" name="@(prefix)Host" value="@(extra.Url ?? extra.Host)" placeholder="@extraHostHint" list="ipam-list" autocomplete="off" spellcheck="false" />
+                <input class="input mono" name="@(prefix)Host" value="@(extra.Url ?? extra.Host)" placeholder="@extraHostHint" list="ipam-list" spellcheck="false" />
             </label>
             <div class="grid grid-2">
                 <label class="field" data-for="Rdp Ssh Telnet Winbox Http Https Oracle">
@@ -251,7 +251,7 @@
                     <div class="field">
                         <label class="field">
                             <span>Gateway RustDesk</span>
-                            <input class="input mono" name="@(prefix)Gateway" value="@extra.GatewayPeerId" list="peer-list" data-peer-input placeholder="Automatico (come la principale)" autocomplete="off" spellcheck="false" disabled="@extra.NoGateway" />
+                            <input class="input mono" name="@(prefix)Gateway" value="@extra.GatewayPeerId" list="peer-list" data-peer-input placeholder="Automatico (come la principale)" spellcheck="false" disabled="@extra.NoGateway" />
                         </label>
                         <label class="check check-inline">
                         <input type="checkbox" name="@(prefix)NoGateway" value="true" checked="@(extra.NoGateway)" data-no-gateway />
@@ -304,7 +304,7 @@
             <label class="field">
                 <span data-for="Http Https">Host o indirizzo completo (anche https://…)</span>
                 <span data-not-for="Http Https">Host o IP</span>
-                <input class="input mono" name="Console.Host" value="@(row?.Url ?? row?.Host)" placeholder="@(hudu?.Url ?? hudu?.Host ?? "es. https://idrac-srv01.cliente.local/")" list="ipam-list" autocomplete="off" spellcheck="false" />
+                <input class="input mono" name="Console.Host" value="@(row?.Url ?? row?.Host)" placeholder="@(hudu?.Url ?? hudu?.Host ?? "es. https://idrac-srv01.cliente.local/")" list="ipam-list" spellcheck="false" />
             </label>
             <div class="grid grid-2">
                 <label class="field" data-for="Rdp Ssh Telnet Winbox Http Https Oracle">
@@ -324,7 +324,7 @@
                     <div class="field">
                         <label class="field">
                             <span>Gateway RustDesk</span>
-                            <input class="input mono" name="Console.Gateway" value="@row?.GatewayPeerId" list="peer-list" data-peer-input placeholder="Automatico (gateway del cliente)" autocomplete="off" spellcheck="false" disabled="@(row?.NoGateway == true)" />
+                            <input class="input mono" name="Console.Gateway" value="@row?.GatewayPeerId" list="peer-list" data-peer-input placeholder="Automatico (gateway del cliente)" spellcheck="false" disabled="@(row?.NoGateway == true)" />
                         </label>
                         <label class="check check-inline">
                         <input type="checkbox" name="Console.NoGateway" value="true" checked="@(row?.NoGateway == true)" data-no-gateway />
@@ -373,7 +373,7 @@
             <label class="field">
                 <span data-for="Http Https">Host o indirizzo completo (anche https://…)</span>
                 <span data-not-for="Http Https">Host o IP</span>
-                <input class="input mono" name="Extras[__i__].Host" placeholder="@extraHostHint" list="ipam-list" autocomplete="off" spellcheck="false" />
+                <input class="input mono" name="Extras[__i__].Host" placeholder="@extraHostHint" list="ipam-list" spellcheck="false" />
             </label>
             <div class="grid grid-2">
                 <label class="field" data-for="Rdp Ssh Telnet Winbox Http Https Oracle">
@@ -393,7 +393,7 @@
                     <div class="field">
                         <label class="field">
                             <span>Gateway RustDesk</span>
-                            <input class="input mono" name="Extras[__i__].Gateway" list="peer-list" data-peer-input placeholder="Automatico (come la principale)" autocomplete="off" spellcheck="false" />
+                            <input class="input mono" name="Extras[__i__].Gateway" list="peer-list" data-peer-input placeholder="Automatico (come la principale)" spellcheck="false" />
                         </label>
                         <label class="check check-inline">
                             <input type="checkbox" name="Extras[__i__].NoGateway" value="true" data-no-gateway />

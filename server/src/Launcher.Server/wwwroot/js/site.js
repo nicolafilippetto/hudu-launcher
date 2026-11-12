@@ -571,9 +571,19 @@
                 fragment.appendChild(option);
             });
             list.appendChild(fragment);
+            refreshSuggestions();
         } catch (e) {
             peersLoaded = false;
         }
+    }
+
+    // Firefox non aggiorna i suggerimenti di un campo se il suo elenco (datalist) cambia dopo che il
+    // campo esiste: spegnere e riaccendere l'autocompletamento gli fa rileggere l'elenco.
+    function refreshSuggestions() {
+        $$("input[list]").forEach(function (input) {
+            input.setAttribute("autocomplete", "off");
+            input.removeAttribute("autocomplete");
+        });
     }
 
     function openEditor(assetId) {
@@ -594,6 +604,7 @@
             if (!response.ok) { throw new Error(await readError(response)); }
             dialogBody.innerHTML = await response.text();
             syncEditor();
+            refreshSuggestions();
             var first = $("select, input:not([type=hidden])", dialogBody);
             if (first) { first.focus(); }
         } catch (error) {
@@ -774,6 +785,7 @@
             // devono restare consecutivi, altrimenti il portale ignora le schede che seguono.
             $("[data-extra-remove]", row).value = "true";
             row.classList.add("is-removed");
+            row.hidden = true;
             row.removeAttribute("data-panel");
             if (rowTab) { rowTab.parentNode.removeChild(rowTab); }
             selectTab("primary");
