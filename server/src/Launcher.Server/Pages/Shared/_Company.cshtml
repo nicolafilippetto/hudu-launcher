@@ -56,7 +56,7 @@
             <input type="hidden" name="companyId" value="@Model.Company.Id" />
             <label class="field">
                 <span>Dispositivo da cui si raggiunge la rete del cliente</span>
-                <input class="input" name="gateway" list="peer-list" data-peer-input value="@(Model.NoRustDesk ? null : Model.GatewayPeerId)" placeholder="ID RustDesk o nome dalla rubrica" autocomplete="off" disabled="@Model.NoRustDesk" />
+                <input class="input" name="gateway" list="peer-list" data-peer-input value="@(Model.NoRustDesk ? null : Model.GatewayPeerId)" placeholder="ID RustDesk o nome dalla rubrica" disabled="@Model.NoRustDesk" />
             </label>
             <label class="check">
                 <input type="checkbox" name="noRustDesk" value="true" checked="@Model.NoRustDesk" data-no-gateway />
