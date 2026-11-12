@@ -9,7 +9,8 @@ namespace Launcher.Server.Pages.Admin;
 
 public sealed record ChecklistItem(bool Ok, string Title, string Detail, string? Link);
 
-public sealed class IndexModel(AppDbContext db, SettingsService settings, SyncService sync, Security.LauncherOptions options) : LauncherPageModel
+public sealed class IndexModel(AppDbContext db, SettingsService settings, SyncService sync, Security.LauncherOptions options,
+    IConfiguration configuration, IWebHostEnvironment environment) : LauncherPageModel
 {
     public SyncState? State { get; private set; }
     public bool SyncRunning => sync.IsRunning;
@@ -40,6 +41,18 @@ public sealed class IndexModel(AppDbContext db, SettingsService settings, SyncSe
             Checklist.Add(new ChecklistItem(false, "Il proxy non invia X-Forwarded-For",
                 $"Le richieste arrivano dal proxy fidato ({HttpContext.Connection.RemoteIpAddress}) senza l'indirizzo del client: " +
                 "l'accesso locale è rifiutato e i limiti per IP valgono per tutti insieme. Configurare il proxy perché invii X-Forwarded-For.", null));
+        }
+
+        if (!environment.IsDevelopment() && configuration["AllowedHosts"] is null or "" or "*")
+        {
+            Checklist.Add(new ChecklistItem(false, "AllowedHosts non limitato",
+                "Il portale accetta qualsiasi nome host. Nel compose impostare AllowedHosts con il nome pubblico del portale (es. launcher.example.com).", null));
+        }
+
+        if (settings.RustDesk.UsesAddressBook && settings.RustDesk.ApiUrl?.StartsWith("http://", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            Checklist.Add(new ChecklistItem(false, "API di RustDesk in chiaro",
+                "L'indirizzo dell'API di RustDesk è http: il token viaggia in chiaro. Usare https (anche con un certificato interno).", null));
         }
 
         if (options.AllowHttp)

@@ -215,6 +215,15 @@ public sealed class SyncService(
     /// </summary>
     public async Task<SyncResult> RefreshCompanyAsync(int companyId, string requestedBy, CancellationToken ct)
     {
+        // Solo clienti che esistono: il dizionario dei limiti non deve crescere con ID inventati.
+        await using (var check = await dbFactory.CreateDbContextAsync(ct))
+        {
+            if (!await check.Companies.AnyAsync(c => c.Id == companyId, ct))
+            {
+                return new SyncResult(false, "Cliente non trovato.");
+            }
+        }
+
         // Una volta al minuto per cliente, chiunque lo chieda: protegge i limiti dell'API di Hudu.
         var now = DateTimeOffset.UtcNow;
         var last = _companyRefreshes.GetOrAdd(companyId, DateTimeOffset.MinValue);

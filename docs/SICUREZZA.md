@@ -30,9 +30,18 @@ server (se la licenza lo consente), rotazione periodica, alert sugli accessi API
 - **Utenti Microsoft 365**: accesso con OIDC (codice + PKCE), solo dal proprio tenant. Al primo accesso
   l'utente resta **in attesa** e non vede nulla finché un amministratore non lo approva (come tecnico o
   admin). È riconosciuto dall'**object ID** Entra, immutabile, non dall'email; bloccato o rimosso perde
-  portale e Launcher entro un minuto. In Entra restano consigliati assegnazione utente obbligatoria e
-  Accesso condizionale con MFA: le due barriere sono indipendenti.
-- **Accessi di emergenza**: utenti locali, sempre admin, password + MFA TOTP, solo da reti interne.
+  portale e Launcher entro un minuto. La sessione dura al massimo le ore impostate dal login (scadenza
+  assoluta: il ricontrollo di ogni minuto non la allunga). Non si possono approvare due utenti con la
+  stessa email. In Entra restano consigliati assegnazione utente obbligatoria e Accesso condizionale
+  con MFA: le due barriere sono indipendenti.
+- **Accessi di emergenza**: utenti locali, sempre admin, password + MFA TOTP, solo da reti interne: la
+  rete si controlla alla password, ai passi MFA e a ogni richiesta della sessione (al massimo 4 ore).
+  Cambio password o MFA chiudono le sessioni aperte (security stamp); i codici MFA errati contano per il
+  blocco anche alla prima configurazione.
+- **Connessioni aggiuntive e console**: solo indirizzi che Hudu associa all'asset (IP e FQDN dell'IPAM,
+  campi del layout, console di Hudu); gateway scritti a mano solo dalla rubrica RustDesk. La password
+  di Hudu parte solo verso indirizzi di Hudu: connessioni salvate prima con un host diverso si aprono
+  senza credenziale. Ogni modifica registra host, credenziale e gateway delle connessioni.
 - **Credenziale del portale verso Entra**: certificato generato dal portale (RSA 3072, 2 anni); la chiave
   privata è cifrata nel database e non si scarica, in Entra c'è solo il certificato pubblico. Al login il
   portale firma un'asserzione valida 5 minuti invece di inviare un segreto.
@@ -90,12 +99,16 @@ server (se la licenza lo consente), rotazione periodica, alert sugli accessi API
 - Output sempre codificato (Razor), **Content Security Policy** senza script inline, frame vietati,
   HSTS, `nosniff`, `no-referrer`, isolamento tra origini.
 - Token antiforgery su tutti i form e le API del portale; cookie `__Host-`, HttpOnly, Secure, SameSite.
-- Limiti per IP: login, MFA e Setup 10 ogni 5 minuti; connessioni e riscatti 30 ogni 5 minuti;
-  aggiornamento da Hudu una volta al minuto per cliente. Blocco dell'account dopo 5 errori
+- Limiti per IP: login, MFA e Setup 10 ogni 5 minuti; connessioni 30 e riscatti 120 ogni 5 minuti
+  (più tecnici possono uscire dallo stesso NAT); aggiornamento da Hudu una volta al minuto per cliente.
+  Le richieste respinte scrivono nel registro una sola riga per indirizzo ogni 5 minuti, con il conteggio. Blocco dell'account dopo 5 errori
   (password o MFA). Messaggi di errore che non rivelano se un utente esiste.
 - Accesso di emergenza rifiutato se il proxy davanti al portale non è riconosciuto, o se il proxy
   fidato non invia `X-Forwarded-For` (in entrambi i casi l'IP reale non è verificabile e l'indirizzo
   privato del proxy farebbe sembrare interna una richiesta da internet). La dashboard admin lo segnala.
+  Le intestazioni `X-Original-*` inviate dal client si scartano: le scrive solo il middleware dei proxy fidati.
+- Il client verso Hudu non segue i reindirizzamenti (porterebbero la chiave API a un altro host). La
+  dashboard admin segnala `AllowedHosts` non limitato e l'API di RustDesk in http.
 - Upload solo di immagini raster riconosciute dal contenuto (niente SVG), richieste massimo 2 MB.
 - Container non root, filesystem in sola lettura, nessuna capability, nessuna shell.
 

@@ -44,6 +44,8 @@ public static class LauncherClaims
     public const string ObjectId = "oid";
     public const string TenantId = "tid";
     public const string ValidatedAt = "validated_at";
+    /// <summary>Security stamp dell'account locale al login: se cambia (password, MFA) la sessione si chiude.</summary>
+    public const string SecurityStamp = "security_stamp";
     public const string MethodEntra = "entra";
     public const string MethodLocal = "local";
 
@@ -342,13 +344,22 @@ public sealed class ConnectorJwtEvents(SettingsService settings, PortalPrincipal
 /// Ricontrolla la sessione ogni minuto: un utente bloccato o rimosso, o un accesso di emergenza
 /// eliminato, perde la sessione; un cambio di ruolo vale subito.
 /// </summary>
-public sealed class PortalCookieEvents(PortalPrincipalFactory principals, IDbContextFactory<AppDbContext> dbFactory) : CookieAuthenticationEvents
+public sealed class PortalCookieEvents(PortalPrincipalFactory principals, IDbContextFactory<AppDbContext> dbFactory, SettingsService settings)
+    : CookieAuthenticationEvents
 {
     private static readonly TimeSpan RevalidateEvery = TimeSpan.FromMinutes(1);
 
     public override async Task ValidatePrincipal(CookieValidatePrincipalContext context)
     {
         var principal = context.Principal!;
+        var local = principal.FindFirstValue(LauncherClaims.AuthMethod) == LauncherClaims.MethodLocal;
+        // Accesso di emergenza: valido solo dalle reti ammesse, a ogni richiesta (non solo al login).
+        if (local && !NetworkAllowList.IsAllowed(settings.Portal.LocalLoginNetworks, context.HttpContext))
+        {
+            await RejectAsync(context);
+            return;
+        }
+
         var validatedAt = long.TryParse(principal.FindFirstValue(LauncherClaims.ValidatedAt), out var seconds)
             ? DateTimeOffset.FromUnixTimeSeconds(seconds)
             : DateTimeOffset.MinValue;
@@ -360,13 +371,17 @@ public sealed class PortalCookieEvents(PortalPrincipalFactory principals, IDbCon
         var ct = context.HttpContext.RequestAborted;
         var email = principal.GetEmail();
         ClaimsPrincipal? renewed = null;
-        if (principal.FindFirstValue(LauncherClaims.AuthMethod) == LauncherClaims.MethodLocal && email is not null)
+        if (local && email is not null)
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var normalized = email.ToUpperInvariant();
-            if (await db.Users.AnyAsync(u => u.NormalizedEmail == normalized, ct) && await principals.IsBreakGlassAsync(email, ct))
+            var stamp = principal.FindFirstValue(LauncherClaims.SecurityStamp);
+            var account = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.NormalizedEmail == normalized, ct);
+            // Cambio password, azzeramento o nuova configurazione MFA: il security stamp cambia e la sessione si chiude.
+            if (account is not null && stamp is not null && account.SecurityStamp == stamp && await principals.IsBreakGlassAsync(email, ct))
             {
                 renewed = PortalPrincipalFactory.Create(email, principal.FindFirstValue(ClaimTypes.Name), LauncherClaims.MethodLocal, isAdmin: true);
+                ((ClaimsIdentity)renewed.Identity!).AddClaim(new Claim(LauncherClaims.SecurityStamp, stamp));
             }
         }
         else
@@ -378,15 +393,22 @@ public sealed class PortalCookieEvents(PortalPrincipalFactory principals, IDbCon
             }
         }
 
-        if (renewed is null)
+        // Scadenza assoluta: il rinnovo serve ad aggiornare i dati dell'utente, non ad allungare la sessione.
+        var now = DateTimeOffset.UtcNow;
+        if (renewed is null || !SessionExpiry.CapRenewal(context.Properties, now))
         {
-            context.RejectPrincipal();
-            await context.HttpContext.SignOutAsync(AuthSchemes.Portal);
+            await RejectAsync(context);
             return;
         }
 
         context.ReplacePrincipal(renewed);
         context.ShouldRenew = true;
+    }
+
+    private static async Task RejectAsync(CookieValidatePrincipalContext context)
+    {
+        context.RejectPrincipal();
+        await context.HttpContext.SignOutAsync(AuthSchemes.Portal);
     }
 
     public override Task RedirectToLogin(RedirectContext<CookieAuthenticationOptions> context) =>
@@ -408,6 +430,42 @@ public sealed class PortalCookieEvents(PortalPrincipalFactory principals, IDbCon
         }
 
         return Task.CompletedTask;
+    }
+}
+
+/// <summary>
+/// Scadenza assoluta della sessione del portale. Il gestore dei cookie, a ogni rinnovo, sposta la scadenza
+/// in avanti della durata intera (scadenza meno emissione): qui la si fissa alla scadenza del login.
+/// </summary>
+public static class SessionExpiry
+{
+    public const string Key = "launcher.expires";
+
+    /// <summary>
+    /// Prepara il rinnovo senza allungare la sessione; false se la scadenza è già passata. La prima volta
+    /// si ricorda come assoluta la scadenza attuale (quella del login).
+    /// </summary>
+    public static bool CapRenewal(AuthenticationProperties properties, DateTimeOffset now)
+    {
+        DateTimeOffset? absolute = properties.Items.TryGetValue(Key, out var saved)
+            && DateTimeOffset.TryParse(saved, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed)
+            ? parsed
+            : properties.ExpiresUtc;
+        if (absolute is null)
+        {
+            return true;
+        }
+
+        if (absolute <= now)
+        {
+            return false;
+        }
+
+        properties.Items[Key] = absolute.Value.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        // Il rinnovo calcola la nuova scadenza come "adesso + (scadenza - emissione)": così resta quella assoluta.
+        properties.IssuedUtc = now;
+        properties.ExpiresUtc = absolute;
+        return true;
     }
 }
 

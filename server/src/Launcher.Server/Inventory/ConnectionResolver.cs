@@ -16,7 +16,8 @@ public sealed record ResolvedConnection(
     IReadOnlyList<string> Issues,
     string? Url = null,
     SavedOptions? Options = null,
-    bool DirectOnly = false)
+    bool DirectOnly = false,
+    bool HostFromHudu = true)
 {
     public bool IsWeb => Protocol is ConnectionProtocol.Http or ConnectionProtocol.Https;
 
@@ -30,6 +31,7 @@ public sealed record ResolvedConnection(
     public bool CanConnect => CanConnectDirect && GatewayPeerId is not null;
 
     // DirectOnly: scelta esplicita (connessione, cliente o RustDesk spento) di collegarsi solo in diretta.
+    // HostFromHudu: l'indirizzo viene da Hudu (IPAM, campi dell'asset, console): solo allora parte la credenziale.
 
     /// <summary>Collegabile direttamente (tecnico dal cliente o in VPN): bastano indirizzo e porta.</summary>
     public bool CanConnectDirect => Host is not null && Port > 0;
@@ -160,6 +162,7 @@ public static class ConnectionResolver
         var companyGatewaySource = companySetting?.GatewayPeerId is not null ? "predefinito del cliente" : "Hudu, cliente";
 
         var connections = new List<ResolvedConnection>();
+        var huduHosts = HuduHosts(asset);
 
         // --- Connessione principale ---
         var protocol = setting?.Protocol ?? GuessProtocol(asset.OperatingSystem, layout, ownPeer);
@@ -223,7 +226,7 @@ public static class ConnectionResolver
         var (passwordId, passwordIssue) = noPassword ? (null, null) : ResolvePassword(setting?.PasswordId, asset, ctx);
         connections.Add(Build(PrimaryKey, Label(protocol), protocol, host, port, gateway, gatewaySource, passwordId, passwordIssue, ctx, hostIssue,
             webUrl?.AbsoluteUri, new SavedOptions(setting?.RdpOptions, setting?.WebOptions, setting?.DatabaseName, setting?.DatabaseKind),
-            directOnly, credentialOptional: noPassword));
+            directOnly, credentialOptional: noPassword, huduHosts: huduHosts));
 
         // --- Console fuori banda (iDRAC/iLO/IPMI): suggerita dal campo di Hudu, modificabile dai tecnici ---
         var extrasOfAsset = ctx.Extras[asset.Id].ToList();
@@ -237,7 +240,7 @@ public static class ConnectionResolver
                 : (null, (string?)null);
             connections.Add(Build(ConsoleKey, string.IsNullOrWhiteSpace(consoleRow?.Label) ? "Console" : consoleRow.Label, console.Protocol, console.Host,
                 console.Port, consoleGateway, consoleSource, consolePasswordId, consolePasswordIssue, ctx, url: console.Url,
-                options: Options(consoleRow), directOnly: consoleDirect));
+                options: Options(consoleRow), directOnly: consoleDirect, huduHosts: huduHosts));
         }
 
         // --- Connessioni aggiuntive definite dai tecnici ---
@@ -269,7 +272,7 @@ public static class ConnectionResolver
                 : (WebProtocol(extraUrl), extraUrl.Port);
             connections.Add(Build(ExtraPrefix + extra.Id, extra.Label, extraProtocol, extraHost, extraPort,
                 extraGateway, extraSource, extraPasswordId, extraPasswordIssue, ctx, url: extraUrl?.AbsoluteUri, options: Options(extra),
-                directOnly: extraDirect));
+                directOnly: extraDirect, huduHosts: huduHosts));
         }
 
         return new ResolvedAsset(asset, companyName, setting, connections, ctx.Favorites.Contains(asset.Id));
@@ -303,6 +306,41 @@ public static class ConnectionResolver
         return companyGateway is not null
             ? (companyGateway, companyGatewaySource, false)
             : (primaryGateway, primarySource, primaryDirectOnly);
+    }
+
+    /// <summary>
+    /// Indirizzi dell'asset che vengono da Hudu: IP e FQDN dell'IPAM, IP e hostname dei campi del layout,
+    /// console, e localhost (dispositivo che è il proprio jump host). Solo verso questi si invia la credenziale
+    /// e solo questi si possono scegliere per le connessioni aggiuntive e la console.
+    /// </summary>
+    public static IReadOnlySet<string> HuduHosts(CachedAsset asset)
+    {
+        var hosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { SelfHost, "127.0.0.1", "::1" };
+        foreach (var ip in asset.IpamList())
+        {
+            hosts.Add(ip);
+        }
+
+        foreach (var line in (asset.IpamFqdns ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var fqdn = line.Split(' ', 2) is [_, var value] ? value.Trim() : null;
+            if (fqdn is null)
+            {
+                continue;
+            }
+
+            hosts.Add(fqdn.Contains("://", StringComparison.Ordinal) && Uri.TryCreate(fqdn, UriKind.Absolute, out var url) ? url.Host.Trim('[', ']') : fqdn);
+        }
+
+        foreach (var value in new[] { asset.PrimaryIp, asset.Hostname, HuduConsole(asset)?.Host })
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                hosts.Add(value.Trim());
+            }
+        }
+
+        return hosts;
     }
 
     private static SavedOptions Options(ExtraConnection? row) =>
@@ -379,8 +417,10 @@ public static class ConnectionResolver
     private static ResolvedConnection Build(
         string key, string label, ConnectionProtocol protocol, string? host, int port,
         string? gateway, string? gatewaySource, int? passwordId, string? passwordIssue, ResolutionContext ctx, string? hostIssue = null,
-        string? url = null, SavedOptions? options = null, bool directOnly = false, bool credentialOptional = false)
+        string? url = null, SavedOptions? options = null, bool directOnly = false, bool credentialOptional = false,
+        IReadOnlySet<string>? huduHosts = null)
     {
+        var hostFromHudu = host is null || huduHosts is null || huduHosts.Contains(host);
         var issues = new List<string>();
         if (host is null)
         {
@@ -429,8 +469,15 @@ public static class ConnectionResolver
             issues.Add("Nessuna credenziale associata");
         }
 
+        if (!hostFromHudu && password is not null)
+        {
+            // Indirizzo scritto a mano e non presente in Hudu: la password dell'asset non deve poter
+            // finire su un host qualsiasi. Si collega lo stesso, la credenziale si inserisce a mano.
+            issues.Add("Indirizzo non presente in Hudu: la credenziale non viene inviata (caricalo nell'IPAM dell'asset)");
+        }
+
         return new ResolvedConnection(key, label, protocol, host, port, gateway, gatewaySource, password?.Id, password?.Name, password?.Username, issues, url,
-            options, directOnly || !ctx.RustDeskEnabled);
+            options, directOnly || !ctx.RustDeskEnabled, hostFromHudu);
     }
 
     /// <summary>
