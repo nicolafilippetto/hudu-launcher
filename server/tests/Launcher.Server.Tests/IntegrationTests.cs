@@ -988,6 +988,11 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
             Assert.DoesNotContain("Nessun gateway RustDesk", row, StringComparison.Ordinal);
 
             // Anche chiedendo il jump host, il biglietto è per la connessione diretta.
+            // Le altre connessioni restano con il menu jump host / diretta (attributo a "false", non vuoto).
+            var companyPage = await client.GetStringAsync(new Uri("/?c=1", UriKind.Relative), ct);
+            Assert.Matches("data-connect=\"10\"[^>]*data-direct-only=\"false\"", companyPage.Replace("\n", " ", StringComparison.Ordinal).Replace("\r", " ", StringComparison.Ordinal));
+            Assert.DoesNotContain("data-direct-only=\"\"", companyPage, StringComparison.Ordinal);
+
             var connect = await PostApiAsync(client, "/api/connect", new { assetId = 40, key = "primary", mode = "gateway" });
             Assert.Equal(HttpStatusCode.OK, connect.StatusCode);
             var url = new Uri((await connect.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("url").GetString()!);

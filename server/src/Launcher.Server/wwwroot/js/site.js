@@ -393,7 +393,7 @@
 
     function connectWith(button, anchor) {
         // RustDesk spento, o connessione/cliente "senza gateway": esiste solo la diretta, niente menu.
-        if (document.body.getAttribute("data-rustdesk") === "off" || button.hasAttribute("data-direct-only")) {
+        if (document.body.getAttribute("data-rustdesk") === "off" || button.getAttribute("data-direct-only") === "true") {
             startConnection(button, "direct", anchor);
         } else {
             openConnectMenu(button, anchor);
