@@ -604,16 +604,21 @@ public sealed class WebLoginScriptTests
         var script = WebLoginScript.Fill("iDRAC.local", "admin", password);
         Assert.DoesNotContain(password, script, StringComparison.Ordinal);
         Assert.Contains(System.Text.Json.JsonSerializer.Serialize(password), script, StringComparison.Ordinal);
-        Assert.EndsWith("(\"idrac.local\", \"admin\", " + System.Text.Json.JsonSerializer.Serialize(password) + ", true)", script, StringComparison.Ordinal);
+        Assert.EndsWith("(\"idrac.local\", \"admin\", " + System.Text.Json.JsonSerializer.Serialize(password) + ", true, \"\")", script, StringComparison.Ordinal);
     }
 
     [Fact]
+    public void Otp_code_is_passed_as_a_json_string() =>
+        Assert.EndsWith("(\"vcsa.iess.local\", \"root\", \"x\", true, \"123456\")", WebLoginScript.Fill("vcsa.iess.local", "root", "x", "123456"), StringComparison.Ordinal);
+
+    [Fact]
     public void Detection_carries_no_credentials() =>
-        Assert.EndsWith("(\"fe80::1\", \"\", \"\", false)", WebLoginScript.Detect("[FE80::1]"), StringComparison.Ordinal);
+        Assert.EndsWith("(\"fe80::1\", \"\", \"\", false, \"\")", WebLoginScript.Detect("[FE80::1]"), StringComparison.Ordinal);
 
     [Theory]
     [InlineData("\"both\"", WebLoginFill.Filled)]
     [InlineData("\"user\"", WebLoginFill.UserOnly)]
+    [InlineData("\"otp\"", WebLoginFill.Otp)]
     [InlineData("\"host\"", WebLoginFill.OtherHost)]
     [InlineData("\"none\"", WebLoginFill.NoForm)]
     [InlineData("null", WebLoginFill.NoForm)]
@@ -746,6 +751,32 @@ public sealed class TnsNamesTests
     [InlineData("")]
     public void Refuses_names_that_would_inject_tns_syntax(string name) =>
         Assert.Throws<ArgumentException>(() => TnsNames.Render(First with { DatabaseName = name }));
+}
+
+public sealed class PageHostRoutingTests
+{
+    [Fact]
+    public void Page_name_goes_into_the_tunnel_towards_the_ip()
+    {
+        var target = new TargetInfo("172.16.27.20", 443);
+        var route = WebRoutes.For(target, SessionEndpoint.ForTunnel(52702), "vcsa.iess.local");
+
+        // Il nome della pagina e l'IP vanno entrambi nel tunnel (porta locale), senza DNS.
+        Assert.Equal(new ProxyRoute("127.0.0.1", 52702), route("vcsa.iess.local", 443));
+        Assert.Equal(new ProxyRoute("127.0.0.1", 52702), route("172.16.27.20", 443));
+        // Altri host restano fuori dal tunnel; altre porte dell'asset non passano dal tunnel.
+        Assert.Equal(new ProxyRoute("cdn.example.com", 443), route("cdn.example.com", 443));
+        Assert.Null(route("vcsa.iess.local", 8080));
+    }
+
+    [Fact]
+    public void Connection_info_exposes_the_page_host()
+    {
+        var info = new ConnectionInfo(ConnectionProtocol.Https, "vcsa", "Cliente", "Web", new GatewayInfo("123", "x"), new TargetInfo("172.16.27.20", 443),
+            null, "alias", null, Web: new WebOptions("https://vcsa.iess.local/ui"));
+        Assert.Equal("vcsa.iess.local", info.PageHost);
+        Assert.Equal("172.16.27.20", (info with { Web = null }).PageHost);
+    }
 }
 
 public sealed class WinboxCommandTests

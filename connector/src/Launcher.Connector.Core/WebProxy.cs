@@ -15,9 +15,13 @@ public sealed record ProxyRoute(string Host, int Port);
 /// </summary>
 public static class WebRoutes
 {
-    public static Func<string, int, ProxyRoute?> For(TargetInfo target, SessionEndpoint endpoint) => (host, port) =>
+    /// <param name="pageHost">
+    /// Nome della pagina (FQDN) se diverso dall'IP della destinazione: anche lui va nel tunnel, verso l'IP,
+    /// senza chiedere il DNS né al PC né al jump host.
+    /// </param>
+    public static Func<string, int, ProxyRoute?> For(TargetInfo target, SessionEndpoint endpoint, string? pageHost = null) => (host, port) =>
     {
-        if (!SameHost(host, target.Host))
+        if (!SameHost(host, target.Host) && (pageHost is null || !SameHost(host, pageHost)))
         {
             return new ProxyRoute(host, port);
         }

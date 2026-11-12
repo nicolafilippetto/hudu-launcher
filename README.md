@@ -58,8 +58,11 @@ Ogni connessione, e ogni credenziale consegnata, finisce nel registro accessi de
   indicare "nessun gateway" per una connessione o per un intero cliente senza RustDesk (solo
   connessioni dirette, senza avvisi), e "nessuna credenziale" quando va inserita a mano. RustDesk è
   facoltativo: senza, il portale offre solo la connessione diretta (dalla rete del cliente o in VPN).
-- **Indirizzi dall'IPAM di Hudu**, con segnalazione degli asset senza IP o con più IP da scegliere;
-  l'FQDN dell'IPAM diventa l'indirizzo delle pagine web.
+- **Indirizzi dall'IPAM di Hudu**, con segnalazione degli asset senza IP o con più IP da scegliere.
+  Il tunnel va sempre all'IP (il jump host non deve risolvere nomi); nel browser integrato la pagina
+  si apre con l'FQDN dell'IPAM o con il nome indicato, così certificato e nome tornano (vCenter, iDRAC).
+- **Accesso alle pagine web** con la credenziale impostata sulla connessione (senza elenco da scegliere)
+  e il **codice OTP** calcolato dal portale dal segreto salvato in Hudu.
 - **Credenziali solo da Hudu**: si sceglie tra le password assegnate all'asset o collegate come
   *related*; i collegamenti si correggono in Hudu, non nel portale.
 - **Editor a schede** per asset: connessione principale, connessioni aggiuntive e console suggerita da

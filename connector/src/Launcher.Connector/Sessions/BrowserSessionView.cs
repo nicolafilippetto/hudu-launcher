@@ -119,7 +119,8 @@ public sealed class BrowserSessionView : ISessionView
 
     public async Task StartAsync()
     {
-        _proxy = new Socks5Proxy(WebRoutes.For(_info.Target, _endpoint), Log.Warn);
+        // Nel tunnel l'IP della destinazione e anche il nome della pagina (FQDN), verso lo stesso IP.
+        _proxy = new Socks5Proxy(WebRoutes.For(_info.Target, _endpoint, _info.PageHost), Log.Warn);
         _proxy.Start();
         _environment = await CreateEnvironmentAsync();
         await _web.EnsureCoreWebView2Async(_environment);
@@ -260,7 +261,7 @@ public sealed class BrowserSessionView : ISessionView
         StateChanged?.Invoke();
         try
         {
-            if (!Uri.TryCreate(core.Source, UriKind.Absolute, out var page) || !WebRoutes.SameHost(page.Host, _info.Target.Host))
+            if (!Uri.TryCreate(core.Source, UriKind.Absolute, out var page) || !IsAssetHost(page.Host))
             {
                 SetStatus("La pagina non è sull'indirizzo dell'asset: accesso non compilato");
                 return;
@@ -275,7 +276,7 @@ public sealed class BrowserSessionView : ISessionView
 
             SetStatus($"Accesso con {candidate.Name}…");
             var credential = await _fetchLogin(candidate.Id, _cts.Token);
-            var script = WebLoginScript.Fill(_info.Target.Host, credential.Username, credential.Password);
+            var script = WebLoginScript.Fill(page.Host, credential.Username, credential.Password, credential.Otp);
             var result = WebLoginFill.NoForm;
             foreach (var target in targets)
             {
@@ -290,6 +291,7 @@ public sealed class BrowserSessionView : ISessionView
             {
                 WebLoginFill.Filled => $"Accesso compilato con {candidate.Name}: conferma nella pagina",
                 WebLoginFill.UserOnly => "Utente compilato: alla schermata della password premi di nuovo Accesso",
+                WebLoginFill.Otp => $"Codice OTP compilato (vale ancora {credential.OtpSecondsLeft ?? 30} secondi): conferma nella pagina",
                 _ => "Modulo di accesso non riconosciuto: compila a mano",
             });
         }
@@ -315,7 +317,7 @@ public sealed class BrowserSessionView : ISessionView
     /// <summary>Pagina e riquadri sull'host dell'asset che hanno un modulo di accesso.</summary>
     private async Task<List<Func<string, Task<string>>>> LoginTargetsAsync()
     {
-        var detect = WebLoginScript.Detect(_info.Target.Host);
+        var detect = WebLoginScript.Detect(PageHostNow());
         var candidates = new List<Func<string, Task<string>>> { script => Core!.ExecuteScriptAsync(script) };
         candidates.AddRange(_frames.ToList().Select(frame => (Func<string, Task<string>>)(script => frame.ExecuteScriptAsync(script))));
         var found = new List<Func<string, Task<string>>>();
@@ -323,7 +325,7 @@ public sealed class BrowserSessionView : ISessionView
         {
             try
             {
-                if (WebLoginScript.Parse(await target(detect)) is WebLoginFill.Filled or WebLoginFill.UserOnly)
+                if (WebLoginScript.Parse(await target(detect)) is WebLoginFill.Filled or WebLoginFill.UserOnly or WebLoginFill.Otp)
                 {
                     found.Add(target);
                 }
@@ -365,7 +367,7 @@ public sealed class BrowserSessionView : ISessionView
     /// </summary>
     private void OnCertificateError(object? sender, CoreWebView2ServerCertificateErrorDetectedEventArgs e)
     {
-        if (!Uri.TryCreate(e.RequestUri, UriKind.Absolute, out var uri) || !WebRoutes.SameHost(uri.Host, _info.Target.Host))
+        if (!Uri.TryCreate(e.RequestUri, UriKind.Absolute, out var uri) || !IsAssetHost(uri.Host))
         {
             e.Action = CoreWebView2ServerCertificateErrorAction.Cancel;
             return;
@@ -433,6 +435,13 @@ public sealed class BrowserSessionView : ISessionView
             }
         }
     }
+
+    /// <summary>Host dell'asset: l'IP della destinazione o il nome della pagina, che nel tunnel portano allo stesso IP.</summary>
+    private bool IsAssetHost(string host) => WebRoutes.SameHost(host, _info.Target.Host) || WebRoutes.SameHost(host, _info.PageHost);
+
+    /// <summary>Host della pagina aperta adesso, se è dell'asset; altrimenti quello indicato dal portale.</summary>
+    private string PageHostNow() =>
+        Core is { } core && Uri.TryCreate(core.Source, UriKind.Absolute, out var page) && IsAssetHost(page.Host) ? page.Host : _info.PageHost;
 
     private async Task ForgetRejectionAsync(string fingerprint, Task<bool> answer)
     {

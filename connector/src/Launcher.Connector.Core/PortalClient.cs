@@ -16,7 +16,8 @@ public sealed record GatewayInfo(string Id, string? Password, string? ClientPath
 
 public sealed record TargetInfo(string Host, int Port);
 
-public sealed record CredentialInfo(string? Username, string? Password);
+/// <param name="Otp">Codice OTP del momento (calcolato dal portale dal segreto in Hudu), solo per l'accesso web.</param>
+public sealed record CredentialInfo(string? Username, string? Password, string? Otp = null, int? OtpSecondsLeft = null);
 
 /// <summary>
 /// Opzioni di Desktop remoto decise nel portale (predefiniti dell'admin + eventuali override dell'asset).
@@ -138,6 +139,12 @@ public sealed record ConnectionInfo(
 
     /// <summary>Opzioni della pagina web; dai portali precedenti arriva null e si usano i predefiniti.</summary>
     public WebOptions WebOrDefault => Web ?? WebOptions.For(Protocol == ConnectionProtocol.Https ? "https" : "http", Target);
+
+    /// <summary>
+    /// Host della pagina nel browser: l'FQDN quando il portale lo indica (il tunnel va comunque all'IP di
+    /// <see cref="Target"/>), altrimenti l'host della destinazione.
+    /// </summary>
+    public string PageHost => Uri.TryCreate(WebOrDefault.Url, UriKind.Absolute, out var url) ? url.Host.Trim('[', ']') : Target.Host;
 
     /// <summary>Descrizione del percorso, per i testi della scheda.</summary>
     public string Route => Gateway is null ? "connessione diretta" : $"tramite RustDesk {Gateway.Id}";

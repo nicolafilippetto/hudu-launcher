@@ -276,6 +276,13 @@ await using (var scope = app.Services.CreateAsyncScope())
     {
         app.Logger.LogInformation("Aggiornamento 1.5.3: {Count} asset con RustDesk installato ora hanno gateway e indirizzo localhost scritti nel portale", frozen);
     }
+
+    // 1.5.7: le aggiuntive salvate con un indirizzo e senza IP ricevono l'IP del tunnel.
+    var addresses = await ExtraAddressMigration.RunOnceAsync(scope.ServiceProvider.GetRequiredService<AppDbContext>(), DateTimeOffset.UtcNow, CancellationToken.None);
+    if (addresses > 0)
+    {
+        app.Logger.LogInformation("Aggiornamento 1.5.7: {Count} connessioni aggiuntive con indirizzo ora hanno l'IP del tunnel", addresses);
+    }
 }
 settingsService.Changed += keys =>
 {

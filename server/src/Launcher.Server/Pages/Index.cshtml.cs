@@ -20,6 +20,8 @@ public sealed class ExtraForm
     public string? Gateway { get; set; }
     public bool NoGateway { get; set; }
     public bool Remove { get; set; }
+    /// <summary>Nome per il browser (FQDN o indirizzo completo), solo per le pagine web: il tunnel resta sull'IP.</summary>
+    public string? Address { get; set; }
     public Dictionary<string, string?> Rdp { get; set; } = [];
     public Dictionary<string, string?> Web { get; set; } = [];
     public string? DatabaseName { get; set; }
@@ -721,32 +723,38 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
             return null;
         }
 
-        string? host = null;
-        int? port = null;
+        // IP dall'IPAM: destinazione del tunnel (vuoto = come la principale, o come in Hudu per la console).
+        var host = ParseHost(extra.Host, label, errors);
+        var port = ParsePort(extra.Port, label, errors);
+        // Nome per il browser, solo per le pagine web: FQDN o indirizzo completo. Il traffico va comunque
+        // all'IP del tunnel, il nome serve a certificato e indirizzo della pagina (vCenter, iDRAC).
         string? url = null;
-        // Nel campo host si può scrivere anche un indirizzo completo: vale per le pagine web.
-        if (extra.Host?.Contains("://", StringComparison.Ordinal) == true)
+        var address = extra.Address?.Trim();
+        if (!string.IsNullOrEmpty(address) && protocol is null or ConnectionProtocol.Http or ConnectionProtocol.Https)
         {
-            var (parsedUrl, urlError) = WebUrls.Parse(extra.Host);
-            if (urlError is not null)
+            if (address.Contains("://", StringComparison.Ordinal))
             {
-                errors.Add($"{label}: {urlError}.");
+                var (parsedUrl, urlError) = WebUrls.Parse(address);
+                if (urlError is not null)
+                {
+                    errors.Add($"{label}: {urlError}.");
+                    return null;
+                }
+
+                url = parsedUrl!.AbsoluteUri;
+                protocol = parsedUrl.Scheme == Uri.UriSchemeHttp ? ConnectionProtocol.Http : ConnectionProtocol.Https;
+                port = parsedUrl.Port;
+            }
+            else if (HostParser.IsValidHost(address))
+            {
+                var https = protocol != ConnectionProtocol.Http;
+                url = WebUrls.Default(https, address, port ?? (https ? 443 : 80));
+            }
+            else
+            {
+                errors.Add($"{label}: \"{address}\" non è un nome valido per il browser.");
                 return null;
             }
-
-            if (protocol is not (null or ConnectionProtocol.Http or ConnectionProtocol.Https))
-            {
-                errors.Add($"{label}: un indirizzo completo (URL) vale solo per le connessioni web.");
-                return null;
-            }
-
-            url = parsedUrl!.AbsoluteUri;
-            protocol = parsedUrl.Scheme == Uri.UriSchemeHttp ? ConnectionProtocol.Http : ConnectionProtocol.Https;
-        }
-        else
-        {
-            host = ParseHost(extra.Host, label, errors);
-            port = ParsePort(extra.Port, label, errors);
         }
 
         if (protocol == ConnectionProtocol.Tcp && port is null)
@@ -754,10 +762,10 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
             errors.Add($"{label}: indicare la porta del servizio.");
         }
 
-        // Solo indirizzi di Hudu per l'asset (o quello già salvato su questa connessione).
+        // Solo IP che Hudu associa all'asset (o quello già salvato su questa connessione).
         var saved = rules.Saved.FirstOrDefault(r => isConsole ? r.IsConsole : r.Id == extra.Id && !r.IsConsole);
-        var chosenHost = url is not null ? new Uri(url).Host.Trim('[', ']') : host;
-        var savedHost = saved?.Url is { } savedUrl && Uri.TryCreate(savedUrl, UriKind.Absolute, out var savedUri) ? savedUri.Host.Trim('[', ']') : saved?.Host;
+        var chosenHost = host;
+        var savedHost = saved?.Host;
         if (chosenHost is not null && !rules.HuduHosts.Contains(chosenHost)
             && !string.Equals(chosenHost, savedHost, StringComparison.OrdinalIgnoreCase))
         {

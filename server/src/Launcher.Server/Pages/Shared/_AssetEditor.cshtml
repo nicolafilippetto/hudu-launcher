@@ -25,14 +25,25 @@
         : primary?.DirectOnly == true ? "Cliente senza RustDesk: solo diretta"
         : "Da scegliere (nessun gateway del cliente)";
     var consoleHidden = Model.ConsoleRow?.Hidden == true;
-    // Aggiuntive senza host: stesso indirizzo della principale (per le pagine web l'FQDN dell'IPAM, se c'è).
+    // Aggiuntive senza IP scelto: stesso IP della principale.
     var primaryIp = setting?.Host ?? autoHost;
-    var extraHostHint = primaryIp is null
-        ? "Indirizzo del dispositivo"
-        : $"Vuoto = {primaryIp}, come la principale" + (fqdn is not null && setting?.WebAddress != ConnectionResolver.WebAddressIp ? $" (pagine web: {fqdn})" : "");
+    // IP salvato che non è più (o non è mai stato) nell'IPAM: resta visibile per poterlo cambiare.
+    string? Legacy(string? saved) =>
+        saved is not null && !ipam.Contains(saved, StringComparer.OrdinalIgnoreCase)
+            && !string.Equals(saved, ConnectionResolver.SelfHost, StringComparison.OrdinalIgnoreCase) ? saved : null;
 }
 @functions {
     private const string NoneValue = Launcher.Server.Pages.IndexModel.NoneValue;
+    private const string NameHint = "Vuoto = FQDN dall'IPAM · es. vcsa.cliente.local o https://vcsa.cliente.local/ui";
+
+    /// <summary>Nomi suggeriti per il browser: FQDN dell'IPAM e hostname dell'asset in Hudu.</summary>
+    private static IEnumerable<string> BrowserNames(CachedAsset asset) =>
+        (asset.IpamFqdns ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Split(' ', 2) is [_, var name] ? name.Trim() : null)
+            .Append(asset.Hostname)
+            .OfType<string>()
+            .Where(name => name.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
 
     private static string PasswordLabel(CachedPassword p) =>
         string.IsNullOrWhiteSpace(p.Username) ? p.Name : $"{p.Name} — {p.Username}";
@@ -228,11 +239,30 @@
                     <input class="input mono" name="@(prefix)Port" value="@extra.Port" placeholder="predefinita" inputmode="numeric" autocomplete="off" data-port-input />
                 </label>
             </div>
-            <label class="field">
-                <span data-for="Http Https">Host o indirizzo completo (anche https://…)</span>
-                <span data-not-for="Http Https">Host o IP</span>
-                <input class="input mono" name="@(prefix)Host" value="@(extra.Url ?? extra.Host)" placeholder="@extraHostHint" list="ipam-list" spellcheck="false" />
-            </label>
+            <div class="grid grid-2">
+                <label class="field">
+                    <span>Indirizzo IP (dall'IPAM): destinazione del tunnel</span>
+                    <select class="input mono" name="@(prefix)Host">
+                        <option value="">Come la principale (@(primaryIp ?? "nessun IP"))</option>
+                        @foreach (var ip in ipam)
+                        {
+                            <option value="@ip" selected="@(string.Equals(extra.Host, ip, StringComparison.OrdinalIgnoreCase))">@ip</option>
+                        }
+                        @if (Info.RustDeskEnabled)
+                        {
+                            <option value="@ConnectionResolver.SelfHost" selected="@(string.Equals(extra.Host, ConnectionResolver.SelfHost, StringComparison.OrdinalIgnoreCase))">localhost: RustDesk è sul dispositivo</option>
+                        }
+                        @if (Legacy(extra.Host) is { } savedIp)
+                        {
+                            <option value="@savedIp" selected>@savedIp (non nell'IPAM)</option>
+                        }
+                    </select>
+                </label>
+                <label class="field" data-for="Http Https">
+                    <span>Nome per il browser (facoltativo)</span>
+                    <input class="input mono" name="@(prefix)Address" value="@(extra.Url)" placeholder="@NameHint" list="name-list" spellcheck="false" />
+                </label>
+            </div>
             <div class="grid grid-2">
                 <label class="field" data-for="Rdp Ssh Telnet Winbox Http Https Oracle">
                     <span data-for="Rdp Ssh Telnet Winbox">Credenziale (da Hudu, inviata al Launcher)</span>
@@ -301,11 +331,30 @@
                     <input class="input mono" name="Console.Port" value="@row?.Port" placeholder="@(hudu?.Port.ToString() ?? "predefinita")" inputmode="numeric" autocomplete="off" data-port-input />
                 </label>
             </div>
-            <label class="field">
-                <span data-for="Http Https">Host o indirizzo completo (anche https://…)</span>
-                <span data-not-for="Http Https">Host o IP</span>
-                <input class="input mono" name="Console.Host" value="@(row?.Url ?? row?.Host)" placeholder="@(hudu?.Url ?? hudu?.Host ?? "es. https://idrac-srv01.cliente.local/")" list="ipam-list" spellcheck="false" />
-            </label>
+            <div class="grid grid-2">
+                <label class="field">
+                    <span>Indirizzo IP (dall'IPAM): destinazione del tunnel</span>
+                    <select class="input mono" name="Console.Host">
+                        <option value="">Come in Hudu (@(hudu?.Host ?? "nessuna console in Hudu"))</option>
+                        @foreach (var ip in ipam)
+                        {
+                            <option value="@ip" selected="@(string.Equals(row?.Host, ip, StringComparison.OrdinalIgnoreCase))">@ip</option>
+                        }
+                        @if (Info.RustDeskEnabled)
+                        {
+                            <option value="@ConnectionResolver.SelfHost" selected="@(string.Equals(row?.Host, ConnectionResolver.SelfHost, StringComparison.OrdinalIgnoreCase))">localhost: RustDesk è sul dispositivo</option>
+                        }
+                        @if (Legacy(row?.Host) is { } savedIp)
+                        {
+                            <option value="@savedIp" selected>@savedIp (non nell'IPAM)</option>
+                        }
+                    </select>
+                </label>
+                <label class="field" data-for="Http Https">
+                    <span>Nome per il browser (facoltativo)</span>
+                    <input class="input mono" name="Console.Address" value="@(row?.Url)" placeholder="@(hudu?.Url ?? NameHint)" list="name-list" spellcheck="false" />
+                </label>
+            </div>
             <div class="grid grid-2">
                 <label class="field" data-for="Rdp Ssh Telnet Winbox Http Https Oracle">
                     <span data-for="Rdp Ssh Telnet Winbox">Credenziale (da Hudu, inviata al Launcher)</span>
@@ -370,11 +419,26 @@
                     <input class="input mono" name="Extras[__i__].Port" placeholder="predefinita" inputmode="numeric" autocomplete="off" data-port-input />
                 </label>
             </div>
-            <label class="field">
-                <span data-for="Http Https">Host o indirizzo completo (anche https://…)</span>
-                <span data-not-for="Http Https">Host o IP</span>
-                <input class="input mono" name="Extras[__i__].Host" placeholder="@extraHostHint" list="ipam-list" spellcheck="false" />
-            </label>
+            <div class="grid grid-2">
+                <label class="field">
+                    <span>Indirizzo IP (dall'IPAM): destinazione del tunnel</span>
+                    <select class="input mono" name="Extras[__i__].Host">
+                        <option value="">Come la principale (@(primaryIp ?? "nessun IP"))</option>
+                        @foreach (var ip in ipam)
+                        {
+                            <option value="@ip" selected="@(string.Equals((string?)null, ip, StringComparison.OrdinalIgnoreCase))">@ip</option>
+                        }
+                        @if (Info.RustDeskEnabled)
+                        {
+                            <option value="@ConnectionResolver.SelfHost" selected="@(string.Equals((string?)null, ConnectionResolver.SelfHost, StringComparison.OrdinalIgnoreCase))">localhost: RustDesk è sul dispositivo</option>
+                        }
+                    </select>
+                </label>
+                <label class="field" data-for="Http Https">
+                    <span>Nome per il browser (facoltativo)</span>
+                    <input class="input mono" name="Extras[__i__].Address" value="@((string?)null)" placeholder="@NameHint" list="name-list" spellcheck="false" />
+                </label>
+            </div>
             <div class="grid grid-2">
                 <label class="field" data-for="Rdp Ssh Telnet Winbox Http Https Oracle">
                     <span data-for="Rdp Ssh Telnet Winbox">Credenziale (da Hudu, inviata al Launcher)</span>
@@ -408,10 +472,10 @@
             </div>
         </section>
     </template>
-    <datalist id="ipam-list">
-        @foreach (var ip in ipam)
+    <datalist id="name-list">
+        @foreach (var name in BrowserNames(asset))
         {
-            <option value="@ip"></option>
+            <option value="@name"></option>
         }
     </datalist>
 

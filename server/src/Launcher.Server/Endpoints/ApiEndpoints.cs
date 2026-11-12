@@ -65,7 +65,8 @@ public sealed record RedeemResponse(
 /// <summary>Richiesta del Launcher per compilare l'accesso di una pagina web con la credenziale scelta.</summary>
 public sealed record WebLoginRequest(string? Grant, int CredentialId);
 
-public sealed record WebLoginResponse(string? Username, string? Password);
+/// <param name="Otp">Codice OTP del momento, se in Hudu la credenziale ha un segreto OTP (mai il segreto).</param>
+public sealed record WebLoginResponse(string? Username, string? Password, string? Otp = null, int? OtpSecondsLeft = null);
 
 public static class RateLimitPolicies
 {
@@ -344,7 +345,8 @@ public static class ApiEndpoints
                 statusCode: StatusCodes.Status426UpgradeRequired);
         }
 
-        var (response, credentialNote) = await BuildConnectionAsync(asset, connection, ticket.Direct, settings, hudu, inventory, logger, ct);
+        var (response, credentialNote) = await BuildConnectionAsync(asset, connection, ticket.Direct, settings, hudu, inventory, logger, ct,
+            legacyWebTarget: !SplitsWebAddress(LauncherClients.VersionOf(http)));
         if (response.Web is { Login: not "off" } && connection.HostFromHudu)
         {
             // Pagina web: solo nome e utente delle credenziali candidate, più l'autorizzazione per chiedere
@@ -463,9 +465,10 @@ public static class ApiEndpoints
         }
 
         await clients.RecordAsync(grant.Email, http, ct);
+        var otp = Totp.Compute(secret.OtpSecret, DateTimeOffset.UtcNow);
         await audit.WriteAsync(new AuditEntry("web.login", grant.Email, CompanyName: asset.CompanyName, AssetId: asset.Asset.Id,
-            AssetName: asset.Asset.Name, Target: webUrl, Details: $"credenziale: {chosen.Name}"), http, ct);
-        return Results.Ok(new WebLoginResponse(secret.Username, secret.Password));
+            AssetName: asset.Asset.Name, Target: webUrl, Details: $"credenziale: {chosen.Name}" + (otp is null ? "" : " + codice OTP")), http, ct);
+        return Results.Ok(new WebLoginResponse(secret.Username, secret.Password, otp?.Code, otp?.SecondsLeft));
     }
 
     /// <summary>Il Launcher scambia il biglietto offline con le connessioni dirette degli asset scelti.</summary>
@@ -504,7 +507,8 @@ public static class ApiEndpoints
             var notes = new List<string>();
             foreach (var connection in asset.Connections.Where(c => c.CanConnectDirect && LauncherSupports(LauncherClients.VersionOf(http), c.Protocol)))
             {
-                var (response, credentialNote) = await BuildConnectionAsync(asset, connection, direct: true, settings, hudu, inventory, logger, ct);
+                var (response, credentialNote) = await BuildConnectionAsync(asset, connection, direct: true, settings, hudu, inventory, logger, ct,
+                    legacyWebTarget: !SplitsWebAddress(LauncherClients.VersionOf(http)));
                 connections.Add(response);
                 notes.Add($"{connection.Label}: {credentialNote}");
             }
@@ -585,7 +589,7 @@ public static class ApiEndpoints
     /// <summary>Dati di una connessione per il Launcher, con la credenziale letta da Hudu in quel momento.</summary>
     private static async Task<(RedeemResponse Response, string CredentialNote)> BuildConnectionAsync(
         ResolvedAsset asset, ResolvedConnection connection, bool direct, SettingsService settings, HuduClient hudu, InventoryService inventory,
-        ILogger logger, CancellationToken ct)
+        ILogger logger, CancellationToken ct, bool legacyWebTarget = false)
     {
         var gatewayName = direct ? null : await inventory.GetPeerNameAsync(connection.GatewayPeerId!, ct);
         RedeemCredential? credential = null;
@@ -618,7 +622,7 @@ public static class ApiEndpoints
             connection.Label,
             // Connessione diretta: niente jump host e niente password di RustDesk.
             direct ? null : new RedeemGateway(connection.GatewayPeerId!, settings.RustDesk.ConnectionPassword, settings.RustDesk.ClientPath, gatewayName),
-            new RedeemTarget(connection.Host!, connection.Port),
+            new RedeemTarget(TargetHost(connection, legacyWebTarget), connection.Port),
             credential,
             $"launcher-{asset.Asset.Id}-{connection.Key.Replace(':', '-')}",
             warning,
@@ -639,6 +643,20 @@ public static class ApiEndpoints
             : "senza credenziale";
         return (response, note);
     }
+
+    /// <summary>Dalla 1.5.7 il tunnel va all'IP e il nome della pagina viaggia solo nell'indirizzo del browser.</summary>
+    public const string SplitWebAddressVersion = "1.5.7";
+
+    public static bool SplitsWebAddress(string? version) => LauncherVersion.Compare(version, SplitWebAddressVersion + "-ci.0") >= 0;
+
+    /// <summary>
+    /// Destinazione del tunnel: l'IP. I Launcher precedenti instradano nel tunnel solo l'host della
+    /// destinazione, quindi per loro resta il nome della pagina (come prima).
+    /// </summary>
+    public static string TargetHost(ResolvedConnection connection, bool legacyWebTarget) =>
+        legacyWebTarget && connection.WebUrl is { } page && Uri.TryCreate(page, UriKind.Absolute, out var url)
+            ? url.Host.Trim('[', ']')
+            : connection.Host!;
 
     /// <summary>Prima versione del Launcher che apre WinBox, Oracle e i tunnel TCP generici.</summary>
     public const string NewProtocolsVersion = "1.5.2";

@@ -42,6 +42,12 @@ server (se la licenza lo consente), rotazione periodica, alert sugli accessi API
   campi del layout, console di Hudu); gateway scritti a mano solo dalla rubrica RustDesk. La password
   di Hudu parte solo verso indirizzi di Hudu: connessioni salvate prima con un host diverso si aprono
   senza credenziale. Ogni modifica registra host, credenziale e gateway delle connessioni.
+  Il tunnel va sempre all'IP; il "nome per il browser" (FQDN) cambia solo l'indirizzo della pagina: il
+  proxy della scheda porta quel nome nel tunnel verso lo stesso IP, senza DNS, quindi non può far uscire
+  traffico (né password) verso un altro host.
+- **Codici OTP**: se in Hudu la credenziale ha un segreto OTP, il portale calcola il codice del momento
+  (TOTP, RFC 6238) solo quando il tecnico chiede l'accesso web; il segreto non lascia mai il portale e al
+  Launcher arriva solo il codice, valido per pochi secondi. Nel registro `web.login` compare "+ codice OTP".
 - **Credenziale del portale verso Entra**: certificato generato dal portale (RSA 3072, 2 anni); la chiave
   privata è cifrata nel database e non si scarica, in Entra c'è solo il certificato pubblico. Al login il
   portale firma un'asserzione valida 5 minuti invece di inviare un segreto.
