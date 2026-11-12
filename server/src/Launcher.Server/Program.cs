@@ -65,7 +65,9 @@ builder.Services.AddSingleton<IConfigureOptions<KeyManagementOptions>>(sp =>
     new ConfigureOptions<KeyManagementOptions>(o => o.XmlEncryptor = new MasterKeyXmlEncryptor(sp.GetRequiredService<MasterKey>())));
 
 // --- Database ---
-var connectionString = $"Data Source={Path.Combine(launcherOptions.DataDirectory, "launcher.db")};Cache=Shared;Pooling=True";
+// Niente Cache=Shared: con la cache condivisa SQLite blocca le letture finché una transazione di scrittura
+// (es. la sincronizzazione con Hudu) non finisce. Con WAL e connessioni separate si leggono i dati precedenti.
+var connectionString = $"Data Source={Path.Combine(launcherOptions.DataDirectory, "launcher.db")};Pooling=True";
 builder.Services.AddDbContextFactory<AppDbContext>(o => o.UseSqlite(connectionString));
 builder.Services.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<AppDbContext>>().CreateDbContext());
 

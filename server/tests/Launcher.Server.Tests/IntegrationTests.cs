@@ -988,6 +988,25 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
             Assert.DoesNotContain("Nessun gateway RustDesk", row, StringComparison.Ordinal);
 
             // Anche chiedendo il jump host, il biglietto è per la connessione diretta.
+            // Modifica in blocco "credenziale automatica": annulla anche il "Nessuna" scelto prima.
+            using (var bulk = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["__RequestVerificationToken"] = token,
+                ["AssetIds"] = "40",
+                ["PasswordId"] = "auto",
+            }))
+            {
+                var bulkResponse = await client.PostAsync(new Uri("/?handler=Bulk", UriKind.Relative), bulk, ct);
+                Assert.Equal(HttpStatusCode.OK, bulkResponse.StatusCode);
+            }
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var setting = await scope.ServiceProvider.GetRequiredService<AppDbContext>().AssetSettings.AsNoTracking().SingleAsync(x => x.AssetId == 40, ct);
+                Assert.False(setting.NoPassword);
+                Assert.True(setting.NoGateway);
+            }
+
             // Le altre connessioni restano con il menu jump host / diretta (attributo a "false", non vuoto).
             var companyPage = await client.GetStringAsync(new Uri("/?c=1", UriKind.Relative), ct);
             Assert.Matches("data-connect=\"10\"[^>]*data-direct-only=\"false\"", companyPage.Replace("\n", " ", StringComparison.Ordinal).Replace("\r", " ", StringComparison.Ordinal));

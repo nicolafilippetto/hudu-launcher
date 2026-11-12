@@ -226,7 +226,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         // Si salvano solo le opzioni del protocollo effettivo (quello scelto o, se automatico, quello dedotto
         // come mostra l'editor): le sezioni degli altri protocolli sono nascoste e non devono restare attive.
         var layout = await db.LayoutConfigs.AsNoTracking().FirstOrDefaultAsync(l => l.LayoutId == asset.LayoutId, ct);
-        var effective = protocol ?? ConnectionResolver.GuessProtocol(asset.OperatingSystem, layout, null);
+        var effective = protocol ?? ConnectionResolver.GuessProtocol(asset.OperatingSystem, layout, await OwnPeerAsync(asset, ct));
         var rdp = effective == ConnectionProtocol.Rdp ? RdpOptionCatalog.Clean(form.Rdp) : new Dictionary<string, string>();
         var web = effective is ConnectionProtocol.Http or ConnectionProtocol.Https ? WebOptionCatalog.Catalog.Clean(form.Web) : new Dictionary<string, string>();
         if (effective == ConnectionProtocol.Tcp)
@@ -508,7 +508,9 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
 
             if (passwordMode.Length > 0)
             {
+                // Credenziale scelta o automatica: annulla anche un "Nessuna" impostato prima.
                 setting.PasswordId = passwordId;
+                setting.NoPassword = false;
             }
 
             if (protocolMode.Length > 0)
@@ -658,7 +660,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         var extras = rows.Where(e => !e.IsConsole).ToList();
         var consoleRow = rows.FirstOrDefault(e => e.IsConsole);
         var layout = await db.LayoutConfigs.AsNoTracking().FirstOrDefaultAsync(l => l.LayoutId == resolved.Asset.LayoutId, ct);
-        var guessed = ConnectionResolver.GuessProtocol(resolved.Asset.OperatingSystem, layout, null);
+        var guessed = ConnectionResolver.GuessProtocol(resolved.Asset.OperatingSystem, layout, await OwnPeerAsync(resolved.Asset, ct));
         var linked = await inventory.GetLinkedPasswordsAsync(resolved.Asset, ct);
         var chosen = new[] { resolved.Setting?.PasswordId }.Concat(rows.Select(e => e.PasswordId)).OfType<int>().ToHashSet();
         var passwords = linked
@@ -667,6 +669,15 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         return new EditorViewModel(resolved, passwords, extras, guessed, errors, settings.RdpDefaults, settings.WebDefaults,
             consoleRow, ConnectionResolver.HuduConsole(resolved.Asset));
     }
+
+    /// <summary>
+    /// Dispositivo RustDesk con lo stesso nome dell'asset: serve solo a dedurre il protocollo come fa il
+    /// risolutore (l'editor deve mostrare lo stesso "Automatico" che poi si usa).
+    /// </summary>
+    private async Task<CachedPeer?> OwnPeerAsync(CachedAsset asset, CancellationToken ct) =>
+        settings.RustDesk.Enabled
+            ? ConnectionResolver.FindOwnPeer(asset, ConnectionResolver.IndexPeersByName(await inventory.GetPeersAsync(ct)))
+            : null;
 
     /// <summary>Valida la scheda di una connessione aggiuntiva o della console; null se va scartata.</summary>
     private static ParsedExtra? ParseExtra(ExtraForm extra, bool isConsole, List<int> companyPasswords, List<string> errors)

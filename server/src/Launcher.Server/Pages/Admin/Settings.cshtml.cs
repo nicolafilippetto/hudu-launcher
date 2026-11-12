@@ -93,7 +93,7 @@ public sealed class SettingsModel(SettingsService settings, AuditService audit, 
     }
 
     public async Task<IActionResult> OnPostRustDeskAsync(string? apiUrl, string? apiToken, string? addressBook, string? connectionPassword, bool clearPassword,
-        bool enabled, string? clientPath)
+        bool enabled, string? clientPath, bool clearToken = false)
     {
         var path = clientPath?.Trim().Trim('"');
         if (!string.IsNullOrEmpty(path) && !RustDeskSettings.IsValidClientPath(path))
@@ -109,7 +109,7 @@ public sealed class SettingsModel(SettingsService settings, AuditService audit, 
         var values = new Dictionary<string, string?>
         {
             [SettingKeys.RustDeskApiUrl] = apiUrl?.Trim().TrimEnd('/'),
-            [SettingKeys.RustDeskApiToken] = apiToken ?? "",
+            [SettingKeys.RustDeskApiToken] = clearToken ? null : apiToken ?? "",
             [SettingKeys.RustDeskAddressBook] = string.IsNullOrWhiteSpace(addressBook) ? null : addressBook.Trim(),
             [SettingKeys.RustDeskConnectionPassword] = clearPassword ? null : connectionPassword ?? "",
             [SettingKeys.RustDeskEnabled] = enabled.ToString(),

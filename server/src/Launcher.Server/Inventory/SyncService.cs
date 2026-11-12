@@ -53,7 +53,16 @@ public sealed class SyncService(
         {
             if (settings.Hudu.IsConfigured)
             {
-                await RunAsync(null, stoppingToken);
+                try
+                {
+                    await RunAsync(null, stoppingToken);
+                }
+                catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+                {
+                    // Un errore qui (es. database occupato all'avvio) non deve fermare tutto il portale:
+                    // un'eccezione non gestita in un servizio in background arresta l'applicazione.
+                    logger.LogError(ex, "Sincronizzazione automatica non riuscita, si riprova al prossimo giro");
+                }
             }
 
             var interval = TimeSpan.FromMinutes(settings.Hudu.SyncMinutes);
@@ -148,14 +157,15 @@ public sealed class SyncService(
             await db.Companies.ExecuteDeleteAsync(ct);
             await db.Assets.ExecuteDeleteAsync(ct);
             await db.Passwords.ExecuteDeleteAsync(ct);
-            db.Layouts.AddRange(layouts.Select(l => new CachedLayout { Id = l.Id, Name = l.Name, Icon = l.Icon, FieldLabels = string.Join('\n', l.FieldLabels) }));
-            db.Companies.AddRange(companies.Select(c => new CachedCompany { Id = c.Id, Name = c.Name, Nickname = c.Nickname, HuduUrl = c.Url }));
-            db.Assets.AddRange(assets);
-            db.Passwords.AddRange(passwords);
+            // Hudu può restituire lo stesso elemento due volte durante la paginazione: si tiene il primo.
+            db.Layouts.AddRange(layouts.DistinctBy(l => l.Id).Select(l => new CachedLayout { Id = l.Id, Name = l.Name, Icon = l.Icon, FieldLabels = string.Join('\n', l.FieldLabels) }));
+            db.Companies.AddRange(companies.DistinctBy(c => c.Id).Select(c => new CachedCompany { Id = c.Id, Name = c.Name, Nickname = c.Nickname, HuduUrl = c.Url }));
+            db.Assets.AddRange(assets.DistinctBy(a => a.Id));
+            db.Passwords.AddRange(passwords.DistinctBy(p => p.Id));
             if (peers is not null)
             {
                 await db.Peers.ExecuteDeleteAsync(ct);
-                db.Peers.AddRange(peers);
+                db.Peers.AddRange(peers.DistinctBy(p => p.Id));
             }
 
             await db.SaveChangesAsync(ct);
@@ -185,8 +195,16 @@ public sealed class SyncService(
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             logger.LogError(ex, "Sincronizzazione non riuscita");
-            await UpdateStateAsync(s => s.LastError = ex.Message, CancellationToken.None);
-            await audit.WriteAsync(new AuditEntry("sync", requestedBy, Success: false, Details: ex.Message), cancellationToken: CancellationToken.None);
+            try
+            {
+                await UpdateStateAsync(s => s.LastError = ex.Message, CancellationToken.None);
+                await audit.WriteAsync(new AuditEntry("sync", requestedBy, Success: false, Details: ex.Message), cancellationToken: CancellationToken.None);
+            }
+            catch (Exception stateError) when (stateError is DbUpdateException or Microsoft.Data.Sqlite.SqliteException or InvalidOperationException)
+            {
+                logger.LogError(stateError, "Stato della sincronizzazione non salvato");
+            }
+
             return new SyncResult(false, ex.Message);
         }
     }
@@ -242,8 +260,8 @@ public sealed class SyncService(
                 await using var tx = await db.Database.BeginTransactionAsync(ct);
                 await db.Assets.Where(a => a.CompanyId == companyId).ExecuteDeleteAsync(ct);
                 await db.Passwords.Where(p => p.CompanyId == companyId).ExecuteDeleteAsync(ct);
-                db.Assets.AddRange(assets);
-                db.Passwords.AddRange(passwords);
+                db.Assets.AddRange(assets.DistinctBy(a => a.Id));
+                db.Passwords.AddRange(passwords.DistinctBy(p => p.Id));
                 await db.SaveChangesAsync(ct);
                 await tx.CommitAsync(ct);
 
@@ -283,7 +301,7 @@ public sealed class SyncService(
             var cached = await db.Assets.AsNoTracking()
                 .Where(a => a.IpamAddresses != null && (companyId == null || a.CompanyId == companyId))
                 .ToListAsync(ct);
-            var previous = cached.ToDictionary(a => a.Id, a => a.IpamList().Select(ip => new HuduIpAddress(ip, null, null, a.Id, a.CompanyId)).ToList());
+            var previous = cached.ToDictionary(a => a.Id, a => a.IpamList().Select(ip => new HuduIpAddress(ip, null, a.FqdnFor(ip), a.Id, a.CompanyId)).ToList());
             return (previous, "IPAM non letto: " + ex.Message);
         }
     }

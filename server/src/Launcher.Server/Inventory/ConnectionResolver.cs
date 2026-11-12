@@ -203,15 +203,18 @@ public static class ConnectionResolver
         if (IsWebProtocol(protocol) && useFqdn && FqdnUrl(asset, host) is { } fqdn)
         {
             // Pagine web: vale l'FQDN che l'IPAM di Hudu associa all'IP (risolto dal jump host), salvo
-            // la scelta "IP" nell'editor. Se in Hudu c'è un indirizzo completo, decide anche schema e porta.
-            if (fqdn.Url is { } fqdnUrl)
+            // la scelta "IP" nell'editor. Se in Hudu c'è un indirizzo completo, decide anche schema e porta,
+            // ma solo se il tecnico non ha scelto porta o protocollo diversi (come per le aggiuntive).
+            if (fqdn.Url is { } fqdnUrl
+                && (setting?.Port is null || setting.Port == fqdnUrl.Port)
+                && (setting?.Protocol is null || setting.Protocol == WebProtocol(fqdnUrl)))
             {
                 webUrl = fqdnUrl;
                 (protocol, host, port) = (WebProtocol(fqdnUrl), fqdnUrl.Host.Trim('[', ']'), fqdnUrl.Port);
             }
             else
             {
-                host = fqdn.Host;
+                host = fqdn.Url?.Host.Trim('[', ']') ?? fqdn.Host;
             }
         }
 

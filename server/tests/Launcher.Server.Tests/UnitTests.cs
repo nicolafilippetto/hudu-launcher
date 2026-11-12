@@ -116,6 +116,23 @@ public sealed class ConnectionResolverTests
     }
 
     [Fact]
+    public void Port_chosen_by_the_technician_wins_over_the_full_address_in_the_ipam()
+    {
+        var asset = Asset(os: null);
+        asset.IpamFqdns = "10.0.0.10 https://fw.cliente.local:4443/login";
+        var chosen = Context(setting: new AssetSetting { AssetId = 100, Protocol = ConnectionProtocol.Https, Port = 8443 });
+        var free = Context(setting: new AssetSetting { AssetId = 100, Protocol = ConnectionProtocol.Https });
+
+        var withPort = ConnectionResolver.Resolve(asset, chosen).Primary!;
+        Assert.Equal(("fw.cliente.local", 8443, ConnectionProtocol.Https), (withPort.Host, withPort.Port, withPort.Protocol));
+        Assert.Null(withPort.Url);
+
+        // Senza scelta, l'indirizzo completo di Hudu decide porta e percorso, come prima.
+        var fromHudu = ConnectionResolver.Resolve(asset, free).Primary!;
+        Assert.Equal((4443, "https://fw.cliente.local:4443/login"), (fromHudu.Port, fromHudu.Url));
+    }
+
+    [Fact]
     public void Gateway_is_no_longer_guessed_from_the_address_book_name()
     {
         // Dispositivo RustDesk con lo stesso nome dell'asset: dalla 1.5.3 non diventa il gateway.
