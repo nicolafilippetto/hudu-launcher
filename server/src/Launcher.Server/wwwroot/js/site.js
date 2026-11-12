@@ -392,8 +392,8 @@
     }
 
     function connectWith(button, anchor) {
-        // RustDesk spento: esiste solo la connessione diretta, niente menu.
-        if (document.body.getAttribute("data-rustdesk") === "off") {
+        // RustDesk spento, o connessione/cliente "senza gateway": esiste solo la diretta, niente menu.
+        if (document.body.getAttribute("data-rustdesk") === "off" || button.hasAttribute("data-direct-only")) {
             startConnection(button, "direct", anchor);
         } else {
             openConnectMenu(button, anchor);
@@ -804,6 +804,18 @@
         if (!input || !dialogBody || !dialogBody.contains(input)) { return; }
         var label = $("[data-tab-label]", tabFor(input.closest("[data-panel]")));
         if (label) { label.textContent = input.value.trim() || input.getAttribute("data-label-default") || "Nuova connessione"; }
+    });
+
+    // "Nessun gateway" (scheda dell'editor o cliente): il campo del gateway non serve e non si invia.
+    document.addEventListener("change", function (event) {
+        var box = event.target.closest("[data-no-gateway]");
+        if (!box) { return; }
+        var scope = box.closest(".field, form");
+        var input = scope ? scope.querySelector("[data-peer-input]") : null;
+        if (input) {
+            input.disabled = box.checked;
+            if (box.checked) { input.value = ""; }
+        }
     });
 
     document.addEventListener("change", function (event) {

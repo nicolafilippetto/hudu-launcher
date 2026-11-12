@@ -752,3 +752,35 @@ public sealed class NewProtocolParsingTests
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") });
     }
 }
+
+public sealed class WindowBoundsTests
+{
+    private static readonly ScreenArea Laptop = new(0, 0, 1536, 824);
+    private static readonly ScreenArea External = new(1536, -200, 2560, 1400);
+
+    [Fact]
+    public void Round_trips_and_rejects_garbage()
+    {
+        var bounds = new WindowBounds(1600, 40, 1400, 900, Maximized: true);
+        Assert.Equal(bounds, WindowBounds.Parse(bounds.Serialize()));
+        Assert.Null(WindowBounds.Parse("1;2;3"));
+        Assert.Null(WindowBounds.Parse("a;b;c;d;max"));
+        Assert.Null(WindowBounds.Parse("0;0;50;50;normal"));
+        Assert.Null(WindowBounds.Parse(null));
+    }
+
+    [Fact]
+    public void Keeps_the_position_when_its_screen_is_still_there() =>
+        Assert.Equal(new WindowBounds(1700, 0, 1400, 900, false), new WindowBounds(1700, 0, 1400, 900, false).FitTo([Laptop, External]));
+
+    [Fact]
+    public void Ignores_a_position_on_a_monitor_that_is_gone() =>
+        Assert.Null(new WindowBounds(1700, 0, 1400, 900, false).FitTo([Laptop]));
+
+    [Fact]
+    public void Shrinks_to_a_smaller_screen_and_refuses_title_bar_off_screen()
+    {
+        Assert.Equal(new WindowBounds(10, 10, 1536, 824, true), new WindowBounds(10, 10, 2000, 1200, true).FitTo([Laptop]));
+        Assert.Null(new WindowBounds(100, -400, 800, 600, false).FitTo([Laptop]));
+    }
+}

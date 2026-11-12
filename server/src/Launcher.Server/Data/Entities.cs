@@ -224,6 +224,10 @@ public sealed class AssetSetting
     public int? Port { get; set; }
     public int? PasswordId { get; set; }
     public string? GatewayPeerId { get; set; }
+    /// <summary>Scelta esplicita: nessun jump host, la connessione è solo diretta (niente avviso sul gateway).</summary>
+    public bool NoGateway { get; set; }
+    /// <summary>Scelta esplicita: nessuna credenziale, si inserisce a mano (niente avviso sulla credenziale).</summary>
+    public bool NoPassword { get; set; }
     public bool Hidden { get; set; }
     public string? Note { get; set; }
     /// <summary>Opzioni RDP che sovrascrivono i predefiniti (JSON chiave → valore).</summary>
@@ -277,6 +281,8 @@ public sealed class ExtraConnection
     public string? WebOptions { get; set; }
     public string? DatabaseName { get; set; }
     public string? DatabaseKind { get; set; }
+    /// <summary>Scelta esplicita: nessun jump host per questa connessione (solo diretta).</summary>
+    public bool NoGateway { get; set; }
     /// <summary>Modifica della console suggerita da Hudu (una sola per asset).</summary>
     public bool IsConsole { get; set; }
     /// <summary>Solo per la console: nascosta dal tecnico (es. iDRAC dismesso ma ancora in Hudu).</summary>
@@ -295,11 +301,13 @@ public sealed class LauncherClient
     public DateTimeOffset LastSeenAt { get; set; }
 }
 
-/// <summary>Impostazioni per cliente: il jump host RustDesk predefinito.</summary>
+/// <summary>Impostazioni per cliente: il jump host RustDesk predefinito, o nessun RustDesk.</summary>
 public sealed class CompanySetting
 {
     public int CompanyId { get; set; }
     public string? GatewayPeerId { get; set; }
+    /// <summary>Il cliente non usa RustDesk: connessioni solo dirette, salvo un gateway scritto a mano sull'asset.</summary>
+    public bool NoRustDesk { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public string? UpdatedBy { get; set; }
 }

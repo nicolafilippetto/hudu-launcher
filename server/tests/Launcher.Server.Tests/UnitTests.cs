@@ -116,17 +116,110 @@ public sealed class ConnectionResolverTests
     }
 
     [Fact]
-    public void RustDesk_on_the_asset_itself_targets_localhost()
+    public void Gateway_is_no_longer_guessed_from_the_address_book_name()
+    {
+        // Dispositivo RustDesk con lo stesso nome dell'asset: dalla 1.5.3 non diventa il gateway.
+        var peers = new[] { new CachedPeer { Id = "987654321", Hostname = "SRV01.dominio.local" } };
+
+        var withCompany = ConnectionResolver.Resolve(Asset(), Context(peers: peers, company: new CompanySetting { CompanyId = 1, GatewayPeerId = "111" })).Primary!;
+        Assert.Equal(("111", "10.0.0.10"), (withCompany.GatewayPeerId, withCompany.Host));
+
+        var alone = ConnectionResolver.Resolve(Asset(), Context(peers: peers)).Primary!;
+        Assert.Null(alone.GatewayPeerId);
+        Assert.Contains("Nessun gateway RustDesk", alone.Issues);
+    }
+
+    [Fact]
+    public void Device_that_is_its_own_gateway_targets_localhost_without_ipam_warnings()
     {
         var ctx = Context(
-            peers: [new CachedPeer { Id = "987654321", Hostname = "SRV01.dominio.local" }],
-            company: new CompanySetting { CompanyId = 1, GatewayPeerId = "111" });
+            peers: [new CachedPeer { Id = "987654321", Hostname = "SRV01" }],
+            passwords: [new CachedPassword { Id = 5, CompanyId = 1, Name = "admin", AssetId = 100 }],
+            setting: new AssetSetting { AssetId = 100, GatewayPeerId = "987654321", Host = ConnectionResolver.SelfHost });
 
-        var primary = ConnectionResolver.Resolve(Asset(ip: null), ctx).Primary!;
+        var primary = ConnectionResolver.Resolve(Asset(), ctx).Primary!;
 
-        Assert.Equal("987654321", primary.GatewayPeerId);
-        Assert.Equal("localhost", primary.Host);
-        Assert.Equal("RustDesk sull'asset", primary.GatewaySource);
+        Assert.Equal(("987654321", "localhost", "manuale"), (primary.GatewayPeerId, primary.Host, primary.GatewaySource));
+        Assert.Empty(primary.Issues);
+    }
+
+    [Fact]
+    public void No_gateway_and_no_password_are_choices_without_warnings()
+    {
+        var ctx = Context(
+            company: new CompanySetting { CompanyId = 1, GatewayPeerId = "111" },
+            passwords:
+            [
+                new CachedPassword { Id = 5, CompanyId = 1, Name = "a", AssetId = 100 },
+                new CachedPassword { Id = 6, CompanyId = 1, Name = "b", AssetId = 100 },
+            ],
+            setting: new AssetSetting { AssetId = 100, NoGateway = true, NoPassword = true },
+            extras:
+            [
+                new ExtraConnection { Id = 1, AssetId = 100, Label = "Web", Protocol = ConnectionProtocol.Https },
+                new ExtraConnection { Id = 2, AssetId = 100, Label = "Altro IP", Protocol = ConnectionProtocol.Ssh, Host = "10.0.0.99" },
+                new ExtraConnection { Id = 3, AssetId = 100, Label = "Altro IP diretto", Protocol = ConnectionProtocol.Ssh, Host = "10.0.0.98", NoGateway = true },
+            ]);
+
+        var connections = ConnectionResolver.Resolve(Asset(), ctx).Connections.ToDictionary(c => c.Key);
+
+        var primary = connections[ConnectionResolver.PrimaryKey];
+        Assert.True(primary.DirectOnly);
+        Assert.Null(primary.GatewayPeerId);
+        Assert.Null(primary.PasswordId);
+        Assert.Empty(primary.Issues);
+        // Stesso indirizzo della principale: segue la sua scelta.
+        Assert.True(connections["extra:1"].DirectOnly);
+        // Indirizzo proprio: gateway del cliente, salvo "nessun gateway" sulla connessione.
+        Assert.Equal(("111", false), (connections["extra:2"].GatewayPeerId, connections["extra:2"].DirectOnly));
+        Assert.True(connections["extra:3"].DirectOnly);
+        Assert.Empty(connections["extra:3"].Issues);
+    }
+
+    [Fact]
+    public void Company_without_rustdesk_ignores_hudu_gateways_but_not_manual_ones()
+    {
+        var asset = Asset();
+        asset.RustDeskId = "555666777";
+        var company = new CompanySetting { CompanyId = 1, NoRustDesk = true };
+
+        var direct = ConnectionResolver.Resolve(asset, Context(company: company, huduGateways: new() { [1] = "444" })).Primary!;
+        Assert.True(direct.DirectOnly);
+        Assert.Null(direct.GatewayPeerId);
+        Assert.DoesNotContain(direct.Issues, i => i.Contains("gateway", StringComparison.OrdinalIgnoreCase));
+
+        var manual = ConnectionResolver.Resolve(asset, Context(company: company, setting: new AssetSetting { AssetId = 100, GatewayPeerId = "888" })).Primary!;
+        Assert.Equal(("888", false), (manual.GatewayPeerId, manual.DirectOnly));
+    }
+
+    [Fact]
+    public async Task Upgrade_freezes_name_matched_gateways_once()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(ct);
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options);
+        await db.Database.MigrateAsync(ct);
+        db.Peers.AddRange(new CachedPeer { Id = "900", Hostname = "SRV01" }, new CachedPeer { Id = "901", Hostname = "SRV02" }, new CachedPeer { Id = "902", Hostname = "SRV03" });
+        db.Assets.AddRange(
+            new CachedAsset { Id = 1, CompanyId = 1, LayoutId = 1, LayoutName = "VM", Name = "SRV01" },
+            new CachedAsset { Id = 2, CompanyId = 1, LayoutId = 1, LayoutName = "VM", Name = "SRV02.dominio.local" },
+            new CachedAsset { Id = 3, CompanyId = 1, LayoutId = 1, LayoutName = "VM", Name = "SRV03" },
+            new CachedAsset { Id = 4, CompanyId = 1, LayoutId = 1, LayoutName = "VM", Name = "NAS" });
+        db.AssetSettings.AddRange(
+            new AssetSetting { AssetId = 2, Host = "10.0.0.2" },
+            new AssetSetting { AssetId = 3, GatewayPeerId = "123" });
+        await db.SaveChangesAsync(ct);
+
+        Assert.Equal(2, await OwnPeerGatewayFreeze.RunOnceAsync(db, rustDeskEnabled: true, DateTimeOffset.UtcNow, ct));
+        Assert.Equal(0, await OwnPeerGatewayFreeze.RunOnceAsync(db, rustDeskEnabled: true, DateTimeOffset.UtcNow, ct));
+
+        var settings = await db.AssetSettings.AsNoTracking().ToDictionaryAsync(s => s.AssetId, ct);
+        Assert.Equal(("900", "localhost"), (settings[1].GatewayPeerId, settings[1].Host));
+        // Indirizzo già scelto: resta; gateway scritto a mano: non si tocca; senza abbinamento: niente.
+        Assert.Equal(("901", "10.0.0.2"), (settings[2].GatewayPeerId, settings[2].Host));
+        Assert.Equal(("123", (string?)null), (settings[3].GatewayPeerId, settings[3].Host));
+        Assert.False(settings.ContainsKey(4));
     }
 
     [Fact]

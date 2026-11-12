@@ -14,7 +14,7 @@ partial class AppDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261111232108_ConnectionTabs";
+    public override string LastMigrationId => "20261112001613_NoGateway";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -68,6 +68,12 @@ partial class AppDbContextModelSnapshot : ModelSnapshot
 
                 b.Property<string>("Host")
                     .HasColumnType("TEXT");
+
+                b.Property<bool>("NoGateway")
+                    .HasColumnType("INTEGER");
+
+                b.Property<bool>("NoPassword")
+                    .HasColumnType("INTEGER");
 
                 b.Property<string>("Note")
                     .HasColumnType("TEXT");
@@ -337,6 +343,9 @@ partial class AppDbContextModelSnapshot : ModelSnapshot
                 b.Property<string>("GatewayPeerId")
                     .HasColumnType("TEXT");
 
+                b.Property<bool>("NoRustDesk")
+                    .HasColumnType("INTEGER");
+
                 b.Property<long>("UpdatedAt")
                     .HasColumnType("INTEGER");
 
@@ -378,6 +387,9 @@ partial class AppDbContextModelSnapshot : ModelSnapshot
                 b.Property<string>("Label")
                     .IsRequired()
                     .HasColumnType("TEXT");
+
+                b.Property<bool>("NoGateway")
+                    .HasColumnType("INTEGER");
 
                 b.Property<int?>("PasswordId")
                     .HasColumnType("INTEGER");

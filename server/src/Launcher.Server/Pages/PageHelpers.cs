@@ -88,7 +88,9 @@ public static class Format
     }
 
     public static string ConnectionTitle(ResolvedConnection c) =>
-        c.CanConnect
+        c.DirectOnly && c.CanConnectDirect
+            ? $"{ProtocolName(c.Protocol)} {c.Host}:{c.Port}: solo connessione diretta (senza RustDesk)"
+            : c.CanConnect
             ? $"{ProtocolName(c.Protocol)} {c.Host}:{c.Port} tramite RustDesk {c.GatewayPeerId} ({c.GatewaySource}) oppure diretta"
             : c.CanConnectDirect
                 ? $"{ProtocolName(c.Protocol)} {c.Host}:{c.Port}: connessione diretta" + (c.Issues.Count > 0 ? $" ({string.Join(", ", c.Issues)})" : "")

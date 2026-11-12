@@ -37,7 +37,11 @@
             <svg><use href="#i-plug" /></svg>
             <span>
                 Gateway RustDesk:
-                @if (Model.GatewayPeerId is null)
+                @if (Model.NoRustDesk)
+                {
+                    <strong>nessuno</strong> <span class="muted small">(il cliente non usa RustDesk: solo connessioni dirette)</span>
+                }
+                else if (Model.GatewayPeerId is null)
                 {
                     <strong class="text-warn">non impostato</strong>
                 }
@@ -52,9 +56,13 @@
             <input type="hidden" name="companyId" value="@Model.Company.Id" />
             <label class="field">
                 <span>Dispositivo da cui si raggiunge la rete del cliente</span>
-                <input class="input" name="gateway" list="peer-list" data-peer-input value="@Model.GatewayPeerId" placeholder="ID RustDesk o nome dalla rubrica" autocomplete="off" />
+                <input class="input" name="gateway" list="peer-list" data-peer-input value="@(Model.NoRustDesk ? null : Model.GatewayPeerId)" placeholder="ID RustDesk o nome dalla rubrica" autocomplete="off" disabled="@Model.NoRustDesk" />
             </label>
-            <p class="muted small">Vale per tutti gli asset del cliente, salvo quelli con RustDesk installato o con un gateway impostato a mano.</p>
+            <label class="check">
+                <input type="checkbox" name="noRustDesk" value="true" checked="@Model.NoRustDesk" data-no-gateway />
+                <span>Questo cliente non usa RustDesk (solo connessioni dirette, nessun avviso sul gateway)</span>
+            </label>
+            <p class="muted small">Vale per tutti gli asset del cliente, salvo quelli con un gateway (o "nessun gateway") impostato a mano.</p>
             <div class="actions"><button class="btn btn-primary" type="submit">Salva</button></div>
         </form>
     </details>

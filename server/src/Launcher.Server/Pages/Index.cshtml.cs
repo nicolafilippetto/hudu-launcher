@@ -18,6 +18,7 @@ public sealed class ExtraForm
     public string? Port { get; set; }
     public string? PasswordId { get; set; }
     public string? Gateway { get; set; }
+    public bool NoGateway { get; set; }
     public bool Remove { get; set; }
     public Dictionary<string, string?> Rdp { get; set; } = [];
     public Dictionary<string, string?> Web { get; set; } = [];
@@ -33,6 +34,7 @@ public sealed class AssetForm
     public string? Port { get; set; }
     public string? PasswordId { get; set; }
     public string? Gateway { get; set; }
+    public bool NoGateway { get; set; }
     public bool Hidden { get; set; }
     public string? Note { get; set; }
     public List<ExtraForm> Extras { get; set; } = [];
@@ -102,10 +104,10 @@ public sealed record ConnectButtonModel(int AssetId, ResolvedConnection Connecti
 /// <summary>Connessione aggiuntiva (o console) validata, pronta da salvare.</summary>
 internal sealed record ParsedExtra(
     ExtraForm Form, string Label, ConnectionProtocol? Protocol, string? Host, int? Port, string? Url, int? PasswordId, string? Gateway,
-    string? Rdp, string? Web, string? DatabaseName, string? DatabaseKind)
+    string? Rdp, string? Web, string? DatabaseName, string? DatabaseKind, bool NoGateway = false)
 {
     public bool IsEmptyConsole => Label == "Console" && Protocol is null && Host is null && Port is null && Url is null && PasswordId is null
-        && Gateway is null && Rdp is null && Web is null && DatabaseName is null;
+        && Gateway is null && !NoGateway && Rdp is null && Web is null && DatabaseName is null;
 }
 
 public sealed record HomeViewModel(IReadOnlyList<ResolvedAsset> Favorites, IReadOnlyList<ResolvedAsset> Recent, SyncState? Sync, int CompanyCount,
@@ -117,6 +119,9 @@ public sealed record SearchViewModel(string Query, IReadOnlyList<ResolvedAsset> 
 public sealed class IndexModel(InventoryService inventory, AppDbContext db, AuditService audit, SettingsService settings, SyncService sync,
     LauncherReleases releases, LauncherClients clients) : LauncherPageModel
 {
+    /// <summary>Valore dei menu per "nessuna" scelta esplicita (es. nessuna credenziale).</summary>
+    public const string NoneValue = "none";
+
     public IReadOnlyList<CompanySummary> Companies { get; private set; } = [];
     public CompanyView? Company { get; private set; }
     public SearchViewModel? Search { get; private set; }
@@ -204,7 +209,8 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         var protocol = ParseProtocol(form.Protocol, "Protocollo", errors);
         var host = ParseHost(form.Host, "Indirizzo", errors);
         var previousHost = await db.AssetSettings.AsNoTracking().Where(s => s.AssetId == asset.Id).Select(s => s.Host).FirstOrDefaultAsync(ct);
-        if (host is not null && !asset.IpamList().Contains(host, StringComparer.OrdinalIgnoreCase)
+        if (host is not null && !string.Equals(host, ConnectionResolver.SelfHost, StringComparison.OrdinalIgnoreCase)
+            && !asset.IpamList().Contains(host, StringComparer.OrdinalIgnoreCase)
             && !string.Equals(host, previousHost, StringComparison.OrdinalIgnoreCase))
         {
             // Solo IP dell'IPAM: così gli indirizzi si correggono in Hudu, non nel portale.
@@ -212,8 +218,10 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
             host = null;
         }
         var port = ParsePort(form.Port, "Porta", errors);
-        var passwordId = ParsePassword(form.PasswordId, companyPasswords, errors);
-        var gateway = ParseGateway(form.Gateway, errors);
+        // "Nessuna" credenziale e "nessun gateway" sono scelte esplicite: niente avvisi su quei campi.
+        var noPassword = form.PasswordId == NoneValue;
+        var passwordId = noPassword ? null : ParsePassword(form.PasswordId, companyPasswords, errors);
+        var gateway = form.NoGateway ? null : ParseGateway(form.Gateway, errors);
         var note = string.IsNullOrWhiteSpace(form.Note) ? null : form.Note.Trim();
         // Si salvano solo le opzioni del protocollo effettivo (quello scelto o, se automatico, quello dedotto
         // come mostra l'editor): le sezioni degli altri protocolli sono nascoste e non devono restare attive.
@@ -225,6 +233,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         {
             // "Altro": la credenziale non si usa e il campo è nascosto.
             passwordId = null;
+            noPassword = false;
         }
 
         if (note?.Length > 500)
@@ -278,7 +287,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         var now = DateTimeOffset.UtcNow;
         var setting = await db.AssetSettings.FindAsync([asset.Id], ct);
         var isEmpty = protocol is null && host is null && port is null && passwordId is null && gateway is null && !form.Hidden && note is null
-            && rdp.Count == 0 && webAddress is null && web.Count == 0 && databaseName is null;
+            && rdp.Count == 0 && webAddress is null && web.Count == 0 && databaseName is null && !form.NoGateway && !noPassword;
         if (isEmpty)
         {
             if (setting is not null)
@@ -299,6 +308,8 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
             setting.Port = port;
             setting.PasswordId = passwordId;
             setting.GatewayPeerId = gateway;
+            setting.NoGateway = form.NoGateway;
+            setting.NoPassword = noPassword;
             setting.Hidden = form.Hidden;
             setting.Note = note;
             setting.RdpOptions = RdpOptionCatalog.Serialize(rdp);
@@ -415,6 +426,10 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         {
             changes.Add("gateway automatico");
         }
+        else if (gatewayMode == "none")
+        {
+            changes.Add("nessun gateway (solo diretta)");
+        }
         else if (gatewayMode.Length > 0)
         {
             errors.Add("Scelta del gateway non valida.");
@@ -488,6 +503,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
             if (gatewayMode.Length > 0)
             {
                 setting.GatewayPeerId = gateway;
+                setting.NoGateway = gatewayMode == "none";
             }
 
             if (passwordMode.Length > 0)
@@ -507,7 +523,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
 
             setting.UpdatedAt = now;
             setting.UpdatedBy = Email;
-            if (setting is { Protocol: null, Host: null, Port: null, PasswordId: null, GatewayPeerId: null, Hidden: false, Note: null, RdpOptions: null, WebUrl: null, WebAddress: null, WebOptions: null, DatabaseName: null })
+            if (setting is { Protocol: null, Host: null, Port: null, PasswordId: null, GatewayPeerId: null, Hidden: false, Note: null, RdpOptions: null, WebUrl: null, WebAddress: null, WebOptions: null, DatabaseName: null, NoGateway: false, NoPassword: false })
             {
                 db.AssetSettings.Remove(setting);
             }
@@ -575,7 +591,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         return RedirectToPage(new { c = companyId });
     }
 
-    public async Task<IActionResult> OnPostCompanyGatewayAsync(int companyId, string? gateway, CancellationToken ct)
+    public async Task<IActionResult> OnPostCompanyGatewayAsync(int companyId, string? gateway, bool noRustDesk, CancellationToken ct)
     {
         var company = await db.Companies.AsNoTracking().FirstOrDefaultAsync(c => c.Id == companyId, ct);
         if (company is null)
@@ -584,7 +600,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         }
 
         var errors = new List<string>();
-        var peerId = ParseGateway(gateway, errors);
+        var peerId = noRustDesk ? null : ParseGateway(gateway, errors);
         if (errors.Count > 0)
         {
             FlashError = errors[0];
@@ -592,7 +608,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         }
 
         var setting = await db.CompanySettings.FindAsync([companyId], ct);
-        if (peerId is null)
+        if (peerId is null && !noRustDesk)
         {
             if (setting is not null)
             {
@@ -608,13 +624,16 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
             }
 
             setting.GatewayPeerId = peerId;
+            setting.NoRustDesk = noRustDesk;
             setting.UpdatedAt = DateTimeOffset.UtcNow;
             setting.UpdatedBy = Email;
         }
 
         await db.SaveChangesAsync(ct);
-        await audit.WriteAsync(new AuditEntry("company.update", Email, CompanyName: company.Name, Details: "Gateway: " + (peerId ?? "nessuno")), HttpContext, ct);
-        Flash = peerId is null ? "Gateway del cliente rimosso." : $"Gateway del cliente impostato su {peerId}.";
+        await audit.WriteAsync(new AuditEntry("company.update", Email, CompanyName: company.Name,
+            Details: noRustDesk ? "Senza RustDesk (solo connessioni dirette)" : "Gateway: " + (peerId ?? "nessuno")), HttpContext, ct);
+        Flash = noRustDesk ? "Il cliente non usa RustDesk: solo connessioni dirette."
+            : peerId is null ? "Gateway del cliente rimosso." : $"Gateway del cliente impostato su {peerId}.";
         return RedirectToPage(new { c = companyId });
     }
 
@@ -717,7 +736,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         var web = effective is ConnectionProtocol.Http or ConnectionProtocol.Https ? OptionCatalog.Serialize(WebOptionCatalog.Catalog.Clean(extra.Web)) : null;
         var passwordId = effective == ConnectionProtocol.Tcp ? null : ParsePassword(extra.PasswordId, companyPasswords, errors);
         return new ParsedExtra(extra, label, protocol, host, port, url, passwordId,
-            ParseGateway(extra.Gateway, errors), rdp, web, databaseName, databaseKind);
+            extra.NoGateway ? null : ParseGateway(extra.Gateway, errors), rdp, web, databaseName, databaseKind, extra.NoGateway);
     }
 
     /// <summary>Service name o SID: obbligatorio per Oracle, ignorato per gli altri protocolli.</summary>
@@ -760,6 +779,7 @@ public sealed class IndexModel(InventoryService inventory, AppDbContext db, Audi
         row.Url = extra.Url;
         row.PasswordId = extra.PasswordId;
         row.GatewayPeerId = extra.Gateway;
+        row.NoGateway = extra.NoGateway;
         row.RdpOptions = extra.Rdp;
         row.WebOptions = extra.Web;
         row.DatabaseName = extra.DatabaseName;

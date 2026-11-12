@@ -251,6 +251,17 @@ await using (var scope = app.Services.CreateAsyncScope())
 
 var settingsService = app.Services.GetRequiredService<SettingsService>();
 await settingsService.LoadAsync();
+
+// 1.5.3, una volta sola: gli abbinamenti per nome con la rubrica RustDesk diventano scelte scritte sull'asset.
+await using (var scope = app.Services.CreateAsyncScope())
+{
+    var frozen = await OwnPeerGatewayFreeze.RunOnceAsync(scope.ServiceProvider.GetRequiredService<AppDbContext>(),
+        settingsService.RustDesk.Enabled, DateTimeOffset.UtcNow, CancellationToken.None);
+    if (frozen > 0)
+    {
+        app.Logger.LogInformation("Aggiornamento 1.5.3: {Count} asset con RustDesk installato ora hanno gateway e indirizzo localhost scritti nel portale", frozen);
+    }
+}
 settingsService.Changed += keys =>
 {
     if (keys.Any(k => k.StartsWith("entra.", StringComparison.Ordinal)))

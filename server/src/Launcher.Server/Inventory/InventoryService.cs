@@ -5,7 +5,8 @@ namespace Launcher.Server.Inventory;
 
 public sealed record CompanySummary(int Id, string Name, string? Nickname, int AssetCount, bool HasGateway);
 
-public sealed record CompanyView(CachedCompany Company, string? GatewayPeerId, string? GatewaySource, IReadOnlyList<IGrouping<string, ResolvedAsset>> Groups);
+public sealed record CompanyView(CachedCompany Company, string? GatewayPeerId, string? GatewaySource, IReadOnlyList<IGrouping<string, ResolvedAsset>> Groups,
+    bool NoRustDesk = false);
 
 /// <summary>Letture dell'inventario in cache per il portale e per il connettore.</summary>
 public sealed class InventoryService(AppDbContext db, Settings.SettingsService settings)
@@ -48,7 +49,7 @@ public sealed class InventoryService(AppDbContext db, Settings.SettingsService s
         ctx.CompanySettings.TryGetValue(companyId, out var setting);
         var gateway = setting?.GatewayPeerId ?? ctx.HuduCompanyGateways.GetValueOrDefault(companyId);
         var source = setting?.GatewayPeerId is not null ? "impostato nel portale" : gateway is not null ? "da Hudu" : null;
-        return new CompanyView(company, gateway, source, groups);
+        return new CompanyView(company, gateway, source, groups, setting?.NoRustDesk == true);
     }
 
     /// <summary>Ricerca per parole; con <paramref name="companyId"/> solo dentro quel cliente.</summary>

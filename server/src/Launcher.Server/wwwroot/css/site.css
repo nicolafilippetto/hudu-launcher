@@ -489,6 +489,9 @@ form.inline { display: inline-flex; margin: 0; }
 .conn-panel[hidden] { display: none; }
 .conn-panel-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
 .conn-panel-actions .check { padding-bottom: 0; }
+.check-inline { font-size: 13px; color: var(--muted); }
+.check-inline input { width: 15px; height: 15px; }
+.input:disabled { opacity: .55; cursor: not-allowed; }
 .conn-advanced { border-top: 1px dashed var(--border); padding-top: 10px; display: flex; flex-direction: column; gap: 10px; }
 .conn-advanced summary { cursor: pointer; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
 /* Campi che non servono al protocollo scelto: nascosti (anche se la classe imposta un display). */

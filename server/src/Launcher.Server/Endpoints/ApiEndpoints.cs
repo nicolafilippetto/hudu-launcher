@@ -169,7 +169,7 @@ public static class ApiEndpoints
         }
 
         // Con RustDesk spento esiste solo la connessione diretta.
-        var direct = !settings.RustDesk.Enabled || string.Equals(request.Mode, "direct", StringComparison.Ordinal);
+        var direct = !settings.RustDesk.Enabled || connection.DirectOnly || string.Equals(request.Mode, "direct", StringComparison.Ordinal);
         if (direct ? !connection.CanConnectDirect : !connection.CanConnect)
         {
             return Results.Problem(

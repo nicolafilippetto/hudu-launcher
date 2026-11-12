@@ -956,6 +956,72 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
         }
     }
 
+    [Fact]
+    public async Task No_gateway_and_no_password_choices_are_saved_and_force_direct_connections()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await SignedInClientAsync("tecnico@example.com");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Companies.Add(new CachedCompany { Id = 40, Name = "Cliente senza RustDesk" });
+            db.Assets.Add(new CachedAsset { Id = 40, CompanyId = 1, LayoutId = 28, LayoutName = "Virtual Machines", Name = "SRV-DIRETTO", PrimaryIp = "10.0.0.40", IpamAddresses = "10.0.0.40", OperatingSystem = "Windows Server 2022", SearchText = "srv-diretto" });
+            db.Assets.Add(new CachedAsset { Id = 41, CompanyId = 40, LayoutId = 28, LayoutName = "Virtual Machines", Name = "SRV-ALTRO", PrimaryIp = "10.1.0.41", IpamAddresses = "10.1.0.41", OperatingSystem = "Windows Server 2022", SearchText = "srv-altro" });
+            await db.SaveChangesAsync(ct);
+        }
+
+        try
+        {
+            var token = await AntiforgeryTokenAsync(client);
+            using var form = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["__RequestVerificationToken"] = token,
+                ["AssetId"] = "40",
+                ["NoGateway"] = "true",
+                ["PasswordId"] = "none",
+            });
+            var saved = await client.PostAsync(new Uri("/?handler=SaveAsset", UriKind.Relative), form, ct);
+            Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+            var row = await saved.Content.ReadAsStringAsync(ct);
+            Assert.Contains("data-direct-only=\"true\"", row, StringComparison.Ordinal);
+            Assert.DoesNotContain("Nessuna credenziale associata", row, StringComparison.Ordinal);
+            Assert.DoesNotContain("Nessun gateway RustDesk", row, StringComparison.Ordinal);
+
+            // Anche chiedendo il jump host, il biglietto è per la connessione diretta.
+            var connect = await PostApiAsync(client, "/api/connect", new { assetId = 40, key = "primary", mode = "gateway" });
+            Assert.Equal(HttpStatusCode.OK, connect.StatusCode);
+            var url = new Uri((await connect.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("url").GetString()!);
+            var redeem = await RedeemWithVersionAsync(System.Web.HttpUtility.ParseQueryString(url.Query)["ticket"]!, "1.5.3", "198.51.100.40");
+            Assert.Equal(HttpStatusCode.OK, redeem.StatusCode);
+            var body = await redeem.Content.ReadFromJsonAsync<JsonElement>(ct);
+            Assert.Equal(JsonValueKind.Null, body.GetProperty("gateway").ValueKind);
+            Assert.Equal(JsonValueKind.Null, body.GetProperty("credential").ValueKind);
+
+            // Cliente senza RustDesk: nessun gateway e nessun avviso per i suoi asset.
+            using var companyForm = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["__RequestVerificationToken"] = token,
+                ["companyId"] = "40",
+                ["noRustDesk"] = "true",
+            });
+            var company = await client.PostAsync(new Uri("/?handler=CompanyGateway", UriKind.Relative), companyForm, ct);
+            Assert.Equal(HttpStatusCode.Redirect, company.StatusCode);
+            var page = await client.GetStringAsync(new Uri("/?c=40", UriKind.Relative), ct);
+            Assert.Contains("il cliente non usa RustDesk", page, StringComparison.Ordinal);
+            Assert.DoesNotContain("Nessun gateway RustDesk", page, StringComparison.Ordinal);
+            Assert.Contains("data-direct-only=\"true\"", page, StringComparison.Ordinal);
+        }
+        finally
+        {
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.AssetSettings.Where(x => x.AssetId == 40).ExecuteDeleteAsync(ct);
+            await db.CompanySettings.Where(x => x.CompanyId == 40).ExecuteDeleteAsync(ct);
+            await db.Assets.Where(x => x.Id == 40 || x.Id == 41).ExecuteDeleteAsync(ct);
+            await db.Companies.Where(x => x.Id == 40).ExecuteDeleteAsync(ct);
+        }
+    }
+
     private async Task<HttpResponseMessage> RedeemWithVersionAsync(string ticket, string? version, string? clientIp = null)
     {
         var client = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });

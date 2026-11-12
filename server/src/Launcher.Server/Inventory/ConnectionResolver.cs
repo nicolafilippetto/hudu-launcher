@@ -15,7 +15,8 @@ public sealed record ResolvedConnection(
     string? Username,
     IReadOnlyList<string> Issues,
     string? Url = null,
-    SavedOptions? Options = null)
+    SavedOptions? Options = null,
+    bool DirectOnly = false)
 {
     public bool IsWeb => Protocol is ConnectionProtocol.Http or ConnectionProtocol.Https;
 
@@ -27,6 +28,8 @@ public sealed record ResolvedConnection(
 
     /// <summary>Collegabile tramite il jump host RustDesk.</summary>
     public bool CanConnect => CanConnectDirect && GatewayPeerId is not null;
+
+    // DirectOnly: scelta esplicita (connessione, cliente o RustDesk spento) di collegarsi solo in diretta.
 
     /// <summary>Collegabile direttamente (tecnico dal cliente o in VPN): bastano indirizzo e porta.</summary>
     public bool CanConnectDirect => Host is not null && Port > 0;
@@ -83,6 +86,8 @@ public static class ConnectionResolver
     public const string ExtraPrefix = "extra:";
     /// <summary>Valore di <see cref="AssetSetting.WebAddress"/> per usare l'IP invece dell'FQDN.</summary>
     public const string WebAddressIp = "ip";
+    /// <summary>Indirizzo per un dispositivo che è anche il proprio jump host (RustDesk installato sopra).</summary>
+    public const string SelfHost = "localhost";
 
     public static int DefaultPort(ConnectionProtocol protocol) => protocol switch
     {
@@ -146,8 +151,11 @@ public static class ConnectionResolver
         ctx.CompanySettings.TryGetValue(asset.CompanyId, out var companySetting);
         ctx.Layouts.TryGetValue(asset.LayoutId, out var layout);
         var companyName = ctx.Companies.TryGetValue(asset.CompanyId, out var company) ? company.Name : "";
-        var ownPeer = ctx.RustDeskEnabled ? FindOwnPeer(asset, ctx) : null;
-        var companyGateway = !ctx.RustDeskEnabled ? null : companySetting?.GatewayPeerId
+        // Solo per dedurre il protocollo dalla piattaforma: il gateway non si ricava più dal nome.
+        var ownPeer = ctx.RustDeskEnabled ? FindOwnPeer(asset, ctx.PeersByName) : null;
+        // Cliente senza RustDesk: nessun gateway del cliente né da Hudu, solo connessioni dirette.
+        var companyNoRustDesk = !ctx.RustDeskEnabled || companySetting?.NoRustDesk == true;
+        var companyGateway = companyNoRustDesk ? null : companySetting?.GatewayPeerId
             ?? (ctx.HuduCompanyGateways.TryGetValue(asset.CompanyId, out var huduGateway) ? huduGateway : null);
         var companyGatewaySource = companySetting?.GatewayPeerId is not null ? "predefinito del cliente" : "Hudu, cliente";
 
@@ -157,25 +165,23 @@ public static class ConnectionResolver
         var protocol = setting?.Protocol ?? GuessProtocol(asset.OperatingSystem, layout, ownPeer);
         Uri? webUrl = null;
 
+        // Gateway: scelta dell'asset nel portale, poi quella del cliente, poi Hudu (cliente e asset);
+        // altrimenti avviso. "Nessun gateway" (asset o cliente) è una scelta: solo diretta, senza avvisi.
         string? gateway;
         string? gatewaySource;
+        var directOnly = false;
         var (host, hostIssue) = ResolveHost(setting?.Host, asset);
-        if (!ctx.RustDeskEnabled)
+        if (!ctx.RustDeskEnabled || setting?.NoGateway == true)
         {
-            (gateway, gatewaySource) = (null, null);
+            (gateway, gatewaySource, directOnly) = (null, null, true);
         }
         else if (setting?.GatewayPeerId is { } manualGateway)
         {
             (gateway, gatewaySource) = (manualGateway, "manuale");
         }
-        else if (ownPeer is not null)
+        else if (companyNoRustDesk)
         {
-            // RustDesk è installato sull'asset stesso: il tunnel punta a sé stesso.
-            (gateway, gatewaySource) = (ownPeer.Id, "RustDesk sull'asset");
-            if (setting?.Host is null)
-            {
-                (host, hostIssue) = ("localhost", null);
-            }
+            (gateway, gatewaySource, directOnly) = (null, null, true);
         }
         else if (companyGateway is not null)
         {
@@ -209,24 +215,26 @@ public static class ConnectionResolver
             }
         }
 
-        var (passwordId, passwordIssue) = ResolvePassword(setting?.PasswordId, asset, ctx);
+        // "Nessuna credenziale" è una scelta: niente credenziale e niente avviso.
+        var noPassword = setting?.NoPassword == true;
+        var (passwordId, passwordIssue) = noPassword ? (null, null) : ResolvePassword(setting?.PasswordId, asset, ctx);
         connections.Add(Build(PrimaryKey, Label(protocol), protocol, host, port, gateway, gatewaySource, passwordId, passwordIssue, ctx, hostIssue,
-            webUrl?.AbsoluteUri, new SavedOptions(setting?.RdpOptions, setting?.WebOptions, setting?.DatabaseName, setting?.DatabaseKind)));
+            webUrl?.AbsoluteUri, new SavedOptions(setting?.RdpOptions, setting?.WebOptions, setting?.DatabaseName, setting?.DatabaseKind),
+            directOnly, credentialOptional: noPassword));
 
         // --- Console fuori banda (iDRAC/iLO/IPMI): suggerita dal campo di Hudu, modificabile dai tecnici ---
         var extrasOfAsset = ctx.Extras[asset.Id].ToList();
         var consoleRow = extrasOfAsset.FirstOrDefault(e => e.IsConsole);
         if (consoleRow?.Hidden != true && ResolveConsole(asset, consoleRow) is { } console)
         {
-            var (consoleGateway, consoleSource) = !ctx.RustDeskEnabled ? (null, null) : consoleRow?.GatewayPeerId is { } manualConsoleGateway
-                ? (manualConsoleGateway, "manuale")
-                : (companyGateway ?? gateway, companyGateway is not null ? companyGatewaySource : gatewaySource);
+            var (consoleGateway, consoleSource, consoleDirect) = OwnAddressGateway(consoleRow, ctx, companyNoRustDesk, companyGateway,
+                companyGatewaySource, gateway, gatewaySource, directOnly);
             var (consolePasswordId, consolePasswordIssue) = consoleRow?.PasswordId is not null
                 ? ResolvePassword(consoleRow.PasswordId, asset, ctx)
                 : (null, (string?)null);
             connections.Add(Build(ConsoleKey, string.IsNullOrWhiteSpace(consoleRow?.Label) ? "Console" : consoleRow.Label, console.Protocol, console.Host,
                 console.Port, consoleGateway, consoleSource, consolePasswordId, consolePasswordIssue, ctx, url: console.Url,
-                options: Options(consoleRow)));
+                options: Options(consoleRow), directOnly: consoleDirect));
         }
 
         // --- Connessioni aggiuntive definite dai tecnici ---
@@ -246,9 +254,10 @@ public static class ConnectionResolver
                 extraHost = extraFqdn.Url?.Host.Trim('[', ']') ?? extraFqdn.Host;
             }
 
-            var (extraGateway, extraSource) = !ctx.RustDeskEnabled ? (null, null) : extra.GatewayPeerId is not null
-                ? (extra.GatewayPeerId, "manuale")
-                : extra.Host is null ? (gateway, gatewaySource) : (companyGateway ?? gateway, companyGateway is not null ? companyGatewaySource : gatewaySource);
+            // Stesso indirizzo della principale: stesso gateway; indirizzo proprio: gateway del cliente.
+            var (extraGateway, extraSource, extraDirect) = extra.Host is null && extra.Url is null && !extra.NoGateway && extra.GatewayPeerId is null
+                ? (gateway, gatewaySource, directOnly)
+                : OwnAddressGateway(extra, ctx, companyNoRustDesk, companyGateway, companyGatewaySource, gateway, gatewaySource, directOnly);
             var (extraPasswordId, extraPasswordIssue) = extra.PasswordId is not null
                 ? ResolvePassword(extra.PasswordId, asset, ctx)
                 : (null, (string?)null);
@@ -256,13 +265,42 @@ public static class ConnectionResolver
                 ? (protocolOfExtra, extra.Port ?? DefaultPort(protocolOfExtra))
                 : (WebProtocol(extraUrl), extraUrl.Port);
             connections.Add(Build(ExtraPrefix + extra.Id, extra.Label, extraProtocol, extraHost, extraPort,
-                extraGateway, extraSource, extraPasswordId, extraPasswordIssue, ctx, url: extraUrl?.AbsoluteUri, options: Options(extra)));
+                extraGateway, extraSource, extraPasswordId, extraPasswordIssue, ctx, url: extraUrl?.AbsoluteUri, options: Options(extra),
+                directOnly: extraDirect));
         }
 
         return new ResolvedAsset(asset, companyName, setting, connections, ctx.Favorites.Contains(asset.Id));
     }
 
     private static bool IsWebProtocol(ConnectionProtocol protocol) => protocol is ConnectionProtocol.Http or ConnectionProtocol.Https;
+
+    /// <summary>
+    /// Gateway di una connessione con indirizzo proprio (console o aggiuntiva): scelta della connessione,
+    /// poi cliente, poi quello della principale.
+    /// </summary>
+    private static (string? Gateway, string? Source, bool DirectOnly) OwnAddressGateway(
+        ExtraConnection? row, ResolutionContext ctx, bool companyNoRustDesk, string? companyGateway, string companyGatewaySource,
+        string? primaryGateway, string? primarySource, bool primaryDirectOnly)
+    {
+        if (!ctx.RustDeskEnabled || row?.NoGateway == true)
+        {
+            return (null, null, true);
+        }
+
+        if (row?.GatewayPeerId is { } manual)
+        {
+            return (manual, "manuale", false);
+        }
+
+        if (companyNoRustDesk)
+        {
+            return (null, null, true);
+        }
+
+        return companyGateway is not null
+            ? (companyGateway, companyGatewaySource, false)
+            : (primaryGateway, primarySource, primaryDirectOnly);
+    }
 
     private static SavedOptions Options(ExtraConnection? row) =>
         row is null ? SavedOptions.None : new SavedOptions(row.RdpOptions, row.WebOptions, row.DatabaseName, row.DatabaseKind);
@@ -338,7 +376,7 @@ public static class ConnectionResolver
     private static ResolvedConnection Build(
         string key, string label, ConnectionProtocol protocol, string? host, int port,
         string? gateway, string? gatewaySource, int? passwordId, string? passwordIssue, ResolutionContext ctx, string? hostIssue = null,
-        string? url = null, SavedOptions? options = null)
+        string? url = null, SavedOptions? options = null, bool directOnly = false, bool credentialOptional = false)
     {
         var issues = new List<string>();
         if (host is null)
@@ -360,9 +398,9 @@ public static class ConnectionResolver
             issues.Add("Nome del database Oracle mancante");
         }
 
-        if (!ctx.RustDeskEnabled)
+        if (!ctx.RustDeskEnabled || directOnly)
         {
-            // Solo connessioni dirette: il gateway non serve.
+            // Solo connessioni dirette (RustDesk spento o scelta esplicita): il gateway non serve.
         }
         else if (gateway is null)
         {
@@ -383,13 +421,13 @@ public static class ConnectionResolver
         {
             issues.Add(passwordIssue);
         }
-        else if (password is null && protocol is ConnectionProtocol.Rdp or ConnectionProtocol.Ssh or ConnectionProtocol.Telnet or ConnectionProtocol.Winbox && key == PrimaryKey)
+        else if (password is null && !credentialOptional && protocol is ConnectionProtocol.Rdp or ConnectionProtocol.Ssh or ConnectionProtocol.Telnet or ConnectionProtocol.Winbox && key == PrimaryKey)
         {
             issues.Add("Nessuna credenziale associata");
         }
 
         return new ResolvedConnection(key, label, protocol, host, port, gateway, gatewaySource, password?.Id, password?.Name, password?.Username, issues, url,
-            options);
+            options, directOnly || !ctx.RustDeskEnabled);
     }
 
     /// <summary>
@@ -400,6 +438,12 @@ public static class ConnectionResolver
     public static (string? Host, string? Issue) ResolveHost(string? chosen, CachedAsset asset)
     {
         var ipam = asset.IpamList();
+        if (string.Equals(chosen, SelfHost, StringComparison.OrdinalIgnoreCase))
+        {
+            // Scelta esplicita: il dispositivo è il proprio jump host, il tunnel punta a sé stesso.
+            return (SelfHost, null);
+        }
+
         if (chosen is not null)
         {
             return ipam.Count == 0
@@ -456,7 +500,11 @@ public static class ConnectionResolver
         };
     }
 
-    private static CachedPeer? FindOwnPeer(CachedAsset asset, ResolutionContext ctx)
+    /// <summary>
+    /// Dispositivo della rubrica RustDesk con lo stesso nome dell'asset. Serve solo a dedurre il protocollo
+    /// (e alla migrazione 1.5.3): il gateway non si sceglie più per nome.
+    /// </summary>
+    public static CachedPeer? FindOwnPeer(CachedAsset asset, IReadOnlyDictionary<string, CachedPeer> peersByName)
     {
         foreach (var name in new[] { asset.Hostname, asset.Name })
         {
@@ -466,7 +514,7 @@ public static class ConnectionResolver
             }
 
             var shortName = name.Split('.')[0];
-            if (ctx.PeersByName.TryGetValue(shortName, out var peer))
+            if (peersByName.TryGetValue(shortName, out var peer))
             {
                 return peer;
             }
