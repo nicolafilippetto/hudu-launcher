@@ -50,8 +50,10 @@ server (se la licenza lo consente), rotazione periodica, alert sugli accessi API
   programmi dello stesso utente e agli EDR che registrano le righe di comando: rischio accettato).
   Per Oracle e Altro la password **non** viene inviata: il Launcher mostra solo utente e nome della
   credenziale di Hudu. Per Oracle scrive nel `tnsnames.ora` scelto dal tecnico solo un blocco
-  delimitato in fondo al file (alias, `127.0.0.1` o l'host, porta, service name/SID validati), lo
-  toglie alla chiusura e ne tiene una copia prima della prima modifica.
+  delimitato in fondo al file (alias, `127.0.0.1` o l'host, porta, service name/SID validati) e lo
+  toglie alla chiusura: il resto del file torna com'era (salvo l'a capo finale, se mancava). La
+  scrittura avviene sul file stesso per non cambiarne i permessi; prima della prima modifica se ne
+  tiene una copia del file senza blocchi del Launcher.
 - **Cache d'emergenza offline**: il tecnico sceglie nel portale fino a N asset (N deciso dall'admin,
   predefinito 10; 0 = funzione spenta). Il Launcher, con biglietto e token 365 come sempre, riceve le
   connessioni dirette con le credenziali e le tiene **solo in memoria** per la durata impostata

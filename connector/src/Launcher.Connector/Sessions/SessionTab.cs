@@ -170,6 +170,9 @@ public sealed class SessionTab : TabItem, IAsyncDisposable
         UpdateState();
     }
 
+    /// <summary>La sessione ha preso il posto del pannello di avanzamento.</summary>
+    public bool HasSession => _session is not null;
+
     public void ShowWarning(string message)
     {
         _warning.Child = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap };

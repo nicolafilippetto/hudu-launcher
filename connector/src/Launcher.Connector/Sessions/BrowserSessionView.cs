@@ -418,12 +418,28 @@ public sealed class BrowserSessionView : ISessionView
                     _certificateAnswers[fingerprint] = answer;
                 }
 
-                e.Action = await answer ? CoreWebView2ServerCertificateErrorAction.AlwaysAllow : CoreWebView2ServerCertificateErrorAction.Cancel;
+                var allowed = await answer;
+                e.Action = allowed ? CoreWebView2ServerCertificateErrorAction.AlwaysAllow : CoreWebView2ServerCertificateErrorAction.Cancel;
+                if (!allowed)
+                {
+                    // Un rifiuto vale per le richieste di questa pagina, non per tutta la scheda: con
+                    // Ricarica la domanda si ripresenta (le richieste insieme non ne aprono altre).
+                    _ = ForgetRejectionAsync(fingerprint, answer);
+                }
             }
             finally
             {
                 deferral.Complete();
             }
+        }
+    }
+
+    private async Task ForgetRejectionAsync(string fingerprint, Task<bool> answer)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        if (_certificateAnswers.TryGetValue(fingerprint, out var current) && current == answer)
+        {
+            _certificateAnswers.Remove(fingerprint);
         }
     }
 

@@ -203,6 +203,12 @@ public partial class MainWindow : Window
     /// <summary>Apre una nuova scheda per il biglietto ricevuto dal browser (o prepara la cache offline).</summary>
     public void Open(LaunchRequest request)
     {
+        if (_exiting)
+        {
+            Log.Info("Link ignorato: il Launcher si sta chiudendo");
+            return;
+        }
+
         BringToFront();
         if (request.Offline)
         {
@@ -435,7 +441,7 @@ public partial class MainWindow : Window
                 "Le trovi in \"Pronte offline\" (in basso a destra o nella schermata iniziale) e si aprono in diretta anche senza internet.\n\n" +
                 "Non chiudere il Launcher: chiudendolo o spegnendo il PC la cache viene cancellata.");
         }
-        catch (Exception ex) when (ex is PortalException or System.Net.Http.HttpRequestException or InvalidOperationException)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Log.Error("Cache offline non preparata", ex);
             Dialogs.Show(this, "Cache offline non preparata", ex.Message, DialogKind.Warning);
@@ -686,10 +692,17 @@ public partial class MainWindow : Window
     private async Task ShutdownAsync(IReadOnlyList<SessionTab> open)
     {
         var watch = Stopwatch.StartNew();
-        foreach (var tab in open)
+        var budget = Task.Delay(TimeSpan.FromSeconds(10));
+        // Le schede si chiudono insieme e dentro lo stesso limite di tempo: un tunnel che si sta ancora
+        // aprendo non deve trattenere l'uscita.
+        var closing = open.Select(tab =>
         {
             Tabs.Items.Remove(tab);
-            await tab.DisposeAsync();
+            return tab.DisposeAsync().AsTask();
+        }).ToList();
+        if (await Task.WhenAny(Task.WhenAll(closing), budget) == budget)
+        {
+            Log.Warn($"Chiusura: schede non chiuse dopo {watch.ElapsedMilliseconds} ms, si prosegue");
         }
 
         var sessions = watch.ElapsedMilliseconds;
@@ -701,8 +714,8 @@ public partial class MainWindow : Window
             Log.Info($"Chiusura: sessioni {sessions} ms, tunnel {tunnels - sessions} ms, aggiornamento {watch.ElapsedMilliseconds - tunnels} ms");
         });
 
-        // Oltre 10 secondi non si aspetta più: l'app si chiude comunque (l'updater attende l'uscita).
-        if (await Task.WhenAny(cleanup, Task.Delay(TimeSpan.FromSeconds(10))) != cleanup)
+        // Oltre 10 secondi in tutto non si aspetta più: l'app si chiude comunque (l'updater attende l'uscita).
+        if (await Task.WhenAny(cleanup, budget) != cleanup)
         {
             Log.Warn($"Chiusura lenta: dopo {watch.ElapsedMilliseconds} ms tunnel o aggiornamento non hanno finito");
         }

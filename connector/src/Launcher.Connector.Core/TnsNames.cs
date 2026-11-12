@@ -8,13 +8,19 @@ public sealed record TnsEntry(string Alias, string Host, int Port, string Databa
 
 /// <summary>
 /// Gestione del blocco del Launcher in fondo al tnsnames.ora del tecnico. Il resto del file non si
-/// tocca mai: il blocco è delimitato da due righe di commento e si riscrive per intero (o si toglie)
-/// a ogni connessione aperta o chiusa.
+/// tocca: il blocco è delimitato da due righe di commento, si aggiunge subito dopo l'ultima riga e si
+/// riscrive per intero (o si toglie) a ogni connessione aperta o chiusa. Togliendolo il file torna
+/// identico, salvo l'a capo finale aggiunto se il file non ne aveva uno.
 /// </summary>
 public static partial class TnsNames
 {
-    public const string BeginMarker = "# >>> HuduLauncher: voci gestite dal Launcher, si aggiornano da sole (non modificare)";
+    public const string BeginMarker = "# >>> HuduLauncher: voci gestite dal Launcher, tolte alla chiusura (non modificare)";
     public const string EndMarker = "# <<< HuduLauncher";
+
+    /// <summary>Inizio del blocco scritto dalle versioni 1.5.2–1.5.5, preceduto da una riga vuota aggiunta dal Launcher.</summary>
+    private const string LegacyBeginMarker = "# >>> HuduLauncher: voci gestite dal Launcher, si aggiornano da sole (non modificare)";
+
+    private const string MarkerPrefix = "# >>> HuduLauncher";
 
     /// <summary>Nome della voce: HUDULAUNCHER_1 per la prima connessione aperta, poi _2, _3…</summary>
     public static string Alias(int number) => $"HUDULAUNCHER_{number}";
@@ -30,13 +36,8 @@ public static partial class TnsNames
         }
 
         var block = new StringBuilder();
-        if (text.Length > 0)
+        if (text.Length > 0 && !text.EndsWith('\n'))
         {
-            if (!text.EndsWith('\n'))
-            {
-                block.Append(newline);
-            }
-
             block.Append(newline);
         }
 
@@ -50,10 +51,10 @@ public static partial class TnsNames
         return text + block;
     }
 
-    /// <summary>Toglie il blocco del Launcher, comprese le righe vuote che lo separavano dal resto.</summary>
+    /// <summary>Toglie esattamente le righe del blocco del Launcher; il resto del file resta com'è.</summary>
     public static string RemoveBlock(string content, string? newline = null)
     {
-        var begin = content.IndexOf(BeginMarker, StringComparison.Ordinal);
+        var begin = content.IndexOf(MarkerPrefix, StringComparison.Ordinal);
         if (begin < 0)
         {
             return content;
@@ -62,21 +63,22 @@ public static partial class TnsNames
         var end = content.IndexOf(EndMarker, begin, StringComparison.Ordinal);
         // Blocco senza fine (file troncato o modificato a mano): si toglie fino in fondo.
         var after = end < 0 ? content.Length : content.IndexOf('\n', end) is var lineEnd and >= 0 ? lineEnd + 1 : content.Length;
-        var before = content[..begin].TrimEnd('\r', '\n', ' ', '\t');
-        var rest = content[after..];
-        var nl = newline ?? (content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n");
-        if (before.Length == 0)
+        var before = content[..begin];
+        if (content.AsSpan(begin).StartsWith(LegacyBeginMarker, StringComparison.Ordinal))
         {
-            return rest.TrimStart('\r', '\n');
+            // Versioni precedenti: anche la riga vuota che il Launcher aveva messo prima del blocco.
+            before = before.EndsWith("\r\n\r\n", StringComparison.Ordinal) ? before[..^2]
+                : before.EndsWith("\n\n", StringComparison.Ordinal) ? before[..^1]
+                : before;
         }
 
-        return rest.Trim().Length == 0 ? before + nl : before + nl + nl + rest.TrimStart('\r', '\n');
+        return before + content[after..];
     }
 
     /// <summary>Alias delle voci del Launcher presenti nel file.</summary>
     public static IReadOnlyList<string> ManagedAliases(string content)
     {
-        var begin = content.IndexOf(BeginMarker, StringComparison.Ordinal);
+        var begin = content.IndexOf(MarkerPrefix, StringComparison.Ordinal);
         if (begin < 0)
         {
             return [];

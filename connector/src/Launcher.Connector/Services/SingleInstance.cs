@@ -29,7 +29,8 @@ public static class SingleInstance
         try
         {
             using var pipe = new NamedPipeClientStream(".", Id, PipeDirection.Out, PipeOptions.CurrentUserOnly);
-            pipe.Connect(3000);
+            // L'istanza principale può essere ancora in avvio (antivirus, PC lento): si aspetta di più.
+            pipe.Connect(15000);
             var bytes = Encoding.UTF8.GetBytes(message);
             pipe.Write(bytes);
             pipe.Flush();

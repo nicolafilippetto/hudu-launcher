@@ -81,8 +81,9 @@ public static class Winbox
 
 /// <summary>
 /// tnsnames.ora del tecnico: il Launcher aggiunge in fondo un blocco con le voci HUDULAUNCHER_1, _2…
-/// per le connessioni Oracle aperte e lo toglie quando si chiudono. Il resto del file resta identico,
-/// byte per byte; prima della prima modifica se ne tiene una copia.
+/// per le connessioni Oracle aperte e lo toglie quando si chiudono: il resto del file torna com'era
+/// (salvo l'a capo finale, se mancava). Si scrive sul file stesso, che così conserva i suoi permessi;
+/// prima della prima modifica se ne tiene una copia del file senza blocchi del Launcher.
 /// </summary>
 public sealed class OracleTnsNames
 {
@@ -255,7 +256,9 @@ public sealed class OracleTnsNames
     private void Write(string file)
     {
         var original = File.ReadAllBytes(file);
-        if (!_backedUp)
+        // La copia è del file "pulito": se contiene già un blocco del Launcher (chiusura improvvisa)
+        // non si sovrascrive quella buona fatta in precedenza.
+        if (!_backedUp && TnsNames.ManagedAliases(Bytes.GetString(original)).Count == 0)
         {
             Directory.CreateDirectory(ConnectorSettings.DataDirectory);
             File.WriteAllBytes(ConnectorSettings.TnsNamesBackupFile, original);

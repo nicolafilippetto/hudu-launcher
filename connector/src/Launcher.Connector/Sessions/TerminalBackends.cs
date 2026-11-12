@@ -62,7 +62,8 @@ public sealed class SshBackend(ConnectionInfo info, SessionEndpoint endpoint, Kn
             Timeout = TimeSpan.FromSeconds(20),
         };
 
-        _client = new SshClient(connection);
+        // Keep-alive: senza traffico, firewall e NAT chiudono le sessioni ferme.
+        _client = new SshClient(connection) { KeepAliveInterval = TimeSpan.FromSeconds(30) };
         _client.HostKeyReceived += (_, e) => e.CanTrust = ConfirmHostKey(e.FingerPrintSHA256);
         _client.ErrorOccurred += (_, e) => Closed?.Invoke("Errore SSH: " + e.Exception.Message);
 
@@ -87,7 +88,15 @@ public sealed class SshBackend(ConnectionInfo info, SessionEndpoint endpoint, Kn
             throw new InvalidOperationException($"{endpoint.Host}:{endpoint.Port} non raggiungibile: " + ex.Message);
         }
 
-        _shell = _client.CreateShellStream("xterm-256color", (uint)columns, (uint)rows, 0, 0, 16 * 1024);
+        try
+        {
+            _shell = _client.CreateShellStream("xterm-256color", (uint)columns, (uint)rows, 0, 0, 16 * 1024);
+        }
+        catch (SshException ex)
+        {
+            throw new InvalidOperationException("Il server SSH non ha aperto il terminale: " + ex.Message);
+        }
+
         _shell.DataReceived += (_, e) => DataReceived?.Invoke(e.Data);
         _shell.Closed += (_, _) => Closed?.Invoke("Sessione SSH terminata.");
     }
@@ -170,6 +179,7 @@ public sealed partial class TelnetBackend(ConnectionInfo info, SessionEndpoint e
         }
 
         _stream = _client.GetStream();
+        _filter.WindowSize = (columns, rows);
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _ = ReadLoopAsync(_cts.Token);
     }
@@ -246,9 +256,14 @@ public sealed partial class TelnetBackend(ConnectionInfo info, SessionEndpoint e
         _stream.Write(bytes);
     }
 
+    /// <summary>Con NAWS accettato dal server (RFC 1073) la nuova dimensione gli arriva subito.</summary>
     public void Resize(int columns, int rows)
     {
-        // Nessuna negoziazione NAWS: la dimensione resta quella del server.
+        _filter.WindowSize = (columns, rows);
+        if (_stream is not null && _filter.WindowSizeEnabled)
+        {
+            _stream.Write(TelnetFilter.WindowSizeMessage(columns, rows));
+        }
     }
 
     public void Dispose()
