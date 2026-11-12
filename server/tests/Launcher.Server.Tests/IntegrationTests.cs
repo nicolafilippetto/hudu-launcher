@@ -1070,8 +1070,7 @@ public sealed partial class IntegrationTests(LauncherFactory factory) : IClassFi
         // Host fuori da Hudu: la password dell'asset non deve poter finire su un server qualsiasi.
         var host = await SaveAsync(new Dictionary<string, string> { ["Extras[0].Label"] = "Esca", ["Extras[0].Protocol"] = "Ssh", ["Extras[0].Host"] = "203.0.113.66", ["Extras[0].PasswordId"] = "501" });
         Assert.Contains("non è tra quelli", host, StringComparison.Ordinal);
-        var url = await SaveAsync(new Dictionary<string, string> { ["Extras[0].Label"] = "Esca", ["Extras[0].Protocol"] = "Https", ["Extras[0].Host"] = "https://evil.example.net/login" });
-        Assert.Contains("non è tra quelli", url, StringComparison.Ordinal);
+        // Il nome per il browser non sposta il tunnel: anche con un nome qualsiasi il traffico va all'IP dell'asset.
         var gateway = await SaveAsync(new Dictionary<string, string> { ["Gateway"] = "999888777" });
         Assert.Contains("non è nella rubrica RustDesk", gateway, StringComparison.Ordinal);
 

@@ -143,6 +143,54 @@ public sealed class ConnectionResolverTests
     }
 
     [Fact]
+    public void Tunnel_targets_the_ip_and_the_browser_gets_the_name()
+    {
+        var asset = Asset(os: null, ip: "10.0.0.10");
+        asset.IpamAddresses = "10.0.0.10\n10.0.0.11";
+        asset.IpamFqdns = "10.0.0.10 vcsa.cliente.local\n10.0.0.11 idrac-srv01.cliente.local";
+        asset.ConsoleAddress = "https://idrac-srv01.cliente.local/start";
+        var ctx = Context(
+            setting: new AssetSetting { AssetId = 100, Protocol = ConnectionProtocol.Https, Host = "10.0.0.10" },
+            extras:
+            [
+                // IP scelto dall'IPAM: nel browser il suo FQDN.
+                new ExtraConnection { Id = 1, AssetId = 100, Label = "iDRAC", Protocol = ConnectionProtocol.Https, Host = "10.0.0.11" },
+                // IP scelto e nome scritto a mano per il browser.
+                new ExtraConnection { Id = 2, AssetId = 100, Label = "VAMI", Protocol = ConnectionProtocol.Https, Host = "10.0.0.10", Url = "https://vcsa.cliente.local:5480/" },
+            ]);
+
+        var connections = ConnectionResolver.Resolve(asset, ctx).Connections.ToDictionary(c => c.Key);
+
+        Assert.Equal(("10.0.0.10", "https://vcsa.cliente.local/"), (connections[ConnectionResolver.PrimaryKey].Host, connections[ConnectionResolver.PrimaryKey].WebUrl));
+        Assert.Equal(("10.0.0.11", 443, "https://idrac-srv01.cliente.local/"), (connections["extra:1"].Host, connections["extra:1"].Port, connections["extra:1"].WebUrl));
+        Assert.Equal(("10.0.0.10", 5480, "https://vcsa.cliente.local:5480/"), (connections["extra:2"].Host, connections["extra:2"].Port, connections["extra:2"].WebUrl));
+        // Console di Hudu scritta come nome: il tunnel va all'IP che l'IPAM associa a quel nome.
+        Assert.Equal(("10.0.0.11", "https://idrac-srv01.cliente.local/start"), (connections[ConnectionResolver.ConsoleKey].Host, connections[ConnectionResolver.ConsoleKey].WebUrl));
+        Assert.All(connections.Values, c => Assert.True(c.HostFromHudu));
+
+        // I Launcher precedenti alla 1.5.7 instradano nel tunnel solo l'host della destinazione: per loro il nome.
+        Assert.Equal("vcsa.cliente.local", ApiEndpoints.TargetHost(connections[ConnectionResolver.PrimaryKey], legacyWebTarget: true));
+        Assert.Equal("10.0.0.10", ApiEndpoints.TargetHost(connections[ConnectionResolver.PrimaryKey], legacyWebTarget: false));
+        Assert.False(ApiEndpoints.SplitsWebAddress("1.5.6"));
+        Assert.True(ApiEndpoints.SplitsWebAddress("1.5.7-ci.2"));
+    }
+
+    [Theory]
+    // Vettori di RFC 6238 (SHA1, segreto "12345678901234567890" in base32): 94287082 e 07081804, ultime 6 cifre.
+    [InlineData("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", 59, "287082")]
+    [InlineData("gezd gnbv gy3t qojq gezd gnbv gy3t qojq", 1111111109, "081804")]
+    [InlineData("otpauth://totp/Hudu:admin?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=Hudu&digits=8", 59, "94287082")]
+    public void Otp_code_is_computed_from_the_hudu_secret(string secret, long unixSeconds, string expected)
+    {
+        var otp = Launcher.Server.Security.Totp.Compute(secret, DateTimeOffset.FromUnixTimeSeconds(unixSeconds));
+        Assert.NotNull(otp);
+        Assert.Equal(expected, otp.Value.Code);
+        Assert.InRange(otp.Value.SecondsLeft, 1, 30);
+        Assert.Null(Launcher.Server.Security.Totp.Compute("non-base32!", DateTimeOffset.UtcNow));
+        Assert.Null(Launcher.Server.Security.Totp.Compute(null, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
     public void Port_chosen_by_the_technician_wins_over_the_full_address_in_the_ipam()
     {
         var asset = Asset(os: null);
@@ -151,8 +199,8 @@ public sealed class ConnectionResolverTests
         var free = Context(setting: new AssetSetting { AssetId = 100, Protocol = ConnectionProtocol.Https });
 
         var withPort = ConnectionResolver.Resolve(asset, chosen).Primary!;
-        Assert.Equal(("fw.cliente.local", 8443, ConnectionProtocol.Https), (withPort.Host, withPort.Port, withPort.Protocol));
-        Assert.Null(withPort.Url);
+        Assert.Equal(("10.0.0.10", 8443, ConnectionProtocol.Https), (withPort.Host, withPort.Port, withPort.Protocol));
+        Assert.Equal("https://fw.cliente.local:8443/", withPort.Url);
 
         // Senza scelta, l'indirizzo completo di Hudu decide porta e percorso, come prima.
         var fromHudu = ConnectionResolver.Resolve(asset, free).Primary!;
@@ -278,14 +326,16 @@ public sealed class ConnectionResolverTests
 
         var resolved = ConnectionResolver.Resolve(asset, ctx);
         var primary = resolved.Primary!;
+        // Tunnel all'IP (il jump host non risolve nomi), nel browser l'indirizzo completo dell'IPAM.
         Assert.Equal(ConnectionProtocol.Https, primary.Protocol);
-        Assert.Equal("vcenter.cliente.local", primary.Host);
+        Assert.Equal("10.0.0.10", primary.Host);
         Assert.Equal(9443, primary.Port);
         Assert.Equal("https://vcenter.cliente.local:9443/ui", primary.WebUrl);
         Assert.Empty(primary.Issues);
 
+        // Aggiuntiva con nome per il browser e senza IP scelto: tunnel all'IP della principale.
         var vami = resolved.Connections.Single(c => c.Key == "extra:3");
-        Assert.Equal(("vcenter.cliente.local", 5480), (vami.Host!, vami.Port));
+        Assert.Equal(("10.0.0.10", 5480), (vami.Host!, vami.Port));
         Assert.Equal("https://vcenter.cliente.local:5480/", vami.WebUrl);
     }
 
@@ -418,7 +468,9 @@ public sealed class ConnectionResolverTests
 
         var primary = ConnectionResolver.Resolve(asset, Context(huduGateways: new Dictionary<int, string> { [1] = "444" })).Primary!;
 
-        Assert.Equal((url, host), (primary.WebUrl, primary.Host));
+        // Nel browser il nome; il tunnel resta sull'IP dell'IPAM.
+        Assert.Equal((url, "10.0.0.10"), (primary.WebUrl, primary.Host));
+        Assert.Equal(host, new Uri(primary.WebUrl!).Host);
     }
 
     [Fact]
@@ -450,9 +502,19 @@ public sealed class ConnectionResolverTests
         ];
         var resolved = ConnectionResolver.Resolve(Asset(os: null, layout: 9), Context(passwords: passwords, setting: new AssetSetting { AssetId = 100, PasswordId = 2 }));
 
-        var candidates = Launcher.Server.Connections.WebLoginService.Candidates(resolved, resolved.Primary!, passwords);
+        // Credenziale impostata sulla connessione: si propone (e si compila) solo quella.
+        Assert.Equal([2], Launcher.Server.Connections.WebLoginService.Candidates(resolved, resolved.Primary!, passwords).Select(c => c.Id));
 
-        Assert.Equal([2, 3], candidates.Select(c => c.Id));
+        // Nessuna impostata e più collegate senza una assegnata: si sceglie dall'elenco (solo quelle collegate).
+        List<CachedPassword> related =
+        [
+            new() { Id = 5, CompanyId = 1, Name = "related A", RelatedAssets = "100" },
+            new() { Id = 6, CompanyId = 1, Name = "related B", RelatedAssets = "100" },
+            new() { Id = 7, CompanyId = 1, Name = "non collegata" },
+        ];
+        var open = ConnectionResolver.Resolve(Asset(os: null, layout: 9), Context(passwords: related));
+        Assert.Null(open.Primary!.PasswordId);
+        Assert.Equal([5, 6], Launcher.Server.Connections.WebLoginService.Candidates(open, open.Primary!, related).Select(c => c.Id));
     }
 
     [Theory]

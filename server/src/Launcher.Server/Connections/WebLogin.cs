@@ -62,6 +62,13 @@ public sealed class WebLoginService(IDataProtectionProvider dataProtection, Time
     public static IReadOnlyList<CachedPassword> Candidates(ResolvedAsset asset, ResolvedConnection connection, IReadOnlyList<CachedPassword> companyPasswords)
     {
         var linked = ConnectionResolver.LinkedPasswords(asset.Asset, ConnectionResolver.IndexPasswordsByAsset(companyPasswords));
+        // Credenziale impostata sulla connessione (scelta o unica collegata): si compila solo quella, senza
+        // proporne altre.
+        if (connection.PasswordId is { } chosen && linked.FirstOrDefault(p => p.Id == chosen) is { } only)
+        {
+            return [only];
+        }
+
         return linked
             .OrderBy(p => p.Id == connection.PasswordId ? 0 : 1)
             .Take(MaxCandidates)

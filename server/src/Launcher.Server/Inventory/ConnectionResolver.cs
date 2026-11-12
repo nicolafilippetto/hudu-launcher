@@ -205,19 +205,20 @@ public static class ConnectionResolver
         var useFqdn = !string.Equals(setting?.WebAddress, WebAddressIp, StringComparison.Ordinal);
         if (IsWebProtocol(protocol) && useFqdn && FqdnUrl(asset, host) is { } fqdn)
         {
-            // Pagine web: vale l'FQDN che l'IPAM di Hudu associa all'IP (risolto dal jump host), salvo
-            // la scelta "IP" nell'editor. Se in Hudu c'è un indirizzo completo, decide anche schema e porta,
-            // ma solo se il tecnico non ha scelto porta o protocollo diversi (come per le aggiuntive).
+            // Pagine web: il tunnel va sempre all'IP (il jump host non deve risolvere nomi); nel browser vale
+            // l'FQDN che l'IPAM di Hudu associa all'IP, così certificato e nome tornano (vCenter, iDRAC).
+            // Se in Hudu c'è un indirizzo completo, decide anche schema, porta e percorso, salvo porta o
+            // protocollo scelti diversamente dal tecnico.
             if (fqdn.Url is { } fqdnUrl
                 && (setting?.Port is null || setting.Port == fqdnUrl.Port)
                 && (setting?.Protocol is null || setting.Protocol == WebProtocol(fqdnUrl)))
             {
                 webUrl = fqdnUrl;
-                (protocol, host, port) = (WebProtocol(fqdnUrl), fqdnUrl.Host.Trim('[', ']'), fqdnUrl.Port);
+                (protocol, port) = (WebProtocol(fqdnUrl), fqdnUrl.Port);
             }
             else
             {
-                host = fqdn.Url?.Host.Trim('[', ']') ?? fqdn.Host;
+                webUrl = new Uri(Connections.WebUrls.Default(protocol == ConnectionProtocol.Https, fqdn.Url?.Host.Trim('[', ']') ?? fqdn.Host, port));
             }
         }
 
@@ -246,30 +247,30 @@ public static class ConnectionResolver
         // --- Connessioni aggiuntive definite dai tecnici ---
         foreach (var extra in extrasOfAsset.Where(e => !e.IsConsole).OrderBy(e => e.Label, StringComparer.OrdinalIgnoreCase))
         {
+            // Tunnel: sempre l'IP (quello scelto dall'IPAM o quello della principale). Url è solo l'indirizzo
+            // della pagina nel browser (nome per il browser, facoltativo): schema e porta vengono da lì.
             var extraUrl = Connections.WebUrls.Parse(extra.Url).Url;
-            var extraHost = extraUrl?.Host.Trim('[', ']') ?? extra.Host ?? ipHost;
+            var extraHost = extra.Host ?? ipHost;
             var protocolOfExtra = extra.Protocol ?? ConnectionProtocol.Https;
-            if (extraUrl is null && extra.Host is null && useFqdn && IsWebProtocol(protocolOfExtra) && FqdnUrl(asset, ipHost) is { } extraFqdn)
+            var (extraProtocol, extraPort) = extraUrl is null
+                ? (protocolOfExtra, extra.Port ?? DefaultPort(protocolOfExtra))
+                : (WebProtocol(extraUrl), extraUrl.Port);
+            if (extraUrl is null && useFqdn && IsWebProtocol(extraProtocol) && FqdnUrl(asset, extraHost) is { } extraFqdn)
             {
-                // Pagina web sullo stesso indirizzo dell'asset: anche qui l'FQDN dell'IPAM.
-                if (extraFqdn.Url is { } extraFqdnUrl && (extra.Port is null || extra.Port == extraFqdnUrl.Port))
-                {
-                    extraUrl = extraFqdnUrl;
-                }
-
-                extraHost = extraFqdn.Url?.Host.Trim('[', ']') ?? extraFqdn.Host;
+                // Senza nome scritto a mano: l'FQDN che l'IPAM associa a quell'IP.
+                extraUrl = extraFqdn.Url is { } extraFqdnUrl && (extra.Port is null || extra.Port == extraFqdnUrl.Port) && WebProtocol(extraFqdnUrl) == extraProtocol
+                    ? extraFqdnUrl
+                    : new Uri(Connections.WebUrls.Default(extraProtocol == ConnectionProtocol.Https, extraFqdn.Url?.Host.Trim('[', ']') ?? extraFqdn.Host, extraPort));
+                extraPort = extraUrl.Port;
             }
 
             // Stesso indirizzo della principale: stesso gateway; indirizzo proprio: gateway del cliente.
-            var (extraGateway, extraSource, extraDirect) = extra.Host is null && extra.Url is null && !extra.NoGateway && extra.GatewayPeerId is null
+            var (extraGateway, extraSource, extraDirect) = extra.Host is null && !extra.NoGateway && extra.GatewayPeerId is null
                 ? (gateway, gatewaySource, directOnly)
                 : OwnAddressGateway(extra, ctx, companyNoRustDesk, companyGateway, companyGatewaySource, gateway, gatewaySource, directOnly);
             var (extraPasswordId, extraPasswordIssue) = extra.PasswordId is not null
                 ? ResolvePassword(extra.PasswordId, asset, ctx)
                 : (null, (string?)null);
-            var (extraProtocol, extraPort) = extraUrl is null
-                ? (protocolOfExtra, extra.Port ?? DefaultPort(protocolOfExtra))
-                : (WebProtocol(extraUrl), extraUrl.Port);
             connections.Add(Build(ExtraPrefix + extra.Id, extra.Label, extraProtocol, extraHost, extraPort,
                 extraGateway, extraSource, extraPasswordId, extraPasswordIssue, ctx, url: extraUrl?.AbsoluteUri, options: Options(extra),
                 directOnly: extraDirect, huduHosts: huduHosts));
@@ -367,20 +368,18 @@ public static class ConnectionResolver
     public static (ConnectionProtocol Protocol, string Host, int Port, string? Url)? ResolveConsole(CachedAsset asset, ExtraConnection? row)
     {
         var hudu = HuduConsole(asset);
-        if (row is null)
+        var rowUrl = Connections.WebUrls.Parse(row?.Url).Url;
+        if (row?.Host is { } rowHost)
         {
-            return hudu;
+            // IP scelto (tunnel) e, facoltativo, nome per il browser.
+            var protocol = rowUrl is not null ? WebProtocol(rowUrl) : row.Protocol ?? hudu?.Protocol ?? ConnectionProtocol.Https;
+            return (protocol, rowHost, rowUrl?.Port ?? row.Port ?? DefaultPort(protocol), rowUrl?.AbsoluteUri);
         }
 
-        if (Connections.WebUrls.Parse(row.Url).Url is { } rowUrl)
+        if (rowUrl is not null)
         {
-            return (WebProtocol(rowUrl), rowUrl.Host.Trim('[', ']'), rowUrl.Port, rowUrl.AbsoluteUri);
-        }
-
-        if (row.Host is { } rowHost)
-        {
-            var protocol = row.Protocol ?? hudu?.Protocol ?? ConnectionProtocol.Https;
-            return (protocol, rowHost, row.Port ?? DefaultPort(protocol), null);
+            // Nome per il browser senza IP scelto: il tunnel va all'IP di quel nome nell'IPAM, se c'è.
+            return (WebProtocol(rowUrl), TunnelHost(asset, rowUrl.Host.Trim('[', ']')), rowUrl.Port, rowUrl.AbsoluteUri);
         }
 
         if (hudu is not { } suggested)
@@ -388,12 +387,50 @@ public static class ConnectionResolver
             return null;
         }
 
-        // Stesso indirizzo di Hudu: protocollo e porta si possono cambiare; l'URL completo di Hudu vale
-        // solo se non sono stati toccati.
-        var effective = row.Protocol ?? suggested.Protocol;
-        var unchanged = effective == suggested.Protocol && (row.Port is null || row.Port == suggested.Port);
-        return (effective, suggested.Host, row.Port ?? (effective == suggested.Protocol ? suggested.Port : DefaultPort(effective)),
-            unchanged ? suggested.Url : null);
+        // Come in Hudu: protocollo e porta si possono cambiare; l'URL completo di Hudu vale solo se non
+        // sono stati toccati. Se in Hudu c'è un nome, nel browser resta il nome e il tunnel va al suo IP.
+        var effective = row?.Protocol ?? suggested.Protocol;
+        var unchanged = effective == suggested.Protocol && (row?.Port is null || row.Port == suggested.Port);
+        var port = row?.Port ?? (effective == suggested.Protocol ? suggested.Port : DefaultPort(effective));
+        var tunnel = TunnelHost(asset, suggested.Host);
+        var url = unchanged ? suggested.Url : null;
+        if (url is null && IsWebProtocol(effective) && !string.Equals(tunnel, suggested.Host, StringComparison.OrdinalIgnoreCase))
+        {
+            url = Connections.WebUrls.Default(effective == ConnectionProtocol.Https, suggested.Host, port);
+        }
+
+        return (effective, tunnel, port, url);
+    }
+
+    /// <summary>Destinazione del tunnel per un nome: l'IP che l'IPAM dell'asset gli associa, altrimenti il nome stesso.</summary>
+    public static string TunnelHost(CachedAsset asset, string name) => IpForName(asset, name) ?? name;
+
+    /// <summary>IP dell'IPAM dell'asset per un nome (FQDN o indirizzo completo); un IP resta com'è.</summary>
+    public static string? IpForName(CachedAsset asset, string name)
+    {
+        var clean = name.Trim().Trim('[', ']').TrimEnd('.');
+        if (System.Net.IPAddress.TryParse(clean, out _))
+        {
+            return clean;
+        }
+
+        foreach (var line in (asset.IpamFqdns ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (line.Split(' ', 2) is not [var ip, var fqdn])
+            {
+                continue;
+            }
+
+            var host = fqdn.Contains("://", StringComparison.Ordinal) && Uri.TryCreate(fqdn.Trim(), UriKind.Absolute, out var url)
+                ? url.Host.Trim('[', ']')
+                : fqdn.Trim();
+            if (string.Equals(host.TrimEnd('.'), clean, StringComparison.OrdinalIgnoreCase))
+            {
+                return ip;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>FQDN dell'IPAM per l'IP della connessione: un indirizzo completo (Url) o solo il nome host.</summary>

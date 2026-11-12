@@ -25,7 +25,8 @@ public sealed record HuduPasswordInfo(int Id, int CompanyId, string Name, string
 /// <summary>Indirizzo IP dell'IPAM di Hudu, collegato a un asset.</summary>
 public sealed record HuduIpAddress(string Address, string? Status, string? Fqdn, int? AssetId, int CompanyId);
 
-public sealed record HuduCredential(int Id, int CompanyId, string Name, string? Username, string? Password, string? Url);
+/// <param name="OtpSecret">Segreto OTP salvato in Hudu: resta nel portale, che ne calcola solo il codice.</param>
+public sealed record HuduCredential(int Id, int CompanyId, string Name, string? Username, string? Password, string? Url, string? OtpSecret = null);
 
 public sealed class HuduException(string message, Exception? inner = null) : Exception(message, inner);
 
@@ -238,7 +239,8 @@ public sealed class HuduClient(IHttpClientFactory httpFactory, SettingsService s
             GetString(item, "name") ?? "",
             GetString(item, "username"),
             GetString(item, "password"),
-            GetString(item, "url"));
+            GetString(item, "url"),
+            GetString(item, "otp_secret"));
     }
 
     /// <summary>Prova di connessione per la pagina admin: restituisce il numero di layout.</summary>
