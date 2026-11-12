@@ -17,10 +17,13 @@
     var ipam = asset.IpamList();
     var (autoHost, _) = ConnectionResolver.ResolveHost(null, asset);
     var fqdn = asset.FqdnFor(setting?.Host ?? autoHost);
-    var legacyHost = setting?.Host is { } h && !ipam.Contains(h, StringComparer.OrdinalIgnoreCase) ? h : null;
+    var isSelfHost = string.Equals(setting?.Host, ConnectionResolver.SelfHost, StringComparison.OrdinalIgnoreCase);
+    var legacyHost = setting?.Host is { } h && !isSelfHost && !ipam.Contains(h, StringComparer.OrdinalIgnoreCase) ? h : null;
     var autoGateway = setting?.GatewayPeerId is null && primary?.GatewayPeerId is not null
         ? $"Automatico: {primary.GatewayPeerId} ({primary.GatewaySource})"
-        : "Automatico";
+        : setting?.NoGateway == true ? "Nessun gateway: solo connessione diretta"
+        : primary?.DirectOnly == true ? "Cliente senza RustDesk: solo diretta"
+        : "Da scegliere (nessun gateway del cliente)";
     var consoleHidden = Model.ConsoleRow?.Hidden == true;
     // Aggiuntive senza host: stesso indirizzo della principale (per le pagine web l'FQDN dell'IPAM, se c'è).
     var primaryIp = setting?.Host ?? autoHost;
@@ -29,6 +32,8 @@
         : $"Vuoto = {primaryIp}, come la principale" + (fqdn is not null && setting?.WebAddress != ConnectionResolver.WebAddressIp ? $" (pagine web: {fqdn})" : "");
 }
 @functions {
+    private const string NoneValue = Launcher.Server.Pages.IndexModel.NoneValue;
+
     private static string PasswordLabel(CachedPassword p) =>
         string.IsNullOrWhiteSpace(p.Username) ? p.Name : $"{p.Name} — {p.Username}";
 
@@ -135,6 +140,10 @@
                     {
                         <option value="@ip" selected="@(string.Equals(setting?.Host, ip, StringComparison.OrdinalIgnoreCase))">@ip</option>
                     }
+                    @if (Info.RustDeskEnabled)
+                    {
+                        <option value="@ConnectionResolver.SelfHost" selected="@isSelfHost">localhost: RustDesk è installato su questo dispositivo</option>
+                    }
                     @if (legacyHost is not null)
                     {
                         <option value="@legacyHost" selected>@legacyHost (non nell'IPAM)</option>
@@ -164,6 +173,7 @@
                 <span data-for="Oracle">Credenziale (da Hudu: si mostra solo l'utente, la password no)</span>
                 <select class="input" name="PasswordId">
                     <option value="">Automatica (@autoCredential)</option>
+                    <option value="@NoneValue" selected="@(setting?.NoPassword == true)">Nessuna: si inserisce a mano</option>
                     @foreach (var p in Model.Passwords)
                     {
                         <option value="@p.Id" selected="@(setting?.PasswordId == p.Id)">@PasswordLabel(p, asset)</option>
@@ -172,10 +182,16 @@
             </label>
             @if (Info.RustDeskEnabled)
             {
-                <label class="field">
-                    <span>Gateway RustDesk</span>
-                    <input class="input mono" name="Gateway" list="peer-list" data-peer-input value="@setting?.GatewayPeerId" placeholder="@autoGateway" autocomplete="off" spellcheck="false" />
-                </label>
+                <div class="field">
+                    <label class="field">
+                        <span>Gateway RustDesk</span>
+                        <input class="input mono" name="Gateway" list="peer-list" data-peer-input value="@setting?.GatewayPeerId" placeholder="@autoGateway" autocomplete="off" spellcheck="false" disabled="@(setting?.NoGateway == true)" />
+                    </label>
+                    <label class="check check-inline">
+                        <input type="checkbox" name="NoGateway" value="true" checked="@(setting?.NoGateway == true)" data-no-gateway />
+                        <span>Nessun gateway: solo connessione diretta</span>
+                    </label>
+                </div>
             }
             else
             {
@@ -232,10 +248,16 @@
                 </label>
                 @if (Info.RustDeskEnabled)
                 {
-                    <label class="field">
-                        <span>Gateway RustDesk</span>
-                        <input class="input mono" name="@(prefix)Gateway" value="@extra.GatewayPeerId" list="peer-list" data-peer-input placeholder="Automatico (come la principale)" autocomplete="off" spellcheck="false" />
+                    <div class="field">
+                        <label class="field">
+                            <span>Gateway RustDesk</span>
+                            <input class="input mono" name="@(prefix)Gateway" value="@extra.GatewayPeerId" list="peer-list" data-peer-input placeholder="Automatico (come la principale)" autocomplete="off" spellcheck="false" disabled="@extra.NoGateway" />
+                        </label>
+                        <label class="check check-inline">
+                        <input type="checkbox" name="@(prefix)NoGateway" value="true" checked="@(extra.NoGateway)" data-no-gateway />
+                        <span>Nessun gateway: solo connessione diretta</span>
                     </label>
+                    </div>
                 }
                 else
                 {
@@ -299,10 +321,16 @@
                 </label>
                 @if (Info.RustDeskEnabled)
                 {
-                    <label class="field">
-                        <span>Gateway RustDesk</span>
-                        <input class="input mono" name="Console.Gateway" value="@row?.GatewayPeerId" list="peer-list" data-peer-input placeholder="Automatico (gateway del cliente)" autocomplete="off" spellcheck="false" />
+                    <div class="field">
+                        <label class="field">
+                            <span>Gateway RustDesk</span>
+                            <input class="input mono" name="Console.Gateway" value="@row?.GatewayPeerId" list="peer-list" data-peer-input placeholder="Automatico (gateway del cliente)" autocomplete="off" spellcheck="false" disabled="@(row?.NoGateway == true)" />
+                        </label>
+                        <label class="check check-inline">
+                        <input type="checkbox" name="Console.NoGateway" value="true" checked="@(row?.NoGateway == true)" data-no-gateway />
+                        <span>Nessun gateway: solo connessione diretta</span>
                     </label>
+                    </div>
                 }
                 else
                 {
@@ -362,10 +390,16 @@
                 </label>
                 @if (Info.RustDeskEnabled)
                 {
-                    <label class="field">
-                        <span>Gateway RustDesk</span>
-                        <input class="input mono" name="Extras[__i__].Gateway" list="peer-list" data-peer-input placeholder="Automatico (come la principale)" autocomplete="off" spellcheck="false" />
-                    </label>
+                    <div class="field">
+                        <label class="field">
+                            <span>Gateway RustDesk</span>
+                            <input class="input mono" name="Extras[__i__].Gateway" list="peer-list" data-peer-input placeholder="Automatico (come la principale)" autocomplete="off" spellcheck="false" />
+                        </label>
+                        <label class="check check-inline">
+                            <input type="checkbox" name="Extras[__i__].NoGateway" value="true" data-no-gateway />
+                            <span>Nessun gateway: solo connessione diretta</span>
+                        </label>
+                    </div>
                 }
             </div>
             <partial name="_ConnectionAdvanced" model="@(new ConnectionAdvancedModel("Extras[__i__].", null, null, null, null, Model.RdpDefaults, Model.WebDefaults))" />

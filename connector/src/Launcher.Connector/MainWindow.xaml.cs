@@ -28,6 +28,19 @@ public partial class MainWindow : Window
     {
         _workflow = workflow;
         InitializeComponent();
+        RestorePlacement();
+        // Ogni volta che la finestra si nasconde (X, uscita, aggiornamento) se ne ricorda posizione e dimensione.
+        IsVisibleChanged += (_, e) =>
+        {
+            if (e.NewValue is true)
+            {
+                _shown = true;
+            }
+            else
+            {
+                SavePlacement();
+            }
+        };
         Tabs.Items.Clear();
         UpdateEmptyState();
         UpdateStatus();
@@ -83,6 +96,75 @@ public partial class MainWindow : Window
         }
     }
 
+    private bool _shown;
+
+    /// <summary>
+    /// Posizione e dimensione dell'ultima volta, se cadono ancora su uno schermo (altrimenti al centro,
+    /// come al primo avvio). Lo stato ingrandito si applica quando la finestra si mostra.
+    /// </summary>
+    private void RestorePlacement()
+    {
+        if (WindowBounds.Parse(ConnectorSettings.WindowPlacement) is not { } saved)
+        {
+            return;
+        }
+
+        if (saved.FitTo(ScreenAreas()) is not { } bounds)
+        {
+            Log.Info("Posizione della finestra salvata fuori dagli schermi attuali: si apre al centro");
+            return;
+        }
+
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Left = bounds.Left;
+        Top = bounds.Top;
+        Width = Math.Max(MinWidth, bounds.Width);
+        Height = Math.Max(MinHeight, bounds.Height);
+        if (bounds.Maximized)
+        {
+            WindowState = WindowState.Maximized;
+        }
+    }
+
+    private void SavePlacement()
+    {
+        // Mai mostrata (avvio in background senza aprirla): non c'è niente di nuovo da ricordare.
+        if (!_shown)
+        {
+            return;
+        }
+
+        var normal = WindowState == WindowState.Normal ? new Rect(Left, Top, ActualWidth, ActualHeight) : RestoreBounds;
+        if (normal.IsEmpty || normal.Width < MinWidth / 2 || double.IsNaN(normal.Left))
+        {
+            return;
+        }
+
+        try
+        {
+            ConnectorSettings.WindowPlacement = new WindowBounds(normal.Left, normal.Top, normal.Width, normal.Height,
+                WindowState == WindowState.Maximized).Serialize();
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+        {
+            Log.Warn("Posizione della finestra non salvata: " + ex.Message);
+        }
+    }
+
+    /// <summary>Aree di lavoro degli schermi collegati, convertite nelle unità della finestra (DIP).</summary>
+    private List<ScreenArea> ScreenAreas()
+    {
+        new WindowInteropHelper(this).EnsureHandle();
+        var toDip = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice ?? System.Windows.Media.Matrix.Identity;
+        return [.. System.Windows.Forms.Screen.AllScreens.Select(screen =>
+        {
+            var area = screen.WorkingArea;
+            var topLeft = toDip.Transform(new Point(area.Left, area.Top));
+            var size = toDip.Transform(new Vector(area.Width, area.Height));
+            return new ScreenArea(topLeft.X, topLeft.Y, size.X, size.Y);
+        })];
+    }
+
     /// <summary>Disconnessione o spegnimento di Windows: pulizia veloce, senza attese né domande.</summary>
     public void PrepareForSessionEnd()
     {
@@ -92,6 +174,7 @@ public partial class MainWindow : Window
         }
 
         _exiting = true;
+        SavePlacement();
         _tray?.Dispose();
         _workflow.Shutdown();
         _updater.ApplyOnExit();

@@ -128,6 +128,13 @@ public static class ConnectorSettings
 
     public static void SaveTnsNamesPath(string? path) => SaveUserValue("TnsNamesPath", path);
 
+    /// <summary>Posizione, dimensione e stato della finestra principale (vedi <see cref="Core.WindowBounds"/>).</summary>
+    public static string? WindowPlacement
+    {
+        get => ReadFrom("WindowPlacement", policyOnly: false);
+        set => SaveUserValue("WindowPlacement", value);
+    }
+
     /// <summary>Copia del tnsnames.ora prima della prima modifica del Launcher (per sicurezza).</summary>
     public static string TnsNamesBackupFile => Path.Combine(DataDirectory, "tnsnames.backup.ora");
 

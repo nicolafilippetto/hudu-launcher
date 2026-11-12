@@ -53,9 +53,11 @@ Ogni connessione, e ogni credenziale consegnata, finisce nel registro accessi de
   predefinito; opzioni per tutti e per singolo asset (certificati, finestre, download, accesso).
   Il pulsante **Accesso** compila utente e password con la credenziale di Hudu scelta, senza che
   la password si possa copiare.
-- **Jump host automatico**: il gateway RustDesk si ricava da Hudu, dal cliente o dal dispositivo
-  stesso; in alternativa connessione **diretta**. RustDesk è facoltativo: senza, il portale offre
-  solo la connessione diretta (dalla rete del cliente o in VPN).
+- **Jump host esplicito**: il gateway RustDesk è quello scelto sull'asset, poi quello del cliente,
+  poi quello scritto in Hudu (cliente o asset); altrimenti il portale chiede di sceglierlo. Si può
+  indicare "nessun gateway" per una connessione o per un intero cliente senza RustDesk (solo
+  connessioni dirette, senza avvisi), e "nessuna credenziale" quando va inserita a mano. RustDesk è
+  facoltativo: senza, il portale offre solo la connessione diretta (dalla rete del cliente o in VPN).
 - **Indirizzi dall'IPAM di Hudu**, con segnalazione degli asset senza IP o con più IP da scegliere;
   l'FQDN dell'IPAM diventa l'indirizzo delle pagine web.
 - **Credenziali solo da Hudu**: si sceglie tra le password assegnate all'asset o collegate come
@@ -73,6 +75,7 @@ Ogni connessione, e ogni credenziale consegnata, finisce nel registro accessi de
 - **Avvio rapido**: in background il Launcher tiene pronto l'accesso Microsoft 365 e, poco dopo
   l'avvio, carica e rilascia i componenti lenti al primo uso (WebView2, Desktop remoto, SSH), senza
   mostrare nulla.
+- Il Launcher ricorda posizione e dimensione della finestra (anche ingrandita) tra un riavvio e l'altro.
 - Tema chiaro e scuro, interfaccia in italiano.
 
 ## Sicurezza in breve
